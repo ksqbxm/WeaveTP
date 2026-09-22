@@ -1,0 +1,9 @@
+[submodule "DeepSpeed"]
+	path = DeepSpeed
+	url = https://github.com/Shamauk/DeepSpeed.git
+[submodule "transformers"]
+	path = transformers
+	url = https://github.com/Shamauk/transformers.git
+[submodule "fastmoe"]
+	path = fastmoe
+	url = https://github.com/laekov/fastmoe.git

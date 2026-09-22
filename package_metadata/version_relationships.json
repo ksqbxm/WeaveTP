@@ -1,0 +1,79 @@
+{
+  "git_commit": null,
+  "historical_server_commit": null,
+  "note": "Current working copy includes correctness work. Archive identity is not a verified historical server Git identity.",
+  "files": [
+    {
+      "file": "examples/rl/benchmark_live_moe_tp.py",
+      "current": "151dd2987a415a6b4f26c9fc9b4386c9ced12a16caa00524d81a6b6b3b484ad8",
+      "local_project": "151dd2987a415a6b4f26c9fc9b4386c9ced12a16caa00524d81a6b6b3b484ad8",
+      "archive": "151dd2987a415a6b4f26c9fc9b4386c9ced12a16caa00524d81a6b6b3b484ad8",
+      "current_equals_archive": true,
+      "current_equals_project": true
+    },
+    {
+      "file": "megatron/core/resharding/planner.py",
+      "current": "909d5e0ded3b7574530be10558c8b4564b67ecb7870280ae55d30f12c7aa8435",
+      "local_project": "909d5e0ded3b7574530be10558c8b4564b67ecb7870280ae55d30f12c7aa8435",
+      "archive": "909d5e0ded3b7574530be10558c8b4564b67ecb7870280ae55d30f12c7aa8435",
+      "current_equals_archive": true,
+      "current_equals_project": true
+    },
+    {
+      "file": "megatron/core/resharding/async_execution.py",
+      "current": "2da276e310578534f69ea3a4cbe0ef5c53d51ffead0fab1b0bd0e16ebfd94b2b",
+      "local_project": "48da55b3d035bab8c8d5f456040617c3c8db4b2a18729d43b66d0abaa2144a8f",
+      "archive": "48da55b3d035bab8c8d5f456040617c3c8db4b2a18729d43b66d0abaa2144a8f",
+      "current_equals_archive": false,
+      "current_equals_project": false
+    },
+    {
+      "file": "megatron/core/resharding/live.py",
+      "current": "ad716cf2da00d71cd1f9170f064444046d79fd416b290f6b1e184bce329fcbdb",
+      "local_project": "ad716cf2da00d71cd1f9170f064444046d79fd416b290f6b1e184bce329fcbdb",
+      "archive": "ad716cf2da00d71cd1f9170f064444046d79fd416b290f6b1e184bce329fcbdb",
+      "current_equals_archive": true,
+      "current_equals_project": true
+    },
+    {
+      "file": "megatron/core/resharding/copy_services/nccl_copy_service.py",
+      "current": "882926ce7e1782b8262dcaad31690c3d4fea8a72144db7255c932c2f93507e93",
+      "local_project": "882926ce7e1782b8262dcaad31690c3d4fea8a72144db7255c932c2f93507e93",
+      "archive": "882926ce7e1782b8262dcaad31690c3d4fea8a72144db7255c932c2f93507e93",
+      "current_equals_archive": true,
+      "current_equals_project": true
+    },
+    {
+      "file": "tools/resharding/run_deepseek_v2_lite_directional_wave_compare.sh",
+      "current": "14fe19ac06f244e5d349a5d369380c34b20858cbec424298c21be1d39b6eaeb6",
+      "local_project": "14fe19ac06f244e5d349a5d369380c34b20858cbec424298c21be1d39b6eaeb6",
+      "archive": "14fe19ac06f244e5d349a5d369380c34b20858cbec424298c21be1d39b6eaeb6",
+      "current_equals_archive": true,
+      "current_equals_project": true
+    },
+    {
+      "file": "tools/resharding/run_deepseek_v2_lite_selected_baselines.sh",
+      "current": "e4419d5e38a2d972df5d1261ac978f1f713e90199323332af829bc4d163cb92f",
+      "local_project": "e4419d5e38a2d972df5d1261ac978f1f713e90199323332af829bc4d163cb92f",
+      "archive": "e4419d5e38a2d972df5d1261ac978f1f713e90199323332af829bc4d163cb92f",
+      "current_equals_archive": true,
+      "current_equals_project": true
+    },
+    {
+      "file": "tools/resharding/run_deepseek_v2_lite_live_benchmark.sh",
+      "current": "590d668466b410641a5261956144d1fc284da24721c56a2bc29df731e9e23021",
+      "local_project": "590d668466b410641a5261956144d1fc284da24721c56a2bc29df731e9e23021",
+      "archive": "590d668466b410641a5261956144d1fc284da24721c56a2bc29df731e9e23021",
+      "current_equals_archive": true,
+      "current_equals_project": true
+    },
+    {
+      "file": "tools/resharding/run_live_moe_tp_benchmark.sh",
+      "current": "3ea71f379dfba18d7f98dc282a9fe39c4def18086c449884e9019ae1070dca05",
+      "local_project": "3ea71f379dfba18d7f98dc282a9fe39c4def18086c449884e9019ae1070dca05",
+      "archive": "3ea71f379dfba18d7f98dc282a9fe39c4def18086c449884e9019ae1070dca05",
+      "current_equals_archive": true,
+      "current_equals_project": true
+    }
+  ]
+}

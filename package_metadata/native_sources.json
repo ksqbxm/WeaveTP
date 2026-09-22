@@ -1,0 +1,16 @@
+{
+  "HarMoEny": {
+    "repository": "https://github.com/sacs-epfl/HarMoEny",
+    "recorded_revision": "ee50b1881367bbc530953a2144df03364882b48c",
+    "native_performance": "NOT_CONFIRMED"
+  },
+  "ExpertFlow": {
+    "repository": "https://github.com/expertflow-dac/expertflow",
+    "recorded_revision": "05fe01591c0abe7b0ac0669ad917b4b2484d98e5",
+    "native_performance": "NOT_CONFIRMED"
+  },
+  "FIRM-MoE": {
+    "origin": "local paper-mechanism reimplementation",
+    "coverage": "CPU trace smoke only"
+  }
+}

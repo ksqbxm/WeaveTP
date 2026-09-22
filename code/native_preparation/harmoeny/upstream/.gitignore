@@ -1,0 +1,12 @@
+data
+outputs/*
+licenses/*
+plots
+*.pth
+*__pycache__
+*.nsys-rep
+
+# Ignore vim files:
+*~
+*.swp
+*.swo

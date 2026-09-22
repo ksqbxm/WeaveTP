@@ -1,0 +1,32 @@
+{
+  "python": "3.12.14",
+  "source_copy_hashes": "PASS",
+  "python_syntax_files": 806,
+  "required_entrypoints": "PASS",
+  "secret_pattern_scan": "PASS",
+  "tensor_tests_this_task": "NOT_RUN: bundled Python has no torch",
+  "gpu_tests_this_task": "NOT_RUN",
+  "checkpoint_included": false,
+  "bandwidth_profile_included": false,
+  "copied_files": 1066,
+  "bytes": 14161170,
+  "groups": {
+    "current_working_copy": 907,
+    "official_source_collected_locally": 138,
+    "local_reproduction_wrapper": 7,
+    "local_algorithm_reimplementation": 2,
+    "documentation_wording_revision": 11,
+    "read_only_newtext_reference": 1
+  },
+  "historical_version_match": false,
+  "documentation_wording_revision": {
+    "source_code_unchanged": true,
+    "source_files_compared": 1054,
+    "workbook_numeric_inputs_unchanged": true,
+    "workbook_formulas_unchanged": true,
+    "workbook_formats_and_controls_preserved": true,
+    "readme_files_updated": 11,
+    "workbook_text_cells_updated": 12,
+    "new_gpu_or_tensor_tests_run": false
+  }
+}

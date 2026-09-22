@@ -1,0 +1,17 @@
+{
+  "purpose": "人工环境检查表；现有启动脚本不会自动加载此文件",
+  "model": "DeepSeek-V2-Lite",
+  "formal_physical_gpu_count": 8,
+  "historical_device": "NVIDIA RTX 5090",
+  "tp_cycle": [2, 4, 2, 4, 2],
+  "expert_parallel_size": 2,
+  "python_executable_confirmed": false,
+  "converted_checkpoint_available": false,
+  "matching_bandwidth_profile_available": false,
+  "approved_physical_devices_confirmed": false,
+  "cuda_pytorch_extensions_compatible": false,
+  "new_output_location_confirmed": false,
+  "run_budget_confirmed": false,
+  "gpu_execution_authorized_by_this_package": false,
+  "note": "false 表示该运行条件尚未填写或确认，不表示历史服务器资源不存在。"
+}

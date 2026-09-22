@@ -1,0 +1,12 @@
+accelerate
+datasets
+dm-tree
+fairscale
+huggingface-hub
+numpy
+safetensors
+scipy
+torch==2.9.1
+tqdm
+setuptools
+transformers==4.57.3

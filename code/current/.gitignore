@@ -1,0 +1,31 @@
+__pycache__
+*.so
+build
+.coverage_*
+*.egg-info
+*~
+slurm*
+logs
+.vscode
+local/
+.gitmodules
+wandb/
+onelogger.log
+onelogger.err
+.venv
+runs/
+/test_cases/
+**/dist/
+
+# Sphinx documentation
+docs/_build
+docs/apidocs
+
+# Git worktrees
+.worktrees/
+
+# Megatron DATA_CACHE_PATH (GPTDataset index/cache from example scripts, e.g. train_llama3_8b_h100_fp8.sh)
+benchmark_cache_*/
+
+# TensorBoard event logs (--tensorboard-dir from example scripts)
+tensorboard_logs/
