@@ -1,6 +1,19 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# The formal two-node path has one coordinator; node 1 never runs this loop.
+if [[ "${NNODES:-1}" == "2" ]]; then
+    exec "${PYTHON:-/home/ubuntu/miniconda3/envs/megatron/bin/python}" -B \
+        "$(dirname "${BASH_SOURCE[0]}")/compare_weavetp_16gpu.py" "$@"
+elif [[ "${NNODES:-1}" != "1" ]]; then
+    echo "This comparison supports NNODES=1 or NNODES=2" >&2
+    exit 2
+fi
+if (( $# > 0 )); then
+    echo "Arguments such as --dry-run require the formal NNODES=2 path" >&2
+    exit 2
+fi
+
 # Three-way ablation for the directional wave-size hypothesis:
 #   1. fixed_2048: current fixed-source live-default reference;
 #   2. directional_no_reroute: 4096 tasks for expansion and 2048 for shrink;

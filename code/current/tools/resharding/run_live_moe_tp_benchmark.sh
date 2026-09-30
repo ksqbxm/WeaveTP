@@ -8,6 +8,22 @@ export PATH="$(dirname "$PYTHON"):$PATH"
 CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-0,1,2,3}
 PROFILE=${PROFILE:-profiles/refit_4gpu_p2p.json}
 NPROC_PER_NODE=${NPROC_PER_NODE:-4}
+NNODES=${NNODES:-1}
+NODE_RANK=${NODE_RANK:-0}
+MASTER_ADDR=${MASTER_ADDR:-127.0.0.1}
+MASTER_PORT=${MASTER_PORT:-29500}
+if ! [[ "$NPROC_PER_NODE" =~ ^[1-9][0-9]*$ && "$NNODES" =~ ^[1-9][0-9]*$ &&
+        "$NODE_RANK" =~ ^[0-9]+$ && "$MASTER_PORT" =~ ^[0-9]+$ ]] ||
+        (( NODE_RANK >= NNODES || MASTER_PORT < 1 || MASTER_PORT > 65535 )); then
+    echo "Invalid worker count, node rank, or master port" >&2
+    exit 2
+fi
+WORLD_SIZE=$((NPROC_PER_NODE * NNODES))
+DIST_ARGS=(--standalone)
+if (( NNODES > 1 )); then
+    DIST_ARGS=(--nnodes="$NNODES" --node_rank="$NODE_RANK"
+        --master_addr="$MASTER_ADDR" --master_port="$MASTER_PORT" --rdzv_backend=static)
+fi
 EXPERT_PARALLEL_SIZE=${EXPERT_PARALLEL_SIZE:-1}
 MODEL_PRESET=${MODEL_PRESET:-synthetic}
 METHOD_VARIANT=${METHOD_VARIANT:-moetp++}
@@ -89,7 +105,7 @@ MOE_FFN_HIDDEN_SIZE=${MOE_FFN_HIDDEN_SIZE:-1024}
 NUM_EXPERTS=${NUM_EXPERTS:-8}
 MOE_ROUTER_TOPK=${MOE_ROUTER_TOPK:-2}
 MICRO_BATCH_SIZE=${MICRO_BATCH_SIZE:-1}
-GLOBAL_BATCH_SIZE=${GLOBAL_BATCH_SIZE:-$((MICRO_BATCH_SIZE * NPROC_PER_NODE / 2))}
+GLOBAL_BATCH_SIZE=${GLOBAL_BATCH_SIZE:-$((MICRO_BATCH_SIZE * WORLD_SIZE / 2))}
 SEQ_LENGTH=${SEQ_LENGTH:-256}
 MAX_POSITION_EMBEDDINGS=${MAX_POSITION_EMBEDDINGS:-$SEQ_LENGTH}
 OUT_DIR=${OUT_DIR:-outputs/live_moe_tp_$(date +%Y%m%d_%H%M%S)}
@@ -230,7 +246,7 @@ NCCL_DEBUG=${NCCL_DEBUG:-WARN} \
 TORCH_NCCL_ASYNC_ERROR_HANDLING=1 \
 CUDA_DEVICE_MAX_CONNECTIONS=8 \
 "$PYTHON" -m torch.distributed.run \
-    --standalone \
+    "${DIST_ARGS[@]}" \
     --nproc_per_node="$NPROC_PER_NODE" \
     examples/rl/benchmark_live_moe_tp.py \
     --tensor-model-parallel-size 2 \

@@ -3,6 +3,7 @@ set -euo pipefail
 
 CHECKPOINT=${CHECKPOINT:-/home/ubuntu/models/DeepSeek-V2-Lite-megatron-v2}
 PROFILE=${PROFILE:-profiles/moe_tp_8gpu_idle_p2p_v21.json}
+OUT_DIR=${OUT_DIR:-outputs/deepseek_v2_lite_wave_tuned_$(date +%Y%m%d_%H%M%S)}
 
 if [[ "${ADAPTIVE_HYBRID:-0}" == "1" ]]; then
     # On DeepSeek-V2-Lite, source rerouting already balances the large plan.
@@ -58,5 +59,5 @@ LOGIT_VALIDATION_MODE=${LOGIT_VALIDATION_MODE:-bf16-relative} \
 LOGIT_MAX_NRMSE=${LOGIT_MAX_NRMSE:-0.4} \
 LOGIT_MIN_COSINE=${LOGIT_MIN_COSINE:-0.93} \
 LOGIT_MIN_TOP1_AGREEMENT=${LOGIT_MIN_TOP1_AGREEMENT:-0.0} \
-OUT_DIR=${OUT_DIR:-outputs/deepseek_v2_lite_wave_tuned_$(date +%Y%m%d_%H%M%S)} \
-bash tools/resharding/run_live_moe_tp_benchmark.sh
+OUT_DIR="$OUT_DIR" \
+bash tools/resharding/run_live_moe_tp_benchmark.sh --out-dir "$OUT_DIR"
