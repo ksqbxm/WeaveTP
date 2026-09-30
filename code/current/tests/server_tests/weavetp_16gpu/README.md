@@ -1,6 +1,6 @@
 # WeaveTP 16 卡服务器测试
 
-本目录验证已有实现的真实环境行为。**本次仅新增文件和运行本地 CPU 测试，未 SSH、部署或启动 GPU。当前故障回归为失败，T06 尚未实现，不能据此进入正式 GPU 实验。**
+本目录验证已有实现的真实环境行为。**本地 R1 故障回归已通过，尚未 SSH、部署或启动 GPU。旧 T04 测试仍有两个写死旧地址/默认环境的断言失败，T06 尚未实现，不能据此进入正式 GPU 实验。**
 
 ## 文件与证据分离
 
@@ -11,7 +11,7 @@ tests/
     test_compare_weavetp_16gpu.py      # T04：配置、mock 协调及 shell argv
     test_profile_weavetp_16gpu.py      # T05：画像、测量控制流、shell 门禁
     test_server_acceptance.py         # 新服务器检查器的 CPU 正反例
-    test_weavetp_review_findings.py    # 未解决的生产缺陷，正常失败，不标 expectedFailure
+    test_weavetp_review_findings.py    # R1 失败生命周期、远程命令超时及清理状态
   server_tests/weavetp_16gpu/
     common.py                        # /data、独占输出、hash、子命令证据
     test_cpu.py                      # Linux 解释器上运行上述五组测试
@@ -47,7 +47,7 @@ tests/
 | T04 主控中断 | test_controller --scenario controller-interrupt | 对测试主控自身注入 SIGINT，检查本任务 worker 清理及回执；未启动的对端可没有 exit，但必须清理确认 |
 | T04 身份不一致 | test_controller --scenario code-mismatch | 只改临时副本 node1 wrapper，预检拒绝，两个 worker 都不能启动 |
 | T04 只有 master 结果 | test_controller --scenario partial-result | 临时目录只有 result.json 时拒绝跳过、覆盖、重试；两个 worker 都不能启动 |
-| T04 清理不可达 | test_weavetp_review_findings | CPU 可控 RPC 反例稳定失败；后续以有限远程命令超时、进程终止和“未确认”状态修复 |
+| T04 清理不可达 | test_weavetp_review_findings | CPU 可控 RPC 反例通过；超时终止本次命令进程，远端清理失败标记“未确认”；真实 SSH 尚待验证 |
 | T04/T09 超时 | 60 分钟 launch wait 与远程命令超时 | 逐切换由操作者人工监控；必须用真实 CPU 阻塞 worker 验证超时后的进程终止和报告 |
 | T05 画像算法/格式/拒绝回退 | test_cpu | 240 对、64 MiB、1+3×3、decimal Gbps、中位数、非实测对角线、缺失/NaN/维度/默认画像拒绝 |
 | T05/T08 实测网络和设备 | 原 run_weavetp_16gpu_profile.sh + test_profile | 真正的 2×8 测量；保留原始 NCCL 日志及两机画像 hash；逐日志/UUID 配对检查暂缓且不阻断 |
@@ -83,7 +83,7 @@ RUN=/data/${SERVER_USER}/lxh/weavetp/acceptance/review_001
   --output-dir "$RUN/history"
 ```
 
-当前 `test_cpu.py` 预期退出 1：开放缺陷测试失败。不要改为 skip/expectedFailure 或删除它来通过门禁；其余套件日志仍会保存。历史复核只需在 SL3060 执行，调用当前源码，不解包旧 T03 自包含脚本覆盖新代码。
+当前 `test_cpu.py` 仍预期退出 1：旧 T04 测试有两个写死旧地址与默认环境的断言，已与生产入口的显式部署变量冲突。按本次限定的提交范围未修改旧测试，也不将失败改为 skip/expectedFailure；应在后续授权范围内改为使用注入的地址和环境。历史复核只需在 SL3060 执行，调用当前源码，不解包旧 T03 自包含脚本覆盖新代码。
 
 ```bash
 # 两机各执行一次；SL3061 用 node-rank=1 及实际 Python。

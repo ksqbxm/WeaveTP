@@ -85,7 +85,7 @@ def check(args, out, env):
     return {"launches": 9, "switches": 36, "receipt_and_statistics_checks": "passed",
             "pending": [
                 "T06 benchmark group/traffic/candidate-status schema is not implemented; bind assertions when it exists.",
-                "No switch-start/finish deadline evidence or cross-case launch-order timestamps are recorded yet.",
+                "Cross-case launch-order timestamps are not recorded yet.",
                 "BF16 acceptance follows successful producer exits; raw NRMSE/cosine are not in result.json.",
             ]}
 

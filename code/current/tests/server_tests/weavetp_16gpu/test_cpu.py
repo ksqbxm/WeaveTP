@@ -1,4 +1,4 @@
-"""T07: run the same CPU regressions on the real Linux interpreter, including open findings."""
+"""T07: run the same CPU regressions on the real Linux interpreter."""
 
 import argparse
 import sys

@@ -18,6 +18,7 @@ import signal
 import socket
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -25,6 +26,9 @@ from profile_weavetp_16gpu import load_profile
 from summarize_weavetp_formal import DIRECTIONS, seconds, switch_metrics, validate_config
 
 HERE = Path(__file__).resolve().parent
+_rpc_lock = threading.Lock()
+_active_runs = {}
+_stopping = set()
 HELPER = "tools/resharding/compare_weavetp_16gpu.py"
 WRAPPER = "tools/resharding/run_deepseek_v2_lite_live_benchmark.sh"
 CASES = ("fixed", "directional", "weavetp")
@@ -217,7 +221,8 @@ def cleanup(request, rank):
         value <= baseline[key] + 16 for key, value in current.items())
     record = {"before": before, "after": after, "signalled": signalled,
               "remaining_pids": remaining, "memory_restored": restored,
-              "ok": not remaining and restored}
+              "ok": not remaining and restored,
+              "status": "已确认" if not remaining and restored else "未确认"}
     save(Path(out) / f"cleanup.node{rank}.{time.time_ns()}.json", record)
     return record
 
@@ -307,11 +312,33 @@ def rpc_command(request, rank, action):
 
 
 def rpc(request, rank, action):
-    process = subprocess.run(rpc_command(request, rank, action), input=json.dumps(request),
-                             text=True, capture_output=True, timeout=3650 if action == "run" else 90)
-    if process.returncode:
-        raise RuntimeError(f"node{rank} {action} exit={process.returncode}: {process.stderr}")
-    return json.loads(process.stdout)
+    command = rpc_command(request, rank, action)
+    payload = json.dumps(request)
+    try:
+        if action == "run":
+            with _rpc_lock:
+                if request["out_dir"] in _stopping:
+                    raise RuntimeError(f"node{rank} run cancelled after peer failure")
+                process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                           stderr=subprocess.PIPE, text=True)
+                _active_runs[(request["out_dir"], rank)] = process
+            try:
+                stdout, stderr = process.communicate(payload, timeout=3650)
+            finally:
+                if process.poll() is None:
+                    process.kill()
+                    process.wait()
+                with _rpc_lock:
+                    _active_runs.pop((request["out_dir"], rank), None)
+            returncode = process.returncode
+        else:
+            result = subprocess.run(command, input=payload, text=True, capture_output=True, timeout=90)
+            stdout, stderr, returncode = result.stdout, result.stderr, result.returncode
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError(f"node{rank} {action} timed out after {exc.timeout}s; command terminated") from exc
+    if returncode:
+        raise RuntimeError(f"node{rank} {action} exit={returncode}: {stderr}")
+    return json.loads(stdout)
 
 
 def validate_pair(prepared, request):
@@ -377,7 +404,8 @@ def run_case(request, call=rpc):
         prepared = [call(request, rank, "prepare") for rank in (0, 1)]
         validate_pair(prepared, request)
         # Both nodes finish preflight/config agreement before either can launch.
-        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+        pool = concurrent.futures.ThreadPoolExecutor(max_workers=2)
+        try:
             futures = {pool.submit(call, request, rank, "run"): rank for rank in (0, 1)}
             try:
                 for future in concurrent.futures.as_completed(futures):
@@ -387,9 +415,14 @@ def run_case(request, call=rpc):
                     if record["exit_code"] != 0 or record["error"] or not record["quiescent"]:
                         raise ValueError(f"node{rank} failed: {record}")
             except BaseException:
-                # Stop the peer immediately; do not wait for its 60-minute timeout.
                 cleanup_records = stop_case(request, call)
+                if all(record.get("ok") for record in cleanup_records):
+                    concurrent.futures.wait(futures, timeout=15)
                 raise
+        finally:
+            # stop_case in the outer handler terminates live RPCs; never wait
+            # for an unreachable peer before recording the failure.
+            pool.shutdown(wait=False, cancel_futures=True)
         validate_exits(exits, prepared, request)
         save(out / "complete.json", {
             "config_sha256": config_hash(request), "exits": exits,
@@ -412,12 +445,24 @@ def run_case(request, call=rpc):
 
 
 def stop_case(request, call):
+    with _rpc_lock:
+        _stopping.add(request["out_dir"])
+        for rank in (0, 1):
+            process = _active_runs.get((request["out_dir"], rank))
+            if process is not None and process.poll() is None:
+                try:
+                    process.kill()
+                except ProcessLookupError:
+                    pass
     records = []
     for rank in (0, 1):
         try:
-            records.append(call(request, rank, "cleanup"))
+            record = call(request, rank, "cleanup")
+            if not record.get("ok"):
+                record["status"] = "未确认"
+            records.append(record)
         except Exception as exc:
-            records.append({"ok": False, "error": str(exc)})
+            records.append({"ok": False, "status": "未确认", "error": str(exc)})
     return records
 
 
