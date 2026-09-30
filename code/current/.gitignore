@@ -29,3 +29,8 @@ benchmark_cache_*/
 
 # TensorBoard event logs (--tensorboard-dir from example scripts)
 tensorboard_logs/
+/outputs/
+/models/
+/cache/
+/tmp/
+*.log
