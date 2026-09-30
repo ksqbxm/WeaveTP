@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-PYTHON=${PYTHON:-/home/ubuntu/miniconda3/envs/megatron/bin/python}
+PYTHON=${PYTHON:?Set PYTHON to the existing interpreter}
 # Megatron's dataset Makefile invokes python3/python3-config directly. Keep
 # those nested build tools in the same environment as the benchmark process.
 export PATH="$(dirname "$PYTHON"):$PATH"
@@ -10,7 +10,7 @@ PROFILE=${PROFILE:-profiles/refit_4gpu_p2p.json}
 NPROC_PER_NODE=${NPROC_PER_NODE:-4}
 NNODES=${NNODES:-1}
 NODE_RANK=${NODE_RANK:-0}
-MASTER_ADDR=${MASTER_ADDR:-127.0.0.1}
+MASTER_ADDR=${MASTER_ADDR:-localhost}
 MASTER_PORT=${MASTER_PORT:-29500}
 if ! [[ "$NPROC_PER_NODE" =~ ^[1-9][0-9]*$ && "$NNODES" =~ ^[1-9][0-9]*$ &&
         "$NODE_RANK" =~ ^[0-9]+$ && "$MASTER_PORT" =~ ^[0-9]+$ ]] ||
@@ -187,7 +187,12 @@ else
 fi
 
 PROFILE_ARGS=()
-if [[ -f "$PROFILE" ]]; then
+if (( WORLD_SIZE == 16 )); then
+    # T05 formal profile gate runs on CPU before torchrun, including when this
+    # launcher is invoked directly rather than via the two-node coordinator.
+    "$PYTHON" -B tools/resharding/profile_weavetp_16gpu.py --validate "$PROFILE"
+    PROFILE_ARGS+=(--live-bandwidth-profile "$PROFILE")
+elif [[ -f "$PROFILE" ]]; then
     PROFILE_ARGS+=(--live-bandwidth-profile "$PROFILE")
 else
     echo "Bandwidth profile not found: $PROFILE; using the default 100 Gbps remote matrix."

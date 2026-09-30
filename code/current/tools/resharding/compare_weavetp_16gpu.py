@@ -21,17 +21,15 @@ import sys
 import time
 from pathlib import Path
 
+from profile_weavetp_16gpu import load_profile
 from summarize_weavetp_formal import DIRECTIONS, seconds, switch_metrics, validate_config
 
 HERE = Path(__file__).resolve().parent
 HELPER = "tools/resharding/compare_weavetp_16gpu.py"
 WRAPPER = "tools/resharding/run_deepseek_v2_lite_live_benchmark.sh"
-IDENTITY_FILES = (HELPER, WRAPPER, "tools/resharding/run_live_moe_tp_benchmark.sh",
-                  "tools/resharding/summarize_weavetp_formal.py",
-                  "examples/rl/benchmark_live_moe_tp.py")
 CASES = ("fixed", "directional", "weavetp")
 COMMON_ENV = {
-    "NNODES": "2", "NPROC_PER_NODE": "8", "MASTER_ADDR": "10.60.14.1",
+    "NNODES": "2", "NPROC_PER_NODE": "8", "MASTER_ADDR": "SL3060",
     "CUDA_VISIBLE_DEVICES": "0,1,2,3,4,5,6,7", "NCCL_DEBUG": "WARN",
     "NCCL_SOCKET_IFNAME": "eno1np0", "GLOO_SOCKET_IFNAME": "eno1np0",
     "NCCL_IB_HCA": "mlx5_0", "NCCL_IB_DISABLE": "0",
@@ -85,7 +83,8 @@ def make_cases(settings):
             aware = case == "weavetp"
             out = f"{root}/{case}/r{repeat}"
             env = {
-                **COMMON_ENV, "MASTER_PORT": settings["master_port"],
+                **COMMON_ENV, "MASTER_ADDR": settings.get("master_addr", "SL3060"),
+                "MASTER_PORT": settings["master_port"],
                 "METHOD_VARIANT": "moetp++-hybrid" if aware else "baseline",
                 "SCHEDULER_MODE": "residual" if aware else "baseline",
                 "DISABLE_SOURCE_REROUTE": "0" if aware else "1",
@@ -95,6 +94,8 @@ def make_cases(settings):
                 "PROFILE": settings["profile"], "CHECKPOINT": settings["checkpoint"],
                 "OUT_DIR": out, "RUN_ID": f"{Path(root).name}/{case}/r{repeat}",
             }
+            if settings.get("mps_owner"):
+                env["MPS_OWNER"] = settings["mps_owner"]
             yield {"case": case, "repeat": repeat, "out_dir": out, "env": env,
                    "nodes": settings["nodes"]}
 
@@ -120,10 +121,21 @@ def node_environment(request, rank):
     return env
 
 
+def git_identity(code):
+    code = Path(code)
+    head = subprocess.run(["git", "-C", str(code), "rev-parse", "HEAD"],
+                          capture_output=True, text=True, timeout=15, check=True).stdout.strip()
+    status = subprocess.run(["git", "-C", str(code), "status", "--porcelain", "--untracked-files=all"],
+                            capture_output=True, text=True, timeout=15, check=True).stdout
+    if status:
+        raise ValueError(f"Git checkout is not clean: {code}")
+    return head
+
+
 def identity(request, rank):
-    code = Path(request["nodes"][rank]["code_dir"])
-    return {"code": {name: digest((code / name).read_bytes()) for name in IDENTITY_FILES},
-            "profile_sha256": digest(Path(request["env"]["PROFILE"]).read_bytes())}
+    _, profile_sha256 = load_profile(request["env"]["PROFILE"])
+    return {"commit": git_identity(request["nodes"][rank]["code_dir"]),
+            "profile_sha256": profile_sha256}
 
 
 def gpu_state():
@@ -142,7 +154,7 @@ def gpu_memory(state):
     return {row[1].strip(): int(row[2]) for row in rows}
 
 
-def check_idle(state, rank):
+def check_idle(state, rank, mps_owner=None):
     # 65 MiB MPS baseline with conservative headroom; no idle-wait/retry loop.
     if any(value > 81 for value in gpu_memory(state).values()):
         raise ValueError("GPU memory exceeds idle/MPS baseline (65 + 16 MiB ceiling)")
@@ -151,7 +163,7 @@ def check_idle(state, rank):
         import pwd
 
         owner = pwd.getpwuid(Path(f"/proc/{int(pid)}").stat().st_uid).pw_name
-        if rank != 0 or Path(name.strip()).name != "nvidia-cuda-mps-server" or owner != "yiwei":
+        if rank != 0 or Path(name.strip()).name != "nvidia-cuda-mps-server" or owner != mps_owner:
             raise ValueError(f"GPU occupied: {row}; owner={owner}")
 
 
@@ -166,7 +178,7 @@ def tagged_processes(out, proc_root=Path("/proc")):
             tagged = out in argv or f"{out}/result.json" in argv
             worker = any(Path(arg).name in {
                 "run_deepseek_v2_lite_live_benchmark.sh", "run_live_moe_tp_benchmark.sh",
-                "benchmark_live_moe_tp.py",
+                "benchmark_live_moe_tp.py", "profile_weavetp_16gpu.py",
             } for arg in argv)
             if tagged and worker:
                 if entry.stat().st_uid != os.getuid():
@@ -234,7 +246,7 @@ def node_action(action, request, rank):
             raise ValueError("checkpoint directory missing")
         snapshot = gpu_state()
         save(out / f"preflight.node{rank}.json", snapshot)
-        check_idle(snapshot, rank)
+        check_idle(snapshot, rank, env.get("MPS_OWNER"))
         if rank == 0:
             with socket.socket() as probe:
                 probe.bind((env["MASTER_ADDR"], int(env["MASTER_PORT"])))
@@ -248,7 +260,7 @@ def node_action(action, request, rank):
         raise ValueError("prepared configuration/code/profile changed before launch")
     # Recheck immediately before this case, after both hosts passed prepare.
     snapshot = gpu_state()
-    check_idle(snapshot, rank)
+    check_idle(snapshot, rank, env.get("MPS_OWNER"))
     for key in ("TMPDIR", "XDG_CACHE_HOME", "CUDA_CACHE_PATH", "TORCH_HOME",
                 "TORCH_EXTENSIONS_DIR", "TRITON_CACHE_DIR", "HF_HOME",
                 "HUGGINGFACE_HUB_CACHE", "TRANSFORMERS_CACHE", "PIP_CACHE_DIR"):
@@ -420,14 +432,19 @@ def settings_from_env():
     port = int(os.environ.get("MASTER_PORT", "29500"))
     if not 1 <= port <= 65535:
         raise ValueError("MASTER_PORT must be 1..65535")
-    python = os.environ.get("PYTHON", "/home/ubuntu/miniconda3/envs/megatron/bin/python")
+    python = os.environ.get("PYTHON")
+    master_addr = os.environ.get("MASTER_ADDR")
+    peer_ssh = os.environ.get("NODE1_SSH")
+    if not python or not master_addr or not peer_ssh:
+        raise ValueError("PYTHON, MASTER_ADDR, and NODE1_SSH must be set explicitly")
     return {"root_out": root.rstrip("/"), "profile": profile, "master_port": str(port),
+            "master_addr": master_addr, "mps_owner": os.environ.get("MPS_OWNER"),
             "checkpoint": os.environ.get("CHECKPOINT", "/data/models/DeepSeek-V2-Lite-megatron-v2"),
             "nodes": [
                 {"hostname": "SL3060", "code_dir": code, "python": python},
                 {"hostname": "SL3061", "code_dir": os.environ.get("NODE1_CODE_DIR", code),
                  "python": os.environ.get("NODE1_PYTHON", python),
-                 "ssh": "ubuntu@10.60.14.2"},
+                 "ssh": peer_ssh},
             ]}
 
 
