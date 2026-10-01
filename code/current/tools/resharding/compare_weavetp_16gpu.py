@@ -447,13 +447,7 @@ def run_case(request, call=rpc):
 def stop_case(request, call):
     with _rpc_lock:
         _stopping.add(request["out_dir"])
-        for rank in (0, 1):
-            process = _active_runs.get((request["out_dir"], rank))
-            if process is not None and process.poll() is None:
-                try:
-                    process.kill()
-                except ProcessLookupError:
-                    pass
+        processes = [_active_runs.get((request["out_dir"], rank)) for rank in (0, 1)]
     records = []
     for rank in (0, 1):
         try:
@@ -463,6 +457,20 @@ def stop_case(request, call):
             records.append(record)
         except Exception as exc:
             records.append({"ok": False, "status": "未确认", "error": str(exc)})
+    # Let cleanup stop the tagged workers while their runners can still write
+    # exit receipts. Unreachable cleanup must still terminate the live RPC.
+    for process, record in zip(processes, records):
+        if process is not None and process.poll() is None:
+            if record.get("ok"):
+                try:
+                    process.wait(timeout=15)
+                except subprocess.TimeoutExpired:
+                    pass
+            if process.poll() is None:
+                try:
+                    process.kill()
+                except ProcessLookupError:
+                    pass
     return records
 
 

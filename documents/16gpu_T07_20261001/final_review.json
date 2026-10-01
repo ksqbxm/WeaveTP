@@ -1,0 +1,34 @@
+{
+  "status": "passed",
+  "cached_diff_check": {
+    "command": [
+      "git",
+      "diff",
+      "--cached",
+      "--check"
+    ],
+    "exit_code": 0,
+    "stdout": "",
+    "stderr": ""
+  },
+  "deployment_git_blob_hashes_verified": 28,
+  "python_imports_unchanged": true,
+  "server_connected": false,
+  "gpu_started": false,
+  "server_static_cpu_status": "not run for new T07 commit",
+  "staged_files": [
+    "code/current/tests/server_tests/weavetp_16gpu/README.md",
+    "code/current/tests/unit_tests/resharding/test_compare_weavetp_16gpu.py",
+    "code/current/tests/unit_tests/resharding/test_weavetp_review_findings.py",
+    "code/current/tools/resharding/compare_weavetp_16gpu.py",
+    "documents/16gpu_T07_20261001/compare_dry_run.json",
+    "documents/16gpu_T07_20261001/initial_r1_failure.log",
+    "documents/16gpu_T07_20261001/local_validation.json",
+    "documents/16gpu_T07_20261001/profile_dry_runs.json",
+    "documents/16gpu_T07_20261001/review_diffs.json",
+    "documents/16gpu_T07_20261001/run_t07.sh",
+    "documents/16gpu_T07_20261001/source_manifest.json",
+    "documents/16gpu_T07_20261001/trial_report.md",
+    "documents/WeaveTP_16卡正式实验_分步任务.md"
+  ]
+}

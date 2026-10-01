@@ -456,6 +456,27 @@ class CompareTests(unittest.TestCase):
                                        ("--live-expansion-max-wave-tasks", request["env"]["EXPANSION_MAX_WAVE_TASKS"]),
                                        ("--live-json-output", env["OUT_DIR"] + "/result.json")):
                     self.assertEqual(argv[argv.index(flag) + 1], expected)
+                for flag, key in (
+                    ("--live-method-variant", "METHOD_VARIANT"),
+                    ("--live-scheduler-mode", "SCHEDULER_MODE"),
+                    ("--live-max-wave-tasks", "MAX_WAVE_TASKS"),
+                    ("--live-max-waves", "MAX_WAVES"),
+                    ("--live-max-overlap-steps", "MAX_OVERLAP_STEPS"),
+                    ("--live-switches", "SWITCHES"),
+                    ("--live-adaptive-residual-max-waves", "ADAPTIVE_RESIDUAL_MAX_WAVES"),
+                    ("--live-reroute-min-gain-pct", "REROUTE_MIN_GAIN_PCT"),
+                    ("--live-reroute-min-global-gain-pct", "REROUTE_MIN_GLOBAL_GAIN_PCT"),
+                    ("--live-pack-target-bytes", "PACK_TARGET_BYTES"),
+                    ("--live-pack-max-item-bytes", "PACK_MAX_ITEM_BYTES"),
+                ):
+                    self.assertEqual(argv[argv.index(flag) + 1], request["env"][key])
+                self.assertEqual("--live-adaptive-hybrid" in argv, request["case"] == "weavetp")
+                self.assertEqual("--live-disable-source-reroute" in argv, request["case"] != "weavetp")
+                for flag in ("--live-online-replan", "--live-online-migration-first-guard",
+                             "--live-repeat-forward", "--live-persistent-pack-buffers",
+                             "--live-pack-rerouted-only", "--live-emulate-noncollocated-sources",
+                             "--live-diagnose-equivalence"):
+                    self.assertNotIn(flag, argv)
                 self.assertEqual(argv[-1], "WARN")
                 self.assertNotIn("--live-allow-aware-shrink", argv)
                 self.assertNotIn("--live-hybrid-fast-path", argv)

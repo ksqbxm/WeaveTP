@@ -1,0 +1,120 @@
+{
+  "base_commit": "41da0b6ae781a0516b73136d57378a0bb7e9ac93",
+  "scope": "T02-T07 changed Python/shell/fixture files; full deployment identity requires identical Git HEAD and clean checkout",
+  "t03_summarizer_sha256": "e8c6afd4d9230b0d88ef68d90155db49fff8f82fd0ea563c0a310b2c938d6e0f",
+  "files": [
+    {
+      "path": "code/current/examples/rl/benchmark_live_moe_tp.py",
+      "sha256": "ef811d9381fa27bbf8f46f104bf36e7ea66e870454b22e01d36ad89bcc94df66"
+    },
+    {
+      "path": "code/current/tests/server_tests/weavetp_16gpu/common.py",
+      "sha256": "7d820013c2f11a52d00c285e6de9a4c73af99363e3fe51c8c2391ee3f85b621d"
+    },
+    {
+      "path": "code/current/tests/server_tests/weavetp_16gpu/fixtures/cpu_worker.py",
+      "sha256": "da1832b324cee5c3243670f4bdfd991dd6ddd9b5dbdbf82a34385af1dd4306c6"
+    },
+    {
+      "path": "code/current/tests/server_tests/weavetp_16gpu/fixtures/historical_8gpu_manifest.json",
+      "sha256": "ce10478151f56ac998a957e6987bbcc0570eadfa0dd548af025f52c370135b74"
+    },
+    {
+      "path": "code/current/tests/server_tests/weavetp_16gpu/test_checkpoint.py",
+      "sha256": "39bfe3abb999d10b3a2000fe2d12bd743548e7b696c234084e552cdbd57249ea"
+    },
+    {
+      "path": "code/current/tests/server_tests/weavetp_16gpu/test_controller.py",
+      "sha256": "c82c52c4f834302130bc8b4986b1c255713833bf5f1c990ef3fd699934d64a5d"
+    },
+    {
+      "path": "code/current/tests/server_tests/weavetp_16gpu/test_cpu.py",
+      "sha256": "2b1c65a2444d106b9b740f246ce433bd4de6d2317d2323b729d37119a1baf6f8"
+    },
+    {
+      "path": "code/current/tests/server_tests/weavetp_16gpu/test_groups_worker.py",
+      "sha256": "ca81a9f4e71bdfb62d6555de69c6a0fdce5bcf5737f7f6acc9ba790d8143d589"
+    },
+    {
+      "path": "code/current/tests/server_tests/weavetp_16gpu/test_history.py",
+      "sha256": "7d4e1c4463e234b75b30b4ed06422bc24cb9cdda715cb6ce734aa40780a41c6d"
+    },
+    {
+      "path": "code/current/tests/server_tests/weavetp_16gpu/test_node.py",
+      "sha256": "cbc12d9641434c783f0607a567c8a6c10c80af77688ae4fe40a223aee3e528e1"
+    },
+    {
+      "path": "code/current/tests/server_tests/weavetp_16gpu/test_observations.py",
+      "sha256": "815df832398cd95c605d82d2b98c9a3374d839bbe2b93470768b038bc428fd9f"
+    },
+    {
+      "path": "code/current/tests/server_tests/weavetp_16gpu/test_profile.py",
+      "sha256": "fb10e3d0295fbecd7348ffbf00beb60a3ffcc9efbaaf7376fd6905ffc747260a"
+    },
+    {
+      "path": "code/current/tests/server_tests/weavetp_16gpu/test_results.py",
+      "sha256": "91670befda88a0285cd90315e48d453eb5892c7fbac7223fd39a14608d14aa4d"
+    },
+    {
+      "path": "code/current/tests/unit_tests/resharding/test_compare_weavetp_16gpu.py",
+      "sha256": "8979c10abfe2ad9a700017f0bf4fdc91feae03e914b134b299b16724861f9d5e"
+    },
+    {
+      "path": "code/current/tests/unit_tests/resharding/test_profile_weavetp_16gpu.py",
+      "sha256": "63b3de88f890016973d49d8c22355173fec1d4fefb37d205cb3cfcaa9ef70d32"
+    },
+    {
+      "path": "code/current/tests/unit_tests/resharding/test_server_acceptance.py",
+      "sha256": "b8ef625d02754760af874a913dcdf42e4b4759ff84fff826266c30afc00ab255"
+    },
+    {
+      "path": "code/current/tests/unit_tests/resharding/test_summarize_weavetp_formal.py",
+      "sha256": "5a027edee25edd325e1372a50fdd741488a4ab4196fb34be8ad7c49591554de1"
+    },
+    {
+      "path": "code/current/tests/unit_tests/resharding/test_weavetp_observations.py",
+      "sha256": "4a53a3823d4f557a4d13da25d64b4c3ec32d662964cb48cb380a0581d679ccdd"
+    },
+    {
+      "path": "code/current/tests/unit_tests/resharding/test_weavetp_review_findings.py",
+      "sha256": "887374a3cc518228c6766f9457a672f58cd320769a9fdca41f28d5d43ea01289"
+    },
+    {
+      "path": "code/current/tools/resharding/compare_weavetp_16gpu.py",
+      "sha256": "27b01ff698e613eb3ee0182e31ecfd7cace9880952b8c9e9aa62c121b5503117"
+    },
+    {
+      "path": "code/current/tools/resharding/profile_weavetp_16gpu.py",
+      "sha256": "7e36cf1e25547222adaed943bd5cb2a367b95d09d790c3568d93168769f66290"
+    },
+    {
+      "path": "code/current/tools/resharding/run_deepseek_v2_lite_directional_wave_compare.sh",
+      "sha256": "b3dc5fd7fb356d6237c247de52e5a6f37e971ff684abb8576ae241e5f17e1308"
+    },
+    {
+      "path": "code/current/tools/resharding/run_deepseek_v2_lite_live_benchmark.sh",
+      "sha256": "ae1e77ccfefe4030e439a5d9a569b6fd5421ae681c2b9a957a70fae32710c6c0"
+    },
+    {
+      "path": "code/current/tools/resharding/run_live_moe_tp_benchmark.sh",
+      "sha256": "75ae87733f73a8b7875ed0c7cd6a5161cd4d27df94e83c4fbefcb568d9726e00"
+    },
+    {
+      "path": "code/current/tools/resharding/run_weavetp_16gpu_profile.sh",
+      "sha256": "23fa82cca1073927f73d1946359fcf4e0de8a3e787a8bc35896fd95f23a31ea2"
+    },
+    {
+      "path": "code/current/tools/resharding/summarize_weavetp_formal.py",
+      "sha256": "e8c6afd4d9230b0d88ef68d90155db49fff8f82fd0ea563c0a310b2c938d6e0f"
+    },
+    {
+      "path": "code/current/tools/resharding/weavetp_observations.py",
+      "sha256": "68473f1d625c013ab9eb4033a8b90504a316926e5cd9e2997af53f6cec06daa3"
+    },
+    {
+      "path": "documents/16gpu_T07_20261001/run_t07.sh",
+      "sha256": "eccdcd2dc3f334fe6f470ee681692521c2049e8e25878fdb53313ac891d7f73c"
+    }
+  ],
+  "hash_scope": "Linux deployment bytes (Git text blobs with LF); local Windows CRLF is not deployment content"
+}

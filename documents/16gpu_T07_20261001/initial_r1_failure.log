@@ -1,0 +1,18 @@
+test_failed_cleanup_terminates_active_run_command_and_marks_unknown (__main__.FailureLifecycleTests.test_failed_cleanup_terminates_active_run_command_and_marks_unknown) ... ok
+test_remote_command_timeout_is_reported (__main__.FailureLifecycleTests.test_remote_command_timeout_is_reported) ... ok
+test_successful_cleanup_preserves_runner_exit_receipt (__main__.FailureLifecycleTests.test_successful_cleanup_preserves_runner_exit_receipt) ... FAIL
+test_unreachable_cleanup_does_not_wait_for_other_run_rpc (__main__.FailureLifecycleTests.test_unreachable_cleanup_does_not_wait_for_other_run_rpc) ... ok
+
+======================================================================
+FAIL: test_successful_cleanup_preserves_runner_exit_receipt (__main__.FailureLifecycleTests.test_successful_cleanup_preserves_runner_exit_receipt)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "E:\课题组\WeaveTP_代码与实验资料_20260920\code\current\tests\unit_tests\resharding\test_weavetp_review_findings.py", line 61, in test_successful_cleanup_preserves_runner_exit_receipt
+    self.assertTrue(receipt.is_file(), "runner killed before cleanup could preserve its exit receipt")
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: False is not true : runner killed before cleanup could preserve its exit receipt
+
+----------------------------------------------------------------------
+Ran 4 tests in 0.380s
+
+FAILED (failures=1)

@@ -14,6 +14,53 @@ compare = fixtures.compare
 
 
 class FailureLifecycleTests(unittest.TestCase):
+    def test_successful_cleanup_preserves_runner_exit_receipt(self):
+        fixture = fixtures.CompareTests()
+        fixture.setUp()
+        self.addCleanup(fixture.doCleanups)
+        out = Path(fixture.request["out_dir"])
+        out.mkdir(parents=True)
+        started, stop, receipt = (out / name for name in ("started", "stop", "receipt"))
+        errors = []
+        worker = (
+            "import pathlib,sys,time\n"
+            "started,stop,receipt=map(pathlib.Path,sys.argv[1:])\n"
+            "started.write_text('ready')\n"
+            "while not stop.exists(): time.sleep(0.01)\n"
+            "time.sleep(0.05)\n"
+            "receipt.write_text('exit recorded')\n"
+            "print('{}')\n"
+        )
+
+        def remote_run():
+            try:
+                compare.rpc(fixture.request, 0, "run")
+            except RuntimeError as exc:
+                errors.append(str(exc))
+
+        def cleanup(request, rank, action):
+            self.assertEqual(action, "cleanup")
+            if rank == 0:
+                stop.touch()
+            return {"ok": True}
+
+        with mock.patch.object(compare, "rpc_command", return_value=[
+                sys.executable, "-B", "-c", worker, str(started), str(stop), str(receipt)]):
+            thread = threading.Thread(target=remote_run)
+            thread.start()
+            try:
+                deadline = time.monotonic() + 3
+                while not started.exists():
+                    self.assertLess(time.monotonic(), deadline, "runner did not start")
+                    time.sleep(0.01)
+                compare.stop_case(fixture.request, cleanup)
+            finally:
+                stop.touch()
+                thread.join(3)
+        self.assertFalse(thread.is_alive())
+        self.assertTrue(receipt.is_file(), "runner killed before cleanup could preserve its exit receipt")
+        self.assertEqual(errors, [])
+
     def test_unreachable_cleanup_does_not_wait_for_other_run_rpc(self):
         fixture = fixtures.CompareTests()
         fixture.setUp()
