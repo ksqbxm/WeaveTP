@@ -1,0 +1,15 @@
+{
+  "interruption_leaves_child_alive_without_cleanup": true,
+  "launch_uses_unverified_changed_port": true,
+  "events": [
+    {
+      "launch_master_port": "29999"
+    }
+  ],
+  "receipt": {
+    "exit_code": 1,
+    "launcher_exited": false
+  },
+  "gpu_started": false,
+  "ssh_executed": false
+}

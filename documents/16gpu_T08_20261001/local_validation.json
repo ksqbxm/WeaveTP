@@ -1,0 +1,41 @@
+{
+  "gpu_started": false,
+  "ssh_executed": false,
+  "source_hashes": {
+    "t08.py": "63e25bda78e9eb26044ec3d5a1485c0045631ceef429fd23b3b9f58b251c7f0d",
+    "run_t08.sh": "c1f3948f471f45da62c4ebb9d2e94bafbb3d4a8a8fad68d67190e9ba89b50b62",
+    "check_commands.py": "6442fcefa7620f5292282559126bd5dee1559b1ced3875e37969ed4d21b639a4"
+  },
+  "checks": [
+    {
+      "name": "T08 regressions",
+      "tests": 16,
+      "exit_code": 0,
+      "output": "test_controller_scenarios (__main__.ControllerTests.test_controller_scenarios) ... ok\ntest_wait_pair_notices_failure_without_waiting_for_peer (__main__.ControllerTests.test_wait_pair_notices_failure_without_waiting_for_peer) ... ok\ntest_wait_pair_timeout (__main__.ControllerTests.test_wait_pair_timeout) ... ok\ntest_actual_launcher_dry_run_preserves_info_rdma_and_task_tag (__main__.NodeTests.test_actual_launcher_dry_run_preserves_info_rdma_and_task_tag) ... ok\ntest_busy_gpu_prevents_launch (__main__.NodeTests.test_busy_gpu_prevents_launch) ... ok\ntest_cancel_before_start_prevents_popen (__main__.NodeTests.test_cancel_before_start_prevents_popen) ... ok\ntest_cancellation_waits_for_popen_publication (__main__.NodeTests.test_cancellation_waits_for_popen_publication) ... ok\ntest_cleanup_confirmation_uses_live_state_not_exit_receipt (__main__.NodeTests.test_cleanup_confirmation_uses_live_state_not_exit_receipt) ... ok\ntest_cleanup_observation_failure_is_unconfirmed (__main__.NodeTests.test_cleanup_observation_failure_is_unconfirmed) ... ok\ntest_cleanup_rejects_remaining_pid_or_unrestored_memory (__main__.NodeTests.test_cleanup_rejects_remaining_pid_or_unrestored_memory) ... ok\ntest_interruption_and_timeout_reap_a_real_cpu_child (__main__.NodeTests.test_interruption_and_timeout_reap_a_real_cpu_child) ... ok\ntest_low_disk_and_dirty_commit_prevent_launch (__main__.NodeTests.test_low_disk_and_dirty_commit_prevent_launch) ... ok\ntest_node_cli_accepts_the_streamed_source_arguments (__main__.NodeTests.test_node_cli_accepts_the_streamed_source_arguments) ... ok\ntest_profile_verification_checks_both_hash_and_actual_transport (__main__.NodeTests.test_profile_verification_checks_both_hash_and_actual_transport) ... ok\ntest_run_uses_frozen_environment (__main__.NodeTests.test_run_uses_frozen_environment) ... ok\ntest_signal_during_popen_does_not_lose_the_child_handle (__main__.NodeTests.test_signal_during_popen_does_not_lose_the_child_handle) ... ok\n\n----------------------------------------------------------------------\nRan 16 tests in 1.876s\n\nOK\n"
+    },
+    {
+      "name": "bash-n",
+      "command": [
+        "C:/Program Files/Git/bin/bash.exe",
+        "-n",
+        "E:\\课题组\\WeaveTP_代码与实验资料_20260920\\documents\\16gpu_T08_20261001\\run_t08.sh"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "name": "profile tests",
+      "command": [
+        "C:\\Users\\ksqbx\\miniforge3\\python.exe",
+        "-B",
+        "-X",
+        "utf8",
+        "E:\\课题组\\WeaveTP_代码与实验资料_20260920\\code\\current\\tests\\unit_tests\\resharding\\test_profile_weavetp_16gpu.py"
+      ],
+      "exit_code": 0,
+      "stdout": "{\"profile\": \"E:\\\\\\u8bfe\\u9898\\u7ec4\\\\WeaveTP_\\u4ee3\\u7801\\u4e0e\\u5b9e\\u9a8c\\u8d44\\u6599_20260920\\\\t05_fixture_alk6ljdm\\\\profile.json\", \"sha256\": \"aeaa8b64c657bd0a96ed218c25d3d7cb2693d67913e6db626d6670e878f64ded\"}\n",
+      "stderr": "test_all_240_directions_one_warmup_three_passes_and_no_diagonal_probe (__main__.ProfileTests.test_all_240_directions_one_warmup_three_passes_and_no_diagonal_probe) ... ok\ntest_bad_launch_arguments_fail_in_dry_run (__main__.ProfileTests.test_bad_launch_arguments_fail_in_dry_run) ... ok\ntest_cli_validation_without_importing_torch (__main__.ProfileTests.test_cli_validation_without_importing_torch) ... ok\ntest_compare_checks_profile_before_git_identity (__main__.ProfileTests.test_compare_checks_profile_before_git_identity) ... ok\ntest_decimal_gbps_uses_total_transferred_bytes_and_median (__main__.ProfileTests.test_decimal_gbps_uses_total_transferred_bytes_and_median) ... ok\ntest_default_matrix_missing_samples_and_duplicate_pairs_fail (__main__.ProfileTests.test_default_matrix_missing_samples_and_duplicate_pairs_fail) ... ok\ntest_formal_launcher_validates_before_torchrun (__main__.ProfileTests.test_formal_launcher_validates_before_torchrun) ... ok\ntest_missing_file_and_hash_mismatch_fail (__main__.ProfileTests.test_missing_file_and_hash_mismatch_fail) ... ok\ntest_network_gate_distinguishes_bootstrap_from_data_transport (__main__.ProfileTests.test_network_gate_distinguishes_bootstrap_from_data_transport) ... ok\ntest_nonpositive_nonfinite_or_nonnumeric_bandwidth_fails (__main__.ProfileTests.test_nonpositive_nonfinite_or_nonnumeric_bandwidth_fails) ... ok\ntest_pair_hash_mismatch_prevents_formal_launch (__main__.ProfileTests.test_pair_hash_mismatch_prevents_formal_launch) ... ok\ntest_profiling_dry_run_both_nodes_and_info_isolation (__main__.ProfileTests.test_profiling_dry_run_both_nodes_and_info_isolation) ... ok\ntest_rank_mapping_uuid_and_log_provenance (__main__.ProfileTests.test_rank_mapping_uuid_and_log_provenance) ... ok\ntest_real_profiler_control_flow_with_mock_torch (__main__.ProfileTests.test_real_profiler_control_flow_with_mock_torch) ... ok\ntest_socket_fallback_stops_before_pair_sweep (__main__.ProfileTests.test_socket_fallback_stops_before_pair_sweep) ... ok\ntest_source_unit_parameters_and_diagonal_are_required (__main__.ProfileTests.test_source_unit_parameters_and_diagonal_are_required) ... ok\ntest_valid_profile_and_matching_hash (__main__.ProfileTests.test_valid_profile_and_matching_hash) ... ok\ntest_wrong_dimensions_and_world_size (__main__.ProfileTests.test_wrong_dimensions_and_world_size) ... ok\n\n----------------------------------------------------------------------\nRan 18 tests in 4.265s\n\nOK\n"
+    }
+  ]
+}
