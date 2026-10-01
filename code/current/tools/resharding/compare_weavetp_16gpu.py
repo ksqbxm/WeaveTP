@@ -20,10 +20,11 @@ import subprocess
 import sys
 import threading
 import time
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from profile_weavetp_16gpu import load_profile
 from summarize_weavetp_formal import DIRECTIONS, seconds, switch_metrics, validate_config
+from weavetp_observations import validate_parallel_groups
 
 HERE = Path(__file__).resolve().parent
 _rpc_lock = threading.Lock()
@@ -102,6 +103,37 @@ def make_cases(settings):
                 env["MPS_OWNER"] = settings["mps_owner"]
             yield {"case": case, "repeat": repeat, "out_dir": out, "env": env,
                    "nodes": settings["nodes"]}
+
+
+def smoke_path(value):
+    return "smoke" in Path(value).parts or "smoke" in Path(value).resolve().parts
+
+
+def check_output_mode(root, smoke=False, work=None):
+    if not smoke:
+        if smoke_path(root):
+            raise ValueError("formal ROOT_OUT must not use a smoke path")
+        return
+    if not work:
+        raise ValueError("WORK is required for --smoke")
+    path, base = PurePosixPath(root), PurePosixPath(work)
+    if (not base.is_relative_to("/data") or ".." in base.parts or ".." in path.parts
+            or not path.is_relative_to(base / "smoke") or path == base / "smoke"):
+        raise ValueError("smoke ROOT_OUT must be a new directory under $WORK/smoke/")
+    # Dry-run also works on Windows; live paths must not escape through symlinks.
+    if os.name != "nt" and (Path(work).resolve() != Path(work)
+                           or Path(root).resolve() != Path(root)):
+        raise ValueError("smoke WORK/ROOT_OUT must be canonical paths without symlinks")
+
+
+def make_smoke_case(settings, work):
+    check_output_mode(settings["root_out"], True, work)
+    request = next(r for r in make_cases(settings) if r["case"] == "weavetp")
+    request["env"]["SWITCHES"] = "2"
+    if not request["env"]["RUN_ID"].startswith("smoke"):
+        request["env"]["RUN_ID"] = "smoke_" + request["env"]["RUN_ID"]
+    request.update(mode="smoke", work=work)
+    return request
 
 
 def node_environment(request, rank):
@@ -228,6 +260,7 @@ def cleanup(request, rank):
 
 
 def node_action(action, request, rank):
+    check_output_mode(request["out_dir"], request.get("mode") == "smoke", request.get("work"))
     out = Path(data_path(request["out_dir"]))
     if request["env"]["OUT_DIR"] != request["out_dir"]:
         raise ValueError("OUT_DIR environment and process tag differ")
@@ -352,11 +385,21 @@ def validate_pair(prepared, request):
                 raise ValueError(f"node{rank}: effective environment differs: {key}")
     if prepared[0]["identity"] != prepared[1]["identity"]:
         raise ValueError("two-node code/profile hashes differ")
+    if request.get("expected_identity") and prepared[0]["identity"] != request["expected_identity"]:
+        raise ValueError("code/profile differs from smoke preflight")
 
 
 def validate_result(path, case):
+    if smoke_path(path):
+        raise ValueError("formal validation rejects smoke paths")
+    for name in ("request.json", "complete.json"):
+        marker = Path(path).parent / name
+        if marker.is_file() and json.loads(marker.read_bytes()).get("mode") == "smoke":
+            raise ValueError(f"formal validation rejects smoke {name}")
     raw = Path(path).read_bytes()
     data = json.loads(raw)
+    if data.get("mode") == "smoke":
+        raise ValueError("formal validation rejects smoke results")
     validate_config(data, case, 16)
     if data.get("checkpoint_loaded") is not True or data.get("final_active_tp") != 2:
         raise ValueError("checkpoint not loaded or incomplete TP cycle")
@@ -372,6 +415,40 @@ def validate_result(path, case):
     return digest(raw)
 
 
+def validate_smoke_result(path, case):
+    """Read the original benchmark bytes; never annotate/rewrite result.json."""
+    if case != "weavetp":
+        raise ValueError("smoke requires weavetp")
+    raw = Path(path).read_bytes()
+    data = json.loads(raw)
+    validate_config(data, case, 16)
+    if data.get("checkpoint_loaded") is not True or data.get("final_active_tp") != 2:
+        raise ValueError("checkpoint not loaded or incomplete TP cycle")
+    records = data["switches"]
+    if len(records) != 2 or tuple(r["direction"] for r in records) != DIRECTIONS[:2]:
+        raise ValueError("smoke requires exactly two switches: 2->4, 4->2")
+    validate_parallel_groups(data["parallel_groups"])
+    if any(row["nccl_debug"] != "WARN" for row in data["parallel_groups"]):
+        raise ValueError("all smoke ranks must use NCCL_DEBUG=WARN")
+    for i, record in enumerate(records):
+        if type(record["index"]) is not int or record["index"] != i:
+            raise ValueError("smoke switch indices must be 0,1")
+        switch_metrics(record)
+        seconds(record["validation_max_diff"], "validation_max_diff")
+        observed = record["plan_observation"]
+        if observed["direction"] != record["direction"] or observed["index"] != i:
+            raise ValueError("smoke plan observation direction/index mismatch")
+        for name in ("default", "adopted"):
+            plan = observed.get(name)
+            if not isinstance(plan, dict) or not plan.get("plan_id"):
+                raise ValueError(f"smoke missing {name} plan")
+            size = plan["traffic"]["total"]["cross_node_bytes"]
+            if type(size) is not int or size < 0:
+                raise ValueError(f"invalid {name} cross-node bytes")
+    # BF16-relative failure raises before the benchmark writes its final JSON.
+    return digest(raw)
+
+
 def validate_exits(exits, prepared, request):
     for rank, record in enumerate(exits):
         if (record is None or record["rank"] != rank or record["exit_code"] != 0
@@ -382,9 +459,13 @@ def validate_exits(exits, prepared, request):
 
 
 def run_case(request, call=rpc):
+    smoke = request.get("mode") == "smoke"
+    check_output_mode(request["out_dir"], smoke, request.get("work"))
     out = Path(request["out_dir"])
     states = [call(request, rank, "inspect") for rank in (0, 1)]
     if any(state["exists"] for state in states):
+        if smoke:
+            raise ValueError(f"smoke refuses existing evidence at {out}; no reuse or retry")
         marker = out / "complete.json"
         if not all(s["exists"] and s["prepared"] and s["exit"] for s in states) or not marker.is_file():
             raise ValueError(f"incomplete evidence at {out}; refusing skip, overwrite, or automatic retry")
@@ -424,10 +505,14 @@ def run_case(request, call=rpc):
             # for an unreachable peer before recording the failure.
             pool.shutdown(wait=False, cancel_futures=True)
         validate_exits(exits, prepared, request)
-        save(out / "complete.json", {
+        validator = validate_smoke_result if smoke else validate_result
+        complete = {
             "config_sha256": config_hash(request), "exits": exits,
-            "result_sha256": validate_result(out / "result.json", request["case"]),
-        })
+            "result_sha256": validator(out / "result.json", request["case"]),
+        }
+        if smoke:
+            complete["mode"] = "smoke"
+        save(out / "complete.json", complete)
         print(f"DONE {request['env']['RUN_ID']}", flush=True)
     except BaseException as exc:
         # Preserve both exit codes even when one RPC fails or the controller is interrupted.
@@ -503,7 +588,8 @@ def settings_from_env():
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--dry-run", action="store_true", help="print nine cases; no SSH/files/GPU")
+    parser.add_argument("--dry-run", action="store_true", help="print cases; no SSH/files/GPU")
+    parser.add_argument("--smoke", action="store_true", help="one isolated weavetp case, two switches")
     parser.add_argument("--node-action", choices=("inspect", "prepare", "run", "cleanup"))
     parser.add_argument("--node-rank", type=int, choices=(0, 1))
     parser.add_argument("--out-dir")
@@ -516,7 +602,9 @@ def main(argv=None):
             print(json.dumps(node_action(args.node_action, request, args.node_rank)))
             return 0
         settings = settings_from_env()
-        cases = list(make_cases(settings))
+        check_output_mode(settings["root_out"], args.smoke, os.environ.get("WORK"))
+        cases = ([make_smoke_case(settings, os.environ["WORK"])] if args.smoke
+                 else list(make_cases(settings)))
         if args.dry_run:
             print(json.dumps([{"request": r, "node_commands": [rpc_command(r, n, "run")
                                for n in (0, 1)]} for r in cases], indent=2))
@@ -529,7 +617,7 @@ def main(argv=None):
         # Persistent lock deliberately survives controller loss. Inspect/clean up
         # the tagged task before manually removing it; never race another compare.
         lock = Path(settings["root_out"]) / "compare.lock"
-        lock.parent.mkdir(parents=True, exist_ok=True)
+        lock.parent.mkdir(parents=True, exist_ok=not args.smoke)
         save(lock, {"pid": os.getpid(), "hostname": socket.gethostname()})
         try:
             for request in cases:
