@@ -7,7 +7,7 @@ from common import ROOT, command, read, require, run
 
 TESTS = ("test_summarize_weavetp_formal.py", "test_compare_weavetp_16gpu.py",
          "test_profile_weavetp_16gpu.py", "test_server_acceptance.py",
-         "test_weavetp_review_findings.py")
+         "test_weavetp_review_findings.py", "test_weavetp_observations.py")
 
 
 def check(args, out, env):

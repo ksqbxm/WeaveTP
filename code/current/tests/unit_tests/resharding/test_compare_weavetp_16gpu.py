@@ -84,11 +84,12 @@ class CompareTests(unittest.TestCase):
         self.path = Path(self.temp.name)
         self.settings = {
             "root_out": self.path.as_posix() + "/batch", "profile": "/data/profile16.json",
-            "master_port": "29500", "checkpoint": "/data/models/checkpoint",
+            "master_addr": "192.0.2.10", "master_port": "29617",
+            "checkpoint": "/data/models/checkpoint",
             "nodes": [
                 {"hostname": "SL3060", "code_dir": "/data/code", "python": "/env/python"},
                 {"hostname": "SL3061", "code_dir": "/data/code", "python": "/env/python",
-                 "ssh": "ubuntu@10.60.14.2"},
+                 "ssh": "fixture@192.0.2.11"},
             ],
         }
         self.requests = list(compare.make_cases(self.settings))
@@ -383,6 +384,11 @@ class CompareTests(unittest.TestCase):
     def test_formal_shell_dispatch_dry_run_and_legacy_argument_rejection(self):
         script = "tools/resharding/run_deepseek_v2_lite_directional_wave_compare.sh"
         env = {**os.environ, "NNODES": "2", "NODE_RANK": "0", "PYTHON": Path(sys.executable).as_posix(),
+               "MASTER_ADDR": self.settings["master_addr"], "MASTER_PORT": self.settings["master_port"],
+               "NODE1_SSH": self.settings["nodes"][1]["ssh"],
+               "NODE1_PYTHON": Path(sys.executable).as_posix(),
+               "NODE1_CODE_DIR": self.settings["nodes"][1]["code_dir"],
+               "CHECKPOINT": self.settings["checkpoint"], "MPS_OWNER": "fixture-mps",
                "ROOT_OUT": "/data/test", "PROFILE": "/data/profile16.json", "CODE_DIR": "/data/code"}
         result = subprocess.run([str(BASH), script, "--dry-run"], cwd=ROOT, env=env,
                                 text=True, encoding="utf-8", capture_output=True)
@@ -390,6 +396,11 @@ class CompareTests(unittest.TestCase):
         rows = json.loads(result.stdout)
         self.assertEqual(len(rows), 9)
         self.assertTrue(all(r["request"]["env"]["NCCL_DEBUG"] == "WARN" for r in rows))
+        for row in rows:
+            self.assertEqual(row["request"]["env"]["MASTER_ADDR"], env["MASTER_ADDR"])
+            self.assertEqual(row["request"]["env"]["MASTER_PORT"], env["MASTER_PORT"])
+            self.assertEqual(row["request"]["nodes"][1]["ssh"], env["NODE1_SSH"])
+            self.assertEqual(row["request"]["nodes"][1]["python"], env["NODE1_PYTHON"])
         env["NNODES"] = "1"
         result = subprocess.run([str(BASH), script, "--dry-run"], cwd=ROOT, env=env,
                                 text=True, encoding="utf-8", capture_output=True)
@@ -436,7 +447,8 @@ class CompareTests(unittest.TestCase):
                 argv = capture.read_bytes().decode().split("\0")[:-1]
                 self.assertNotIn("--standalone", argv)
                 for token in ("--nnodes=2", f"--node_rank={rank}", "--rdzv_backend=static",
-                              "--master_addr=10.60.14.1", "--master_port=29500", "--nproc_per_node=8"):
+                              f"--master_addr={request['env']['MASTER_ADDR']}",
+                              f"--master_port={request['env']['MASTER_PORT']}", "--nproc_per_node=8"):
                     self.assertIn(token, argv)
                 for flag, expected in (("--global-batch-size", "8"), ("--micro-batch-size", "1"),
                                        ("--num-experts", "64"), ("--seq-length", "1024"),

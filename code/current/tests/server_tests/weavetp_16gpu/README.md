@@ -1,6 +1,6 @@
 # WeaveTP 16 卡服务器测试
 
-本目录验证已有实现的真实环境行为。**本地 R1 故障回归已通过，尚未 SSH、部署或启动 GPU。旧 T04 测试仍有两个写死旧地址/默认环境的断言失败，T06 尚未实现，不能据此进入正式 GPU 实验。**
+本目录验证已有实现的真实环境行为。**2026-10-01 已按用户授权仅修改 T04 测试，显式注入地址、端口与解释器等环境配置；六组相关 CPU 测试共 111/111 通过。R1 和 T06 均包含在本次版本中，尚未 SSH、部署或启动 GPU；真实服务器验收和 T07 完整门禁仍待完成。**
 
 ## 文件与证据分离
 
@@ -12,15 +12,17 @@ tests/
     test_profile_weavetp_16gpu.py      # T05：画像、测量控制流、shell 门禁
     test_server_acceptance.py         # 新服务器检查器的 CPU 正反例
     test_weavetp_review_findings.py    # R1 失败生命周期、远程命令超时及清理状态
+    test_weavetp_observations.py       # T06：实际组读取、流量、缓存候选和读结果验收
   server_tests/weavetp_16gpu/
     common.py                        # /data、独占输出、hash、子命令证据
-    test_cpu.py                      # Linux 解释器上运行上述五组测试
+    test_cpu.py                      # Linux 解释器上运行上述六组测试
     test_node.py                     # GPU/磁盘/版本/网卡/源码一致性，只读
     test_checkpoint.py               # 已有 checkpoint 分片流式 hash，只读
     test_history.py                  # 固定 9 份真实历史 JSON、54 项表 2 及独立算术
     test_controller.py               # 真实 SSH、进程、信号；只运行 CPU 替身
     test_profile.py                  # 实际 UUID、原始 NCCL 日志、两端画像 hash
     test_groups_worker.py            # torchrun worker；实际 ProcessGroup 与 collective
+    test_observations.py             # 只读已有 result.json 的 T06 观测，不启动模型
     test_results.py                  # 正式 9 份结果与两端凭据，只读；完整验收仍 blocked
     fixtures/
       cpu_worker.py                  # 明确标注的替身，不导入 torch
@@ -52,12 +54,12 @@ tests/
 | T05 画像算法/格式/拒绝回退 | test_cpu | 240 对、64 MiB、1+3×3、decimal Gbps、中位数、非实测对角线、缺失/NaN/维度/默认画像拒绝 |
 | T05/T08 实测网络和设备 | 原 run_weavetp_16gpu_profile.sh + test_profile | 真正的 2×8 测量；保留原始 NCCL 日志及两机画像 hash；逐日志/UUID 配对检查暂缓且不阻断 |
 | T06/T08 现有组构建器 | test_groups_worker | 真实 get_process_group_ranks/get_world_size、TP2/4、DP8/4、EDP4/2、TP/ETP/EP 机内、UUID 唯一及各组 all_reduce；不是 benchmark 实际 source/destination hooks 的证明 |
-| T06 流量/候选分类/计时 | 尚无实现可调用，见下表待接入案例 | 本次不创建一个只测假实现并宣称通过的测试；正式结果入口明确 blocked |
-| T07 集成 | test_cpu、bash -n、本次审阅及文件 hash | 已有功能的测试通过不等于 T06 完成；真实 Linux/SSH/GPU 验证状态分别报告 |
+| T06 实际组/流量/候选分类/计时 | test_weavetp_observations + test_observations；test_results 已接入同一检查器 | 本地 25 项 CPU 通过；benchmark 直接读取两个模型的组，统计在全部切换结束后执行；真实 GPU 观测尚未验证 |
+| T07 集成 | test_cpu、bash -n、diff 审阅及两机 Git 身份 | T06 CPU 通过不等于 T07 完成；真实 Linux/SSH/GPU 验证状态分别报告 |
 | T09 正式负载/数值 | test_results + 原 compare 的 9 次正式运行 | 9 结果、36 切换、两端 prepare/exit/config/日志/complete；真实 checkpoint_loaded；不允许替身数据，不因慢或 FIFO 回退删结果 |
-| T10 汇总 | test_results | 原汇总器、独立均值/SD/18 项提升；wave/实际路径单独输出；流量、候选分类、时间线缺项继续 blocked |
+| T10 汇总 | test_results | 原汇总器、独立均值/SD/18 项提升；wave/实际路径及 T06 核查输出；时间线和数值原始证据缺项继续 blocked |
 
-T06 实现后需要接入的案例（不能以请求参数或公式计算的期望值充当实际观测）：
+T06 已接入的 CPU 案例及待执行的真实验证（不能以请求参数或公式计算的期望值充当实际观测）：
 
 | 功能 | 必要正反例 | 真实服务器验证方式 |
 |---|---|---|
@@ -66,6 +68,28 @@ T06 实现后需要接入的案例（不能以请求参数或公式计算的期�
 | 默认/候选/实际计划 | 扩缩两个方向都有默认计划；候选未保留为 unavailable；候选被拒绝后不能拿恢复的 baseline 冒充候选 | 检查同一缓存计划身份及采用记录；收缩不适用 |
 | 全局筛选 | 通过、真正全局否决、无有效改道、关闭/不适用四态；False 不直接等价全局否决；候选通过但 adaptive 回退独立记录 | 对照初始化缓存筛选详情、实际 base.execution_mode，不改门槛制造分支 |
 | 不侵入计时 | 统计在原计时区间外，无新增迁移热路径同步，缺字段不推断 | CPU 分支回归 + diff/调用位置审查；正式 r1 验证观测，不加 A/B 性能组 |
+
+`result.json` 新增 `parallel_groups`，记录逐 rank 的主机、CUDA device、UUID、实际 NCCL_DEBUG，以及 TP2/TP4 的组成员和读取到的大小。仅 world_size=16 启用本次断言；原 8 卡路径不新增 collective。
+
+每个 `switches[].plan_observation` 保存 `candidate_gate`、请求/实际计划、实际执行路径、adaptive 决策及 `default/candidate/adopted`。各计划提供全量接收表指纹、按接收 rank/来源/kind 聚合的 `receiver_rows`，以及可复算的流量、双向跨机字节和每卡收发峰值（并列 rank 全保留）。`weight/kv_prefix/kv_delta` 分开；同卡字节放在 `local_copy_bytes`，不计入 remote/cross-node。默认与候选流量均使用该切换的实际 prefix/delta 区间，属于相同序列范围下的逻辑计划比较，不是候选实际运行时间或网卡实测字节。
+
+`candidate_gate.evaluation=cached_plan_construction` 表示初始化缓存筛选。状态包括 `accepted/rejected_global/no_effective_reroute/disabled/not_applicable`；缺证据为 `unrecorded`。全局否决时 `candidate=null` 且原因为 `pre_global_gate_task_table_not_retained`，不会用恢复后的默认任务表代替。即便 adaptive 后来采用默认计划，缓存候选通过/否决的信息仍保留。收缩的候选状态以新增观测为准，旧顶层候选布尔值来自扩容缓存。
+
+T06 单独 CPU 检查（两机分别执行，不启动 GPU）：
+
+```bash
+"$PY" -B -X utf8 "$CODE/tests/unit_tests/resharding/test_weavetp_observations.py"
+```
+
+在 T07/T08 门禁满足并由既定 r1 正式 launch 产生结果后，可只读验收该结果；本命令不生成额外性能 launch：
+
+```bash
+"$PY" -B -X utf8 "$TESTS/test_observations.py" \
+  --result /data/${SERVER_USER}/lxh/weavetp/正式ROOT_OUT/weavetp/r1/result.json \
+  --output-dir "$RUN/t06_weavetp_r1"
+```
+
+入口验证组、WARN、四次方向、缓存身份、候选分类、有效区间、实际路径，以及接收侧聚合流量的算术一致性。它不能仅凭聚合记录独立证明实际网络发包或 GPU 写入；真实数值检查仍由正式 benchmark 执行。证据输出目录须独立于原 result 所在目录。缺 T06 字段的旧结果会失败，不补造观测。
 
 ## CPU 和只读服务器命令
 
@@ -83,7 +107,7 @@ RUN=/data/${SERVER_USER}/lxh/weavetp/acceptance/review_001
   --output-dir "$RUN/history"
 ```
 
-当前 `test_cpu.py` 仍预期退出 1：旧 T04 测试有两个写死旧地址与默认环境的断言，已与生产入口的显式部署变量冲突。按本次限定的提交范围未修改旧测试，也不将失败改为 skip/expectedFailure；应在后续授权范围内改为使用注入的地址和环境。历史复核只需在 SL3060 执行，调用当前源码，不解包旧 T03 自包含脚本覆盖新代码。
+T04 两个过时断言已修正，未改生产代码、未 skip/expectedFailure。当前 `test_cpu.py` 应执行六组共 111 项测试并退出 0；本地已全部通过，真实 Linux 入口仍待服务器回传。历史复核只需在 SL3060 执行，调用当前源码，不解包旧 T03 自包含脚本覆盖新代码。
 
 ```bash
 # 两机各执行一次；SL3061 用 node-rank=1 及实际 Python。
@@ -144,4 +168,4 @@ GPU 成功或失败均保存两端日志/退出码，并重新检查进程和显
 
 入口检查固定 9 个路径、36 次方向/索引、有效计时、真实权重加载标记、两端环境/源码/画像/退出/清理状态、完整完成标记、原日志存在，拒绝测试替身。用同一汇总器生成统计，再直接从原始 JSON 独立复算 27 格均值/SD 和 18 项提升，写出实际 wave/执行路径。
 
-即便上述检查全部通过，当前版本仍返回 **2 / blocked**，列出尚未实现的 T06 观测、跨 case 时间线和数值原始证据限制；逐切换 10 分钟自动限制已取消。NRMSE/cosine 成功值目前未写入 JSON；只能依据审阅后的生产校验代码和两端成功退出说明原检查通过，不能拿 validation_max_diff 充当 NRMSE。将来应接入真实字段后更新本入口，不预设虚构 schema，不删掉 pending 来宣称完成 T10。
+即便上述检查全部通过，当前版本仍返回 **2 / blocked**，列出跨 case 时间线和数值原始证据限制；逐切换 10 分钟自动限制已取消。T06 现已调用 `test_observations.verify` 验证真实字段，缺失即失败。NRMSE/cosine 成功值目前未写入 JSON；只能依据审阅后的生产校验代码和两端成功退出说明原检查通过，不能拿 validation_max_diff 充当 NRMSE。将来应接入真实字段后更新本入口，不删掉其余 pending 来宣称完成 T10。

@@ -29,6 +29,8 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from tools.resharding import weavetp_observations as observations
+
 from megatron.core.inference.contexts import StaticInferenceContext
 from megatron.core.models.gpt.gpt_layer_specs import (
     get_gpt_decoder_block_spec,
@@ -1406,6 +1408,13 @@ def run_live_benchmark() -> None:
     all_ranks = list(range(world_size))
     reshard_group = dist.new_group(ranks=all_ranks, backend="nccl")
     control_group = dist.new_group(ranks=all_ranks, backend="gloo")
+    parallel_groups = (
+        observations.observe_parallel_groups(
+            torch, dist, {src_tp: src_model.pg_collection, dst_tp: dst_model.pg_collection},
+            control_group,
+        )
+        if world_size == 16 else None
+    )
     source_reroute_enabled = bool(
         args.live_scheduler_mode != "baseline"
         and not args.live_disable_source_reroute
@@ -1687,6 +1696,7 @@ def run_live_benchmark() -> None:
     expansion_index = 0
     guard_phase_key = (initial_active_experts, initial_pressure_ranks)
     records = []
+    observation_inputs = []
     for switch_index in range(args.live_switches):
         active_experts = _active_experts_for_switch(args, switch_index)
         pressure_ranks = _pressure_ranks_for_switch(args, switch_index)
@@ -2108,6 +2118,15 @@ def run_live_benchmark() -> None:
             ),
         }
         records.append(record)
+        if parallel_groups is not None:
+            # Save existing immutable plan references only, after switch_wall_s.
+            # All metadata scans and communication happen after the final switch.
+            observation_inputs.append({
+                "record": record,
+                "default_plan": getattr(baseline_full_plan, "baseline_plan", baseline_full_plan),
+                "cached_plan": candidate_full_plan, "adopted_plan": full_plan,
+                "base_plan": base_plan, "delta_plan": delta_plan, "bundle": target_bundle,
+            })
         print_rank_0(
             f"Completed {direction}: waves={base_metrics['waves']} "
             f"overlap_steps={base_metrics['overlap_steps']} "
@@ -2139,6 +2158,23 @@ def run_live_benchmark() -> None:
         copy_service_by_rank, local_copy_service_stats, group=control_group
     )
 
+    if parallel_groups is not None:
+        local_observations = [
+            observations.local_switch_observation(
+                **inputs, rank=rank, restrict_sequence=restrict_plan_sequence,
+                enabled=source_reroute_enabled, allow_aware_shrink=args.live_allow_aware_shrink,
+                threshold=args.live_reroute_min_global_gain_pct,
+            )
+            for inputs in observation_inputs
+        ]
+        observations_by_rank = [None] * world_size
+        dist.all_gather_object(observations_by_rank, local_observations, group=control_group)
+        rank_hosts = {row["rank"]: row["hostname"] for row in parallel_groups}
+        for index, record in enumerate(records):
+            record["plan_observation"] = observations.merge_switch_observations(
+                [rows[index] for rows in observations_by_rank], rank_hosts,
+            )
+
     result = {
         "benchmark": "live-moe-tp2-tp4",
         "method_variant": args.live_method_variant,
@@ -2151,6 +2187,7 @@ def run_live_benchmark() -> None:
         "checkpoint_loaded": loaded_checkpoint_iteration is not None,
         "checkpoint_iteration": loaded_checkpoint_iteration,
         "world_size": world_size,
+        "parallel_groups": parallel_groups,
         "num_experts": args.num_experts,
         "expert_parallel_size": ep_size,
         "router_mode": args.live_router_mode,

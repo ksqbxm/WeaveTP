@@ -7,6 +7,7 @@ from pathlib import Path
 
 from common import ROOT, command, read, require, run, sha, write
 from test_history import independent_groups
+from test_observations import verify as verify_observations
 
 import compare_weavetp_16gpu as compare
 
@@ -59,6 +60,7 @@ def check(args, out, env):
                                  "path": (relative / "result.json").as_posix(), "sha256": digest})
         data = read(master_dir / "result.json")
         observations.append({"case": request["case"], "repeat": request["repeat"],
+                             "t06": verify_observations(data),
                              "waves": [s["base"]["waves"] for s in data["switches"]],
                              "actual_paths": [s["base"].get("execution_mode") for s in data["switches"]]})
     require(all(i == identities[0] for i in identities), "code/profile changed across the nine launches")
@@ -84,7 +86,6 @@ def check(args, out, env):
     write(out / "observations.json", observations)
     return {"launches": 9, "switches": 36, "receipt_and_statistics_checks": "passed",
             "pending": [
-                "T06 benchmark group/traffic/candidate-status schema is not implemented; bind assertions when it exists.",
                 "Cross-case launch-order timestamps are not recorded yet.",
                 "BF16 acceptance follows successful producer exits; raw NRMSE/cosine are not in result.json.",
             ]}
