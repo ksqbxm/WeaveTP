@@ -51,8 +51,9 @@ def verify(data):
         require(observed["candidate_unavailable_reason"] == expected_reason, "missing candidate-table reason")
         for name in ("default", "candidate", "adopted"):
             plan = observed[name]
-            if plan is None:
+            if name == "candidate" and plan is None:
                 continue
+            require(isinstance(plan, dict), f"missing {name} plan")
             digests = plan["rank_plan_sha256"]
             require(len(digests) == 16 and all(len(d) == 64 and all(c in "0123456789abcdef" for c in d)
                                              for d in digests), "missing plan fingerprints")

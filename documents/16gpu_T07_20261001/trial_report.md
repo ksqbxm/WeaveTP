@@ -1,6 +1,6 @@
 # T07：集成检查与最终 diff 审查
 
-日期：2026-10-01。**本地静态/CPU 集成验收完成，112/112 通过。新版本的双机复核命令已交付，尚未在服务器执行。** 本阶段未 SSH、安装、复制模型或启动 GPU。
+日期：2026-10-01。**本地静态/CPU 集成及三项审阅问题修复完成，115/115 通过。新版本双机复核尚未执行。** 本阶段未 SSH、安装、复制模型或启动 GPU。初次 112 项集成记录保留如下，后续修复与验证见 [T06–T07 审阅及修复报告](../16gpu_T06_T07_review_20261001/review.md)。
 
 ## 本次阅读与范围
 
@@ -59,7 +59,7 @@ T04 既有 9×2 实际 shell argv 测试增加方法、调度模式、四次切�
 - 三组正式配置、门槛、wave 上限、计时起止与原 BF16-relative 检查不变。INFO 仅在独立画像入口。
 - 缺失/无效画像、外部开关污染、标签清理、失败停止、只有 master 结果、缺节点回执、配置漂移、严格续跑等正反例通过；保留服务器实测边界。
 
-[source_manifest.json](./source_manifest.json) 固定 28 个本任务链的 Python/shell/fixture 文件及 SHA-256，包括复核脚本。hash 对应 Git 的 LF 部署字节；本地历史 JSON fixture 的 CRLF 不用于 Linux hash，提交前已逐项与 Git 暂存 blob 校验。清单不是全仓库身份的替代；服务器仍必须检出交付消息中的同一完整提交且 Git 工作树干净。新提交完成发布后再在两机执行本目录脚本，不使用旧 T06 提交冒充本次版本。
+[source_manifest.json](./source_manifest.json) 当前固定 29 个本任务链的 Python/shell/fixture 文件及 SHA-256，包括复核脚本和三个审阅回归的测试文件。hash 对应 Git 的 LF 部署字节；本地历史 JSON fixture 的 CRLF 不用于 Linux hash，提交前逐项与 Git 暂存 blob 校验。清单不是全仓库身份的替代；服务器仍必须检出交付消息中的同一完整提交且 Git 工作树干净。新提交完成发布后再在两机执行本目录脚本，不使用旧 T06 提交冒充本次版本。
 
 ## T03 门禁独立核对
 
@@ -67,9 +67,9 @@ T04 既有 9×2 实际 shell argv 测试增加方法、调度模式、四次切�
 
 ## 执行顺序与未验证项
 
-交付消息提供本地发布命令及完整 SHA。随后先在 SL3060 执行，再在 SL3061 执行同一服务器命令；每段均先 source env.sh，再显式覆盖本轮 WEAVETP_COMMIT，设置 CHECKPOINT，从 GitHub fetch 并检出固定 SHA，调用 `bash "$REPO/documents/16gpu_T07_20261001/run_t07.sh" "$WEAVETP_COMMIT"`。服务器命令未由助手执行，env.sh 中原持久化 SHA 尚未改变。
+交付消息提供已推送 main 的完整 SHA。先在 SL3060 执行，成功后在 SL3061 执行同一服务器命令；每段均先 source /data/ubuntu/lxh/weavetp/env.sh，设置 CHECKPOINT，从 GitHub fetch 并检出固定 SHA，将本机 WORK/env.sh 中唯一的 WEAVETP_COMMIT 赋值原位替换为新 SHA，重新 source 并核对，然后调用 `bash "$REPO/documents/16gpu_T07_20261001/run_t07.sh" "$WEAVETP_COMMIT"`。两机都必须更新文件，不能只覆盖当前进程变量。服务器命令未由助手执行，持久化更新由该命令完成。
 
-每机成功应有 `CPU_OK counts=28/26/18/11/4/25 total=112`、`T07_STATIC_CPU_OK GIT_CLEAN=1 GPU_STARTED=0` 和 `T07_RESULT ... exit=0`；SL3060 另有 `COMPARE_DRY_RUN_OK cases=9 nodes=2 WARN global_batch=8`。失败立即停止，保留本次独占 evidence 目录，不进入 T08。
+每机成功应有 `CPU_OK counts=28/26/18/11/4/25 total=112`、`REVIEW_OK tests=3 total_cpu_tests=115`、`T07_STATIC_CPU_OK GIT_CLEAN=1 GPU_STARTED=0` 和 `T07_RESULT ... exit=0`；SL3060 另有 `COMPARE_DRY_RUN_OK cases=9 nodes=2 WARN global_batch=8`。路径固定为 REPO/code/current，CODE_DIR 不一致时直接停止。失败立即停止，保留本次独占 evidence 目录，不进入 T08。
 
 未验证：新提交的 Linux 完整复核、真实双机 SSH/信号/退出回执及超时后清理、GPU 空闲/MPS 基线、NET/IB 实测、16×16 画像、实际 ProcessGroup、真实模型迁移与观测。T08/T09 未启动。现有最终结果检查器仍将跨 case 时间线和原始 NRMSE/cosine 数值缺项标为 blocked；本轮没有把它们改成通过或修改其验收要求。
 

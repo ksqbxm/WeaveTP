@@ -4,6 +4,8 @@
 
 2026-10-01 T07：本地集成共 112/112 通过；R1 新增真实 CPU 子进程回归并修复先杀监督进程导致退出回执丢失的清理顺序，T04 加强全链路参数断言。22 个 Python 编译、5 份 shell 语法及配置 dry-run 通过；Python imports 未改。用户已回传旧 T06 提交两机 111/111 通过，新提交的双机复核仍待执行。使用 [T07 复核入口](../../../../../documents/16gpu_T07_20261001/run_t07.sh)，每机先 source 已有 env.sh，检出交付的固定 SHA；详细证据见 [阶段报告](../../../../../documents/16gpu_T07_20261001/trial_report.md)。T08/GPU 未执行。
 
+2026-10-01 T06–T07 审阅修复：清理验收只使用两端 cleanup 的最终确认及空 remaining_pids，退出时 quiescent 快照仅记录；default/adopted 必须存在，candidate 按 gate 允许为空；T07_CODE 固定从 REPO/code/current 派生，CODE_DIR 不匹配即停止。两个原反例已通过，另加路径绑定回归，T07 入口合计运行 115 项 CPU 测试并核验 29 个源文件。最新本地测试全部通过；两机需检出新 SHA、原位更新各自 WORK/env.sh 的 WEAVETP_COMMIT 后复核，尚未执行服务器/GPU。详见 [修复报告与原始输出](../../../../../documents/16gpu_T06_T07_review_20261001/review.md)。
+
 ## 文件与证据分离
 
 ```text

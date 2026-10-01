@@ -1,0 +1,87 @@
+{
+  "reviewed_commit": "754feb187d8426cedb978bf073f6ed76de89fc1e",
+  "expected_counts": [
+    28,
+    26,
+    18,
+    11,
+    4,
+    25
+  ],
+  "commands": [
+    {
+      "command": [
+        "C:\\Users\\ksqbx\\miniforge3\\python.exe",
+        "-B",
+        "-X",
+        "utf8",
+        "E:\\课题组\\WeaveTP_代码与实验资料_20260920\\code\\current\\tests\\unit_tests\\resharding\\test_summarize_weavetp_formal.py"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": "test_16gpu_scaling_works_but_absolute_table2_check_is_refused (__main__.FormalSummaryTests.test_16gpu_scaling_works_but_absolute_table2_check_is_refused) ... ok\ntest_all_scopes_average_switches_then_launches_with_sample_sd (__main__.FormalSummaryTests.test_all_scopes_average_switches_then_launches_with_sample_sd) ... ok\ntest_cli_success_writes_both_reports_and_leaves_inputs_unchanged (__main__.FormalSummaryTests.test_cli_success_writes_both_reports_and_leaves_inputs_unchanged) ... ok\ntest_duplicate_contents_under_distinct_paths_are_rejected (__main__.FormalSummaryTests.test_duplicate_contents_under_distinct_paths_are_rejected) ... ok\ntest_duplicate_identity_and_path_are_rejected (__main__.FormalSummaryTests.test_duplicate_identity_and_path_are_rejected) ... ok\ntest_existing_output_cannot_be_overwritten (__main__.FormalSummaryTests.test_existing_output_cannot_be_overwritten) ... ok\ntest_improvement_is_ratio_of_launch_means_with_both_signs (__main__.FormalSummaryTests.test_improvement_is_ratio_of_launch_means_with_both_signs) ... ok\ntest_incomplete_and_out_of_order_switches_are_rejected (__main__.FormalSummaryTests.test_incomplete_and_out_of_order_switches_are_rejected) ... ok\ntest_invalid_inputs_exit_two_without_output (__main__.FormalSummaryTests.test_invalid_inputs_exit_two_without_output) ... ok\ntest_missing_and_invalid_time_fields_are_rejected (__main__.FormalSummaryTests.test_missing_and_invalid_time_fields_are_rejected) ... ok\ntest_missing_file_is_rejected (__main__.FormalSummaryTests.test_missing_file_is_rejected) ... ok\ntest_missing_launch_is_rejected (__main__.FormalSummaryTests.test_missing_launch_is_rejected) ... ok\ntest_missing_transport_cannot_be_reconstructed_from_stage_or_wall (__main__.FormalSummaryTests.test_missing_transport_cannot_be_reconstructed_from_stage_or_wall) ... ok\ntest_mixed_batch_paths_are_rejected (__main__.FormalSummaryTests.test_mixed_batch_paths_are_rejected) ... ok\ntest_mixed_world_size_and_fixed_config_drift_are_rejected (__main__.FormalSummaryTests.test_mixed_world_size_and_fixed_config_drift_are_rejected) ... ok\ntest_non_object_result_and_manifest_are_rejected (__main__.FormalSummaryTests.test_non_object_result_and_manifest_are_rejected) ... ok\ntest_one_case_cannot_mix_two_directories (__main__.FormalSummaryTests.test_one_case_cannot_mix_two_directories) ... ok\ntest_optional_recorded_config_must_be_consistent_within_case (__main__.FormalSummaryTests.test_optional_recorded_config_must_be_consistent_within_case) ... ok\ntest_output_inside_historical_input_batch_is_rejected (__main__.FormalSummaryTests.test_output_inside_historical_input_batch_is_rejected) ... ok\ntest_percentage_labels_compare_displayed_tenths (__main__.FormalSummaryTests.test_percentage_labels_compare_displayed_tenths) ... ok\ntest_quoted_history_stays_quoted_and_missing_rows_use_rounded_table (__main__.FormalSummaryTests.test_quoted_history_stays_quoted_and_missing_rows_use_rounded_table) ... ok\ntest_synthetic_paper_fixture_passes_all_54_checks (__main__.FormalSummaryTests.test_synthetic_paper_fixture_passes_all_54_checks) ... ok\ntest_table2_failure_exits_one_and_keeps_diagnostic_evidence (__main__.FormalSummaryTests.test_table2_failure_exits_one_and_keeps_diagnostic_evidence) ... ok\ntest_table2_tolerance_includes_rounding_and_only_1ns_slack (__main__.FormalSummaryTests.test_table2_tolerance_includes_rounding_and_only_1ns_slack) ... ok\ntest_transport_sums_per_wave_rank_maxima_not_rank_totals_or_stages (__main__.FormalSummaryTests.test_transport_sums_per_wave_rank_maxima_not_rank_totals_or_stages) ... ok\ntest_unknown_observations_and_actual_path_are_preserved_without_inference (__main__.FormalSummaryTests.test_unknown_observations_and_actual_path_are_preserved_without_inference) ... ok\ntest_wave_count_and_empty_waves_are_rejected (__main__.FormalSummaryTests.test_wave_count_and_empty_waves_are_rejected) ... ok\ntest_wrong_hash_is_rejected (__main__.FormalSummaryTests.test_wrong_hash_is_rejected) ... ok\n\n----------------------------------------------------------------------\nRan 28 tests in 2.661s\n\nOK\n"
+    },
+    {
+      "command": [
+        "C:\\Users\\ksqbx\\miniforge3\\python.exe",
+        "-B",
+        "-X",
+        "utf8",
+        "E:\\课题组\\WeaveTP_代码与实验资料_20260920\\code\\current\\tests\\unit_tests\\resharding\\test_compare_weavetp_16gpu.py"
+      ],
+      "exit_code": 0,
+      "stdout": "DONE batch/fixed/r1\nDONE batch/fixed/r1\nSTART batch/fixed/r1\nDONE batch/fixed/r1\nSKIP verified batch/fixed/r1\n",
+      "stderr": "test_both_successful_exits_do_not_accept_incomplete_result (__main__.CompareTests.test_both_successful_exits_do_not_accept_incomplete_result) ... ok\ntest_cleanup_preserves_unrelated_processes_and_records_memory (__main__.CompareTests.test_cleanup_preserves_unrelated_processes_and_records_memory) ... ok\ntest_cleanup_selection_requires_exact_tag_and_worker (__main__.CompareTests.test_cleanup_selection_requires_exact_tag_and_worker) ... ok\ntest_corrupted_result_and_changed_code_block_resume (__main__.CompareTests.test_corrupted_result_and_changed_code_block_resume) ... ok\ntest_dry_run_performs_no_rpc_and_no_output_writes (__main__.CompareTests.test_dry_run_performs_no_rpc_and_no_output_writes) ... ok\ntest_environment_does_not_inherit_experimental_flags (__main__.CompareTests.test_environment_does_not_inherit_experimental_flags) ... ok\ntest_exit_configuration_drift_cannot_complete (__main__.CompareTests.test_exit_configuration_drift_cannot_complete) ... ok\ntest_formal_shell_dispatch_dry_run_and_legacy_argument_rejection (__main__.CompareTests.test_formal_shell_dispatch_dry_run_and_legacy_argument_rejection) ... ok\ntest_gpu_occupancy_refuses_without_waiting (__main__.CompareTests.test_gpu_occupancy_refuses_without_waiting) ... ok\ntest_invalid_results_never_complete (__main__.CompareTests.test_invalid_results_never_complete) ... ok\ntest_launcher_and_wrapper_generate_real_argv_without_torch (__main__.CompareTests.test_launcher_and_wrapper_generate_real_argv_without_torch) ... ok\ntest_master_result_alone_never_skips_or_launches (__main__.CompareTests.test_master_result_alone_never_skips_or_launches) ... ok\ntest_mismatched_code_stops_before_either_gpu_launch (__main__.CompareTests.test_mismatched_code_stops_before_either_gpu_launch) ... ok\ntest_mismatched_config_stops_before_either_gpu_launch (__main__.CompareTests.test_mismatched_config_stops_before_either_gpu_launch) ... ok\ntest_missing_node1_exit_blocks_resume (__main__.CompareTests.test_missing_node1_exit_blocks_resume) ... ok\ntest_nine_rotating_cases_and_fixed_settings (__main__.CompareTests.test_nine_rotating_cases_and_fixed_settings) ... ok\ntest_node1_cannot_drive_compare (__main__.CompareTests.test_node1_cannot_drive_compare) ... ok\ntest_node1_failure_stops_peer_and_retains_both_exit_codes (__main__.CompareTests.test_node1_failure_stops_peer_and_retains_both_exit_codes) ... ok\ntest_node_prepare_cannot_be_reused_after_configuration_change (__main__.CompareTests.test_node_prepare_cannot_be_reused_after_configuration_change) ... ok\ntest_node_receipt_persists_exit_and_effective_environment (__main__.CompareTests.test_node_receipt_persists_exit_and_effective_environment) ... ok\ntest_node_timeout_records_failure_and_cleans_only_tagged_task (__main__.CompareTests.test_node_timeout_records_failure_and_cleans_only_tagged_task) ... ok\ntest_peer_stop_before_delayed_launch_cannot_start_gpu (__main__.CompareTests.test_peer_stop_before_delayed_launch_cannot_start_gpu) ... ok\ntest_port_in_use_blocks_prepare_without_starting_process (__main__.CompareTests.test_port_in_use_blocks_prepare_without_starting_process) ... ok\ntest_queue_stops_after_first_failed_case (__main__.CompareTests.test_queue_stops_after_first_failed_case) ... ok\ntest_success_and_verified_resume (__main__.CompareTests.test_success_and_verified_resume) ... ok\ntest_two_node_commands_share_tag_and_request (__main__.CompareTests.test_two_node_commands_share_tag_and_request) ... ok\n\n----------------------------------------------------------------------\nRan 26 tests in 18.939s\n\nOK\n"
+    },
+    {
+      "command": [
+        "C:\\Users\\ksqbx\\miniforge3\\python.exe",
+        "-B",
+        "-X",
+        "utf8",
+        "E:\\课题组\\WeaveTP_代码与实验资料_20260920\\code\\current\\tests\\unit_tests\\resharding\\test_profile_weavetp_16gpu.py"
+      ],
+      "exit_code": 0,
+      "stdout": "{\"profile\": \"E:\\\\\\u8bfe\\u9898\\u7ec4\\\\WeaveTP_\\u4ee3\\u7801\\u4e0e\\u5b9e\\u9a8c\\u8d44\\u6599_20260920\\\\documents\\\\16gpu_T06_T07_review_20261001\\\\t05_fixture_ifkt7wkw\\\\profile.json\", \"sha256\": \"aeaa8b64c657bd0a96ed218c25d3d7cb2693d67913e6db626d6670e878f64ded\"}\n",
+      "stderr": "test_all_240_directions_one_warmup_three_passes_and_no_diagonal_probe (__main__.ProfileTests.test_all_240_directions_one_warmup_three_passes_and_no_diagonal_probe) ... ok\ntest_bad_launch_arguments_fail_in_dry_run (__main__.ProfileTests.test_bad_launch_arguments_fail_in_dry_run) ... ok\ntest_cli_validation_without_importing_torch (__main__.ProfileTests.test_cli_validation_without_importing_torch) ... ok\ntest_compare_checks_profile_before_git_identity (__main__.ProfileTests.test_compare_checks_profile_before_git_identity) ... ok\ntest_decimal_gbps_uses_total_transferred_bytes_and_median (__main__.ProfileTests.test_decimal_gbps_uses_total_transferred_bytes_and_median) ... ok\ntest_default_matrix_missing_samples_and_duplicate_pairs_fail (__main__.ProfileTests.test_default_matrix_missing_samples_and_duplicate_pairs_fail) ... ok\ntest_formal_launcher_validates_before_torchrun (__main__.ProfileTests.test_formal_launcher_validates_before_torchrun) ... ok\ntest_missing_file_and_hash_mismatch_fail (__main__.ProfileTests.test_missing_file_and_hash_mismatch_fail) ... ok\ntest_network_gate_distinguishes_bootstrap_from_data_transport (__main__.ProfileTests.test_network_gate_distinguishes_bootstrap_from_data_transport) ... ok\ntest_nonpositive_nonfinite_or_nonnumeric_bandwidth_fails (__main__.ProfileTests.test_nonpositive_nonfinite_or_nonnumeric_bandwidth_fails) ... ok\ntest_pair_hash_mismatch_prevents_formal_launch (__main__.ProfileTests.test_pair_hash_mismatch_prevents_formal_launch) ... ok\ntest_profiling_dry_run_both_nodes_and_info_isolation (__main__.ProfileTests.test_profiling_dry_run_both_nodes_and_info_isolation) ... ok\ntest_rank_mapping_uuid_and_log_provenance (__main__.ProfileTests.test_rank_mapping_uuid_and_log_provenance) ... ok\ntest_real_profiler_control_flow_with_mock_torch (__main__.ProfileTests.test_real_profiler_control_flow_with_mock_torch) ... ok\ntest_socket_fallback_stops_before_pair_sweep (__main__.ProfileTests.test_socket_fallback_stops_before_pair_sweep) ... ok\ntest_source_unit_parameters_and_diagonal_are_required (__main__.ProfileTests.test_source_unit_parameters_and_diagonal_are_required) ... ok\ntest_valid_profile_and_matching_hash (__main__.ProfileTests.test_valid_profile_and_matching_hash) ... ok\ntest_wrong_dimensions_and_world_size (__main__.ProfileTests.test_wrong_dimensions_and_world_size) ... ok\n\n----------------------------------------------------------------------\nRan 18 tests in 5.785s\n\nOK\n"
+    },
+    {
+      "command": [
+        "C:\\Users\\ksqbx\\miniforge3\\python.exe",
+        "-B",
+        "-X",
+        "utf8",
+        "E:\\课题组\\WeaveTP_代码与实验资料_20260920\\code\\current\\tests\\unit_tests\\resharding\\test_server_acceptance.py"
+      ],
+      "exit_code": 0,
+      "stdout": "DONE batch/fixed/r1\nDONE batch/fixed/r1\nDONE batch/fixed/r1\n",
+      "stderr": "test_actual_group_memberships_for_tp2_and_tp4 (__main__.ServerAcceptanceTests.test_actual_group_memberships_for_tp2_and_tp4) ... ok\ntest_cpu_worker_uses_synthetic_output_and_no_model (__main__.ServerAcceptanceTests.test_cpu_worker_uses_synthetic_output_and_no_model) ... ok\ntest_formal_receipts_reject_config_drift_and_failed_peer (__main__.ServerAcceptanceTests.test_formal_receipts_reject_config_drift_and_failed_peer) ... ok\ntest_formal_receipts_require_both_hosts_and_bound_completion (__main__.ServerAcceptanceTests.test_formal_receipts_require_both_hosts_and_bound_completion) ... ok\ntest_group_size_asymmetry_placement_and_shared_gpu_fail (__main__.ServerAcceptanceTests.test_group_size_asymmetry_placement_and_shared_gpu_fail) ... ok\ntest_independent_statistics_use_launch_repeats_and_wave_sum (__main__.ServerAcceptanceTests.test_independent_statistics_use_launch_repeats_and_wave_sum) ... ok\ntest_profile_checks_real_local_logs_and_live_gpu_uuid (__main__.ServerAcceptanceTests.test_profile_checks_real_local_logs_and_live_gpu_uuid) ... ok\ntest_profile_hash_mismatch_and_late_socket_fallback_are_rejected (__main__.ServerAcceptanceTests.test_profile_hash_mismatch_and_late_socket_fallback_are_rejected) ... ok\ntest_schema_valid_profile_cannot_replace_missing_original_logs (__main__.ServerAcceptanceTests.test_schema_valid_profile_cannot_replace_missing_original_logs) ... ok\ntest_synthetic_result_is_never_accepted_as_formal_data (__main__.ServerAcceptanceTests.test_synthetic_result_is_never_accepted_as_formal_data) ... ok\ntest_tp_ep_or_etp_crossing_nodes_is_rejected (__main__.ServerAcceptanceTests.test_tp_ep_or_etp_crossing_nodes_is_rejected) ... ok\n\n----------------------------------------------------------------------\nRan 11 tests in 2.200s\n\nOK\n"
+    },
+    {
+      "command": [
+        "C:\\Users\\ksqbx\\miniforge3\\python.exe",
+        "-B",
+        "-X",
+        "utf8",
+        "E:\\课题组\\WeaveTP_代码与实验资料_20260920\\code\\current\\tests\\unit_tests\\resharding\\test_weavetp_review_findings.py"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": "test_failed_cleanup_terminates_active_run_command_and_marks_unknown (__main__.FailureLifecycleTests.test_failed_cleanup_terminates_active_run_command_and_marks_unknown) ... ok\ntest_remote_command_timeout_is_reported (__main__.FailureLifecycleTests.test_remote_command_timeout_is_reported) ... ok\ntest_successful_cleanup_preserves_runner_exit_receipt (__main__.FailureLifecycleTests.test_successful_cleanup_preserves_runner_exit_receipt) ... ok\ntest_unreachable_cleanup_does_not_wait_for_other_run_rpc (__main__.FailureLifecycleTests.test_unreachable_cleanup_does_not_wait_for_other_run_rpc) ... ok\n\n----------------------------------------------------------------------\nRan 4 tests in 0.457s\n\nOK\n"
+    },
+    {
+      "command": [
+        "C:\\Users\\ksqbx\\miniforge3\\python.exe",
+        "-B",
+        "-X",
+        "utf8",
+        "E:\\课题组\\WeaveTP_代码与实验资料_20260920\\code\\current\\tests\\unit_tests\\resharding\\test_weavetp_observations.py"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ".........................\n----------------------------------------------------------------------\nRan 25 tests in 0.247s\n\nOK\n"
+    }
+  ],
+  "server_connected": false,
+  "gpu_started": false
+}

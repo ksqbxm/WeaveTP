@@ -1,0 +1,26 @@
+test_candidate_adoption_still_requires_default_traffic (__main__.ReviewRegressions.test_candidate_adoption_still_requires_default_traffic) ... FAIL
+test_cleanup_confirmation_and_exit_receipt_agree (__main__.ReviewRegressions.test_cleanup_confirmation_and_exit_receipt_agree) ... FAIL
+
+======================================================================
+FAIL: test_candidate_adoption_still_requires_default_traffic (__main__.ReviewRegressions.test_candidate_adoption_still_requires_default_traffic)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "E:\课题组\WeaveTP_代码与实验资料_20260920\documents\16gpu_T06_T07_review_20261001\reproduce_findings.py", line 91, in test_candidate_adoption_still_requires_default_traffic
+    with self.assertRaises(ValueError, msg="missing mandatory default-plan traffic was accepted"):
+         ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: ValueError not raised : missing mandatory default-plan traffic was accepted
+
+======================================================================
+FAIL: test_cleanup_confirmation_and_exit_receipt_agree (__main__.ReviewRegressions.test_cleanup_confirmation_and_exit_receipt_agree)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "E:\课题组\WeaveTP_代码与实验资料_20260920\documents\16gpu_T06_T07_review_20261001\reproduce_findings.py", line 75, in test_cleanup_confirmation_and_exit_receipt_agree
+    self.assertTrue(receipt["quiescent"], "receipt was finalized before worker cleanup completed")
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: False is not true : receipt was finalized before worker cleanup completed
+
+----------------------------------------------------------------------
+Ran 2 tests in 0.101s
+
+FAILED (failures=2)
+{"cleanup_confirmed": true, "workers_remaining": [], "persisted_exit_quiescent": false}

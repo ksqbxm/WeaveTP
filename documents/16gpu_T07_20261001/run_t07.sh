@@ -7,7 +7,11 @@ EXPECTED_COMMIT=${1:?Pass the published full T07 commit SHA}
 : "${CHECKPOINT:?Set the verified checkpoint path}"
 T07_REPO=$(git -C "$(dirname "${BASH_SOURCE[0]}")" rev-parse --show-toplevel)
 test "$T07_REPO" = "$REPO"
-T07_CODE="$CODE_DIR"
+T07_CODE="$REPO/code/current"
+if [[ "$CODE_DIR" != "$T07_CODE" ]]; then
+    echo 'STOP: CODE_DIR must equal $REPO/code/current' >&2
+    exit 1
+fi
 T07_WORK="$WORK"
 case "$(hostname -s | tr '[:upper:]' '[:lower:]')" in
     sl3060) test "${NODE_RANK:?}" = 0
@@ -78,6 +82,8 @@ for name, count in zip(result['details']['suites'], expected, strict=True):
     assert log['exit_code'] == 0 and re.search(rf'Ran {count} tests\b', log['stderr']), name
 print('CPU_OK counts=28/26/18/11/4/25 total=112')
 PY
+"$PYTHON" -B -X utf8 "$T07_REPO/documents/16gpu_T06_T07_review_20261001/reproduce_findings.py"
+echo 'REVIEW_OK tests=3 total_cpu_tests=115'
 # These paths are labels only: neither dry-run creates its output/profile path.
 OUT_DIR="$T07_RUN/profile_not_executed" bash "$T07_CODE/tools/resharding/run_weavetp_16gpu_profile.sh" \
     --dry-run > "$T07_RUN/profile_dry_run.txt"

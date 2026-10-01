@@ -25,7 +25,7 @@
     },
     {
       "path": "code/current/tests/server_tests/weavetp_16gpu/test_controller.py",
-      "sha256": "c82c52c4f834302130bc8b4986b1c255713833bf5f1c990ef3fd699934d64a5d"
+      "sha256": "0724d6b0eead8422bc02397ea3e2f2c99bb53b5fc2e2ff9b77c5f818dd41aba8"
     },
     {
       "path": "code/current/tests/server_tests/weavetp_16gpu/test_cpu.py",
@@ -45,7 +45,7 @@
     },
     {
       "path": "code/current/tests/server_tests/weavetp_16gpu/test_observations.py",
-      "sha256": "815df832398cd95c605d82d2b98c9a3374d839bbe2b93470768b038bc428fd9f"
+      "sha256": "93e3ee1c58215419a608c319b71c5d53209366d02698b0fc46360d7a8ff40e76"
     },
     {
       "path": "code/current/tests/server_tests/weavetp_16gpu/test_profile.py",
@@ -112,8 +112,12 @@
       "sha256": "68473f1d625c013ab9eb4033a8b90504a316926e5cd9e2997af53f6cec06daa3"
     },
     {
+      "path": "documents/16gpu_T06_T07_review_20261001/reproduce_findings.py",
+      "sha256": "6044caf2c657025f78992fbff57ac963f531ecb774eae2b2f0acb3d5db07953c"
+    },
+    {
       "path": "documents/16gpu_T07_20261001/run_t07.sh",
-      "sha256": "eccdcd2dc3f334fe6f470ee681692521c2049e8e25878fdb53313ac891d7f73c"
+      "sha256": "208ccc59cd0bd58345eb9451f95f3a64c27959a72400febc7648e5d78e689072"
     }
   ],
   "hash_scope": "Linux deployment bytes (Git text blobs with LF); local Windows CRLF is not deployment content"
