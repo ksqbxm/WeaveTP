@@ -13,6 +13,7 @@ import time
 from pathlib import Path
 
 ENV_FILE = '/data/ubuntu/lxh/weavetp/env.sh'
+MIN_FREE_BYTES = 5_000_000_000
 SHARED_KEYS = ('WORK', 'REPO', 'CODE_DIR', 'NODE1_CODE_DIR', 'MASTER_ADDR', 'MASTER_PORT',
                'NODE0_PYTHON', 'NODE1_PYTHON', 'CHECKPOINT', 'WEAVETP_COMMIT')
 CACHE_KEYS = ('TMPDIR', 'TMP', 'TEMP', 'XDG_CACHE_HOME', 'CUDA_CACHE_PATH', 'TORCH_HOME',
@@ -187,7 +188,7 @@ def node(phase, rank, run, expected_hash=''):
                 'WEAVETP_COMMIT must be a full lowercase Git SHA')
         require(compare.git_identity(env['CODE_DIR']) == commit,
                 'wrong commit or dirty Git checkout')
-        require(shutil.disk_usage('/data').free >= 20_000_000_000, '/data needs >=20 GB; STOP')
+        require(shutil.disk_usage('/data').free >= MIN_FREE_BYTES, '/data needs >=5 GB; STOP')
     tests = Path(env['CODE_DIR']) / 'tests/server_tests/weavetp_16gpu'
     if phase == 'prepare':
         run.mkdir(parents=True)
@@ -209,12 +210,12 @@ def node(phase, rank, run, expected_hash=''):
             with socket.socket() as probe:
                 probe.bind((env['MASTER_ADDR'], int(env['MASTER_PORT'])))
         subprocess.run([sys.executable, '-B', str(tests / 'test_node.py'), '--node-rank', str(rank),
-                        '--expected-gid', ips[0], '--min-free-gib', str(20_000_000_000 / (1 << 30)),
+                        '--expected-gid', ips[0], '--min-free-gib', str(MIN_FREE_BYTES / (1 << 30)),
                         '--mps-owner', env.get('MPS_OWNER', ''), '--checkpoint', env['CHECKPOINT'],
                         '--require-idle', '--output-dir', str(run / 'preflight')],
                        env=env, check=True, timeout=150)
-        report(env, rank, run, f'deployment passed; commit={commit}; >=20 GB; GPUs idle')
-        print(f'T08_PREFLIGHT_OK node={rank} >=20GB GPUs=8 idle', flush=True)
+        report(env, rank, run, f'deployment passed; commit={commit}; >=5 GB; GPUs idle')
+        print(f'T08_PREFLIGHT_OK node={rank} >=5GB GPUs=8 idle', flush=True)
     elif phase == 'run':
         run_profile(run, rank, env, compare)
     elif phase == 'verify':

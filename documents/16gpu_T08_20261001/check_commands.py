@@ -179,7 +179,7 @@ class NodeTests(unittest.TestCase):
         with mock.patch.dict(os.environ, MASTER_PORT='29999', CODE_DIR='changed'), \
                 mock.patch.object(t08.socket, 'gethostname', return_value='SL3060'), \
                 mock.patch.object(Path, 'is_relative_to', return_value=True), \
-                mock.patch.object(t08.shutil, 'disk_usage', return_value=SimpleNamespace(free=20_000_000_000)), \
+                mock.patch.object(t08.shutil, 'disk_usage', return_value=SimpleNamespace(free=t08.MIN_FREE_BYTES)), \
                 mock.patch.dict(sys.modules, compare_weavetp_16gpu=self.compare, profile_weavetp_16gpu=mock.Mock()), \
                 mock.patch.object(t08, 'run_profile') as launch:
             t08.node('run', 0, self.run)
@@ -187,9 +187,9 @@ class NodeTests(unittest.TestCase):
         self.assertEqual(launch.call_args.args[2]['CODE_DIR'], self.env['CODE_DIR'])
 
     def test_low_disk_and_dirty_commit_prevent_launch(self):
-        for free, commit, pin in ((19_999_999_999, COMMIT, COMMIT),
-                                  (20_000_000_000, 'b' * 40, COMMIT),
-                                  (20_000_000_000, 'short', 'short')):
+        for free, commit, pin in ((t08.MIN_FREE_BYTES - 1, COMMIT, COMMIT),
+                                  (t08.MIN_FREE_BYTES, 'b' * 40, COMMIT),
+                                  (t08.MIN_FREE_BYTES, 'short', 'short')):
             self.env['WEAVETP_COMMIT'] = pin
             (self.run / 'deployment.json').write_text(json.dumps({'node_rank': 0, 'env': self.env}))
             with self.subTest(free=free, commit=commit), \
@@ -199,9 +199,31 @@ class NodeTests(unittest.TestCase):
                     mock.patch.dict(sys.modules, compare_weavetp_16gpu=self.compare, profile_weavetp_16gpu=mock.Mock()), \
                     mock.patch.object(t08, 'run_profile') as launch:
                 self.compare.git_identity.return_value = commit
-                with self.assertRaises(ValueError):
+                error = ('needs >=5 GB' if free < t08.MIN_FREE_BYTES else
+                         'full lowercase Git SHA' if pin == 'short' else 'wrong commit')
+                with self.assertRaisesRegex(ValueError, error):
                     t08.node('run', 0, self.run)
                 launch.assert_not_called()
+
+    def test_five_gb_preflight_passes_exact_bytes_to_node_checker(self):
+        addresses = json.dumps([{'addr_info': [{'local': '192.0.2.10',
+                                                'family': 'inet', 'scope': 'global'}]}])
+        self.env['MASTER_ADDR'] = '192.0.2.10'
+        t08.save(self.run / 'deployment.json', {'node_rank': 0, 'env': self.env})
+        output = io.StringIO()
+        with mock.patch.object(t08.socket, 'gethostname', return_value='SL3060'), \
+                mock.patch.object(Path, 'is_relative_to', return_value=True), \
+                mock.patch.object(t08.shutil, 'disk_usage', return_value=SimpleNamespace(free=t08.MIN_FREE_BYTES)), \
+                mock.patch.dict(sys.modules, compare_weavetp_16gpu=self.compare, profile_weavetp_16gpu=mock.Mock()), \
+                mock.patch.object(t08.subprocess, 'check_output', return_value=addresses), \
+                mock.patch.object(t08.subprocess, 'run') as check, \
+                mock.patch.object(t08.socket, 'socket'), \
+                contextlib.redirect_stdout(output):
+            t08.node('preflight', 0, self.run)
+        command = check.call_args.args[0]
+        self.assertEqual(command[command.index('--min-free-gib') + 1],
+                         str(t08.MIN_FREE_BYTES / (1 << 30)))
+        self.assertIn('T08_PREFLIGHT_OK node=0 >=5GB GPUs=8 idle', output.getvalue())
 
     def test_busy_gpu_prevents_launch(self):
         self.compare.check_idle.side_effect = ValueError('GPU occupied')
