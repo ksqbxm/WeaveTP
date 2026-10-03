@@ -1,0 +1,60 @@
+{
+  "checks": 54,
+  "pass": true,
+  "launches": [
+    {
+      "case": "directional",
+      "repeat": 1,
+      "bytes": 509176,
+      "switch_sum_s": 33.5632904227823
+    },
+    {
+      "case": "directional",
+      "repeat": 2,
+      "bytes": 509182,
+      "switch_sum_s": 33.40813363576308
+    },
+    {
+      "case": "directional",
+      "repeat": 3,
+      "bytes": 509164,
+      "switch_sum_s": 33.99724398367107
+    },
+    {
+      "case": "fixed",
+      "repeat": 1,
+      "bytes": 576222,
+      "switch_sum_s": 37.686246348079294
+    },
+    {
+      "case": "fixed",
+      "repeat": 2,
+      "bytes": 576233,
+      "switch_sum_s": 38.3357768189162
+    },
+    {
+      "case": "fixed",
+      "repeat": 3,
+      "bytes": 576215,
+      "switch_sum_s": 39.6962866159156
+    },
+    {
+      "case": "weavetp",
+      "repeat": 1,
+      "bytes": 525366,
+      "switch_sum_s": 32.78466853220016
+    },
+    {
+      "case": "weavetp",
+      "repeat": 2,
+      "bytes": 525344,
+      "switch_sum_s": 34.26004242897034
+    },
+    {
+      "case": "weavetp",
+      "repeat": 3,
+      "bytes": 525395,
+      "switch_sum_s": 33.01789805665612
+    }
+  ]
+}

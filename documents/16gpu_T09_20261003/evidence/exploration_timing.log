@@ -1,0 +1,11 @@
+test_effective_prefix_delta_preserve_local_task_wave_slot (__main__.TimingTests.test_effective_prefix_delta_preserve_local_task_wave_slot) ... ok
+test_extra_intra_traffic_is_timed_and_units_are_bits (__main__.TimingTests.test_extra_intra_traffic_is_timed_and_units_are_bits) ... ok
+test_local_copy_diagonal_not_scaled_and_services_take_max (__main__.TimingTests.test_local_copy_diagonal_not_scaled_and_services_take_max) ... ok
+test_same_link_tasks_add_before_max (__main__.TimingTests.test_same_link_tasks_add_before_max) ... ok
+test_shared_nic_aggregates_pairs_but_is_full_duplex (__main__.TimingTests.test_shared_nic_aggregates_pairs_but_is_full_duplex) ... ok
+test_three_parameter_fit_and_twenty_percent_failure (__main__.TimingTests.test_three_parameter_fit_and_twenty_percent_failure) ... ok
+
+----------------------------------------------------------------------
+Ran 6 tests in 0.108s
+
+OK

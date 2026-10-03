@@ -2,6 +2,8 @@
 
 状态：方案已确认，本文档不代表代码、部署、历史复算或 GPU 实验已经完成。
 
+2026-10-03 用户修订：16 卡 WeaveTP 正式配置采用 W2（ALLOW_AWARE_SHRINK=1、REROUTE_MIN_GAIN_PCT=0），Fixed/Directional 不变；不做 T08.5 冒烟。先 ONLY=weavetp_r1，成功后同 ROOT_OUT 续跑其余八次。操作与风险见 [T09 准备报告](./16gpu_T09_20261003/trial_report.md)。CPU 核对发现缩容单 rank wave 负载超过 8 卡，用户已允许如实报告后提交；若 weavetp_r1 OOM/超时，停止，另批次将三种方法缩容上限统一改为 2048、扩容不变后重跑，不自动改参重试。
+
 配套文档：[分步任务](./WeaveTP_16卡正式实验_分步任务.md)。项目规则：[CODEX.md](../CODEX.md)；涉及实验源码时还须阅读 [code/current/AGENTS.md](../code/current/AGENTS.md)。论文依据：[WeaveTP PDF](../WeaveTP(1).pdf)。
 
 > 每次开始、继续或修改任何分步 task 的代码前，必须重新完整阅读本总计划和项目根目录的 CODEX.md，不能仅依赖聊天记录或上次阅读记忆。涉及 code/current 时还必须阅读适用的 AGENTS.md。先确认本任务范围和验收条件，再修改代码；不得擅自扩大实验范围或调整固定配置。
@@ -14,7 +16,7 @@
 
 - 不重跑任何 8 卡 GPU 实验；历史 JSON 复算是 CPU 数据处理，不是重跑实验。
 - 不比较 8 卡与 16 卡绝对秒数，不增加固定总工作量对照。
-- 不跑附录五方法代理、图 3b、aware shrink、门槛为零、就近优先、TCP 等额外配置。
+- 不跑附录五方法代理、图 3b、就近优先、TCP 等额外配置；aware shrink 与局部门槛为零仅按已批准的 W2 使用。
 - 不修改选源、执行、KV 算法，不调整门槛来取得正收益。
 - 只允许多机启动、网卡环境、global batch、指定 wave 上限、16×16 画像、并行组检查、计划统计和结果汇总等适配。
 
@@ -41,7 +43,7 @@
 | Directional | baseline | baseline | 1 | 0 | 8192 | 4096 |
 | WeaveTP | moetp++-hybrid | residual | 0 | 1 | 8192 | 4096 |
 
-WeaveTP 固定 ADAPTIVE_RESIDUAL_MAX_WAVES=4。三组共用：
+WeaveTP 固定 ADAPTIVE_RESIDUAL_MAX_WAVES=4，ALLOW_AWARE_SHRINK=1、REROUTE_MIN_GAIN_PCT=0；Fixed/Directional 为 0、10。其余三组共用：
 
 ```bash
 NPROC_PER_NODE=8
@@ -61,13 +63,12 @@ PACK_TARGET_BYTES=0
 PACK_MAX_ITEM_BYTES=0
 ONLINE_REPLAN=0
 ONLINE_MIGRATION_FIRST_GUARD=0
-ALLOW_AWARE_SHRINK=0
 NCCL_DEBUG=WARN
 ```
 
-使用 DeepSeek-V2-Lite、64 专家；其余参数沿用 wrapper 默认值，包括 PROMPT_TOKENS=8、P2P_ORDER=peer-size-desc。选源门槛保留 REROUTE_MIN_GAIN_PCT=10、REROUTE_MIN_CONTENTION_GAIN_PCT=0、REROUTE_MIN_GLOBAL_GAIN_PCT=5、REROUTE_PENALTY_US=20、REROUTE_MIN_BYTES=1048576。在线 guard、hybrid fast path 等额外开关保持关闭，不继承外部 shell 的实验残留设置。
+使用 DeepSeek-V2-Lite、64 专家；其余参数沿用 wrapper 默认值，包括 PROMPT_TOKENS=8、P2P_ORDER=peer-size-desc。除上述 W2 局部门槛外，保留 REROUTE_MIN_CONTENTION_GAIN_PCT=0、REROUTE_MIN_GLOBAL_GAIN_PCT=5、REROUTE_PENALTY_US=20、REROUTE_MIN_BYTES=1048576。在线 guard、hybrid fast path 等额外开关保持关闭，不继承外部 shell 的实验残留设置。
 
-全部 9 次正式 launch（包括首轮冒烟）两机显式固定 NCCL_DEBUG=WARN，并记录实际环境值。画像/连通性检查可单独使用 INFO；不得把 INFO 带入正式 launch。
+全部 9 次正式 launch 两机显式固定 NCCL_DEBUG=WARN，并记录实际环境值。画像/连通性检查可单独使用 INFO；不得把 INFO 带入正式 launch。
 
 ### 2.3 wave 上限与失败规则
 
@@ -137,7 +138,7 @@ global batch 默认按总 worker 数派生，本次显式为 8。SL3060 唯一�
 - 全局门槛状态：通过、被全局门槛否决、没有形成有效改道候选、未启用/不适用。
 - 预测全局收益、全局门槛、global_gate_accepted、rejected_global。
 
-从缓存候选计划保留筛选信息，避免切到 baseline 后丢失原因。这是初始化阶段的筛选结果，不声称每次切换重新筛选。global_gate_accepted=False 本身不能证明门槛否决：需要区分无有效改道、未启用和真正被全局门槛撤销。收缩关闭候选选源，标记“不适用”。候选被拒绝时保留结果，不降门槛、不强制采用候选。
+从缓存候选计划保留筛选信息，避免切到 baseline 后丢失原因。这是初始化阶段的筛选结果，不声称每次切换重新筛选。global_gate_accepted=False 本身不能证明门槛否决：需要区分无有效改道、未启用和真正被全局门槛撤销。历史 W0 收缩关闭候选选源；16 卡 W2 两个方向按实际执行几何及各自全局门槛验收。候选被拒绝时保留失败证据，不降全局门槛、不强制采用候选。
 
 ### 4.4 计划流量统计
 
@@ -198,7 +199,7 @@ global batch 默认按总 worker 数派生，本次显式为 8。SL3060 唯一�
 | r2 | Directional → WeaveTP → Fixed |
 | r3 | WeaveTP → Fixed → Directional |
 
-首轮三个 launch 兼作实际配置冒烟；成功即作为正式 r1，不额外增加性能 launch，也不因耗时不理想丢弃首轮。
+不做冒烟。先单独运行正式 weavetp_r1；成功后复用同 ROOT_OUT，按原轮换顺序跳过已完成项，不因耗时不理想丢弃首轮。
 
 正式前完成 shell 语法、双机参数与协调检查；CPU 测试覆盖统计、逐 wave MAX、流量去重及候选状态分类。完成历史复算和画像门禁后，检查每次 GPU 启动前的双机空闲状态，再执行 r1。
 
@@ -237,4 +238,4 @@ global batch 默认按总 worker 数派生，本次显式为 8。SL3060 唯一�
 
 重点解读 WeaveTP 相对 Directional：两者 wave 上限相同，差异主要用于观察选源收益；相对 Fixed 同时混入 wave 大小影响。核对实际执行路径后再解释，不能仅凭方法名称归因。
 
-结论只回答“16 卡相对提升是否扩大”。必须写明：历史来自 09-01 批次，代码与机器状态不同，只比较各自批次内相对提升；收缩未启用候选选源，没有提升属于预期行为，不是故障。聚合流量与计时不能证明唯一硬件瓶颈。
+结论只回答“16 卡相对提升是否扩大”。必须写明：历史来自 09-01 批次，代码、配置与机器状态不同，只比较各自批次内相对提升；8 卡历史 W0 收缩未启用候选，16 卡 W2 按实际执行几何核验两个方向的带宽感知计划与全局门槛，不能将 baseline/FIFO 标签解释为没有选源。聚合流量与计时不能证明唯一硬件瓶颈。

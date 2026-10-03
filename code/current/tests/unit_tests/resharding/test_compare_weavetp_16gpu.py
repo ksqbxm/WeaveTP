@@ -525,7 +525,7 @@ class CompareTests(unittest.TestCase):
                              "--live-diagnose-equivalence"):
                     self.assertNotIn(flag, argv)
                 self.assertEqual(argv[-1], "WARN")
-                self.assertNotIn("--live-allow-aware-shrink", argv)
+                self.assertEqual("--live-allow-aware-shrink" in argv, request["case"] == "weavetp")
                 self.assertNotIn("--live-hybrid-fast-path", argv)
         # Generic single-node compatibility and default batch derived from total workers.
         for nodes, expected_batch in ((1, "4"), (2, "8")):

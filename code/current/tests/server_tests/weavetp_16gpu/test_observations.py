@@ -13,8 +13,7 @@ def verify(data):
     require(data["world_size"] == 16, "T06 requires a real 16-rank result")
     observations.validate_parallel_groups(data["parallel_groups"])
     require(all(r["nccl_debug"] == "WARN" for r in data["parallel_groups"]), "formal ranks must use WARN")
-    require(data["online_replan"] is False and data["bandwidth_aware_shrink"] is False,
-            "T06 formal observations require cached plans and default shrink")
+    require(data["online_replan"] is False, "formal observations require cached plans")
     hosts = {r["rank"]: r["hostname"] for r in data["parallel_groups"]}
     records = data["switches"]
     require([r["direction"] for r in records] == ["2->4", "4->2", "2->4", "4->2"], "need four switches")
@@ -38,7 +37,7 @@ def verify(data):
         gate = observed["candidate_gate"]
         expected_gate = observations.candidate_gate(
             gate["source_route_stats"], direction=record["direction"],
-            enabled=data["source_reroute_enabled"], allow_aware_shrink=False, threshold=5.0,
+            enabled=data["source_reroute_enabled"], allow_aware_shrink=data["bandwidth_aware_shrink"], threshold=5.0,
         )
         require(gate == expected_gate and gate["state"] != "unrecorded", "missing/inconsistent cached gate evidence")
         available = gate["state"] == "accepted"
@@ -65,7 +64,7 @@ def verify(data):
             if name != "adopted":
                 key = (record["direction"], name)
                 require(identities.setdefault(key, plan["plan_id"]) == plan["plan_id"], "cached identity changed")
-        adopted_name = "default" if record["plan_variant"] == "baseline" else "candidate"
+        adopted_name = "default" if observations.executed_geometry(observed) == "default" else "candidate"
         require(observed[adopted_name] is not None, "adopted plan unavailable")
         require(observed["adopted"] == observed[adopted_name], "adopted table differs from selected cached plan")
     return {"switches": len(records), "directions": sorted({r["direction"] for r in records}),

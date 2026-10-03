@@ -10,6 +10,8 @@ import sys
 from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 
+from weavetp_observations import executed_geometry
+
 CASES = ("fixed", "directional", "weavetp")
 SCOPES = {"expansion": (0, 2), "shrink": (1, 3), "cycle": (0, 1, 2, 3)}
 METRICS = ("migration_wall_s", "transport_s", "switch_wall_s")
@@ -72,7 +74,8 @@ NOTES = [
     "Missing observations remain unrecorded. global_gate_accepted=false alone does not prove "
     "global-gate rejection; a baseline actual plan may have lost candidate filtering evidence.",
     "Requested scheduler_mode does not establish base.execution_mode. "
-    "Shrink disables candidate source routing; no gain is expected there.",
+    "Actual plan means executed geometry. Historical 8-GPU W0 disables aware shrink; "
+    "16-GPU W2 enables it. Adaptive baseline/FIFO labels do not establish default geometry.",
     "Historical reference is the 09-01 batch, with different code/machine state. "
     "Compare within-batch relative gains only, not cross-scale absolute seconds.",
     "Labels compare percentages rounded to 0.1 percentage point (decimal half-up); they are "
@@ -111,6 +114,9 @@ def validate_config(data, case, world_size):
         "expansion_max_wave_tasks": (2048 if case == "fixed" else 4096) * factor,
     }
     optional = {**OPTIONAL_CONFIG, "global_batch_size": world_size // 2}
+    if world_size == 16 and aware:
+        expected["bandwidth_aware_shrink"] = True
+        optional.update(bandwidth_aware_shrink=True, reroute_min_gain_pct=0)
     if aware:
         optional["adaptive_residual_max_waves"] = 4
     for key, value in expected.items():
@@ -161,7 +167,7 @@ def load_launches(manifest_path):
         relative = Path(entry["path"])
         if relative.is_absolute() or len(relative.parts) != 3 or relative.parts[1:] != (
             f"r{repeat}", "result.json"
-        ) or relative.parts[0] in (".", ".."):
+        ) or relative.parts[0] in (".", "..", "_failed"):
             raise ValueError(
                 "run path must be <case-directory>/r<launch>/result.json within batch_root"
             )
@@ -350,7 +356,7 @@ def render_markdown(result):
                 *[f"{switch['metrics'][m]:.9f}" for m in METRICS], record["base"]["waves"],
                 record["base"].get("execution_mode", "unrecorded"),
                 record.get("requested_plan_variant", "unrecorded"),
-                record.get("plan_variant", "unrecorded"),
+                executed_geometry(record.get("plan_observation", {})),
                 record.get("candidate_route_available", "unrecorded"),
                 record.get("candidate_fallback_reason", "unrecorded"),
             ])

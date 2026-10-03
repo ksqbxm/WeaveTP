@@ -286,7 +286,8 @@ T07 后续审阅修复已完成：按用户指定方案删除旧退出快照的�
 
 ## T09：运行 9 次正式 launch
 
-- **状态：未开始**
+- **状态：2026-10-03 W2 配置、操作脚本与本地 CPU 准备已完成；9 次正式 GPU launch 未执行**
+- **本次用户修订：** 以 [T09 准备报告](./16gpu_T09_20261003/trial_report.md) 为操作依据；W2=aware shrink 1 / min gain 0，仅 WeaveTP 改两项；不做冒烟。先 ONLY=weavetp_r1 后同 ROOT_OUT 续跑。磁盘门槛 9 GB/机。CPU 核对的单 rank wave 负载“不超过 8 卡”未满足，用户允许保留配置并明确报告后提交；OOM/超时预案为另批次统一三方法缩容上限 2048，扩容不变，无自动重试。
 - **前置依赖：** T03、T08；每次启动时重新满足两机空闲门禁。
 - **必读文件：** [总计划](./WeaveTP_16卡正式实验_总计划.md)、[CODEX.md](../CODEX.md)、[源码 AGENTS.md](../code/current/AGENTS.md)；历史复算、部署和画像验收记录。
 - **开始检查：** [ ] 本次已重新完整阅读总计划和 CODEX.md；涉及 code/current 时已阅读适用 AGENTS.md。
@@ -297,7 +298,7 @@ T07 后续审阅修复已完成：按用户指定方案删除旧退出快照的�
 
 1. 每次启动前检查两机全部 GPU，核对代码/画像身份、正式 NCCL_DEBUG=WARN、global batch=8 和配置。
 2. r1：Fixed、Directional、WeaveTP；r2：Directional、WeaveTP、Fixed；r3：WeaveTP、Fixed、Directional。
-3. 每 launch 完整四次交替切换。r1 兼作冒烟，成功即保留为正式数据，不额外启动冒烟性能组。
+3. 每 launch 完整四次交替切换。不做冒烟；先单独正式 weavetp_r1，成功即保留，并按原轮换顺序续跑其余八次。
 4. 逐切换记录 DP/EDP、实际路径、全局筛选/回退、wave 数、计划流量及数值校验。
 5. 操作者人工监控切换；launch 超过 60 分钟时保存现场并停止后续队列；8192 卡住时人工确认后立即停止，不回退、不重试。
 6. 失败或中断只清理带 OUT_DIR 的本任务进程，确认两机恢复 MPS 基线；成功 launch 也核对退出状态。

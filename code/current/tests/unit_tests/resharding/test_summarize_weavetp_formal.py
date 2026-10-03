@@ -14,6 +14,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "tools/resharding"))
+
 SCRIPT = Path(__file__).resolve().parents[3] / "tools/resharding/summarize_weavetp_formal.py"
 SPEC = importlib.util.spec_from_file_location("formal_summary", SCRIPT)
 formal = importlib.util.module_from_spec(SPEC)
@@ -52,6 +54,8 @@ class FormalSummaryTests(unittest.TestCase):
                     "scheduler_mode": "residual" if aware else "baseline",
                     "adaptive_hybrid": aware, "source_reroute_enabled": aware,
                     "bandwidth_aware_plan": aware,
+                    "bandwidth_aware_shrink": aware and world_size == 16,
+                    "reroute_min_gain_pct": 0 if aware and world_size == 16 else 10,
                     "max_wave_tasks": 2048 * (world_size // 8),
                     "shrink_max_wave_tasks": 2048 * (world_size // 8),
                     "expansion_max_wave_tasks": (2048 if case == "fixed" else 4096)

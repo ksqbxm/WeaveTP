@@ -75,7 +75,12 @@ def validate(out):
     old, new, smoke = dry_run(True), dry_run(), dry_run(smoke_mode=True)
     for name, raw in (('formal_before.json', old), ('formal_after.json', new), ('smoke_dry_run.json', smoke)):
         (out / name).write_bytes(raw)
-    checks = {'formal_byte_identical': old == new,
+    expected = json.loads(old)
+    for row in expected:
+        if row['request']['case'] == 'weavetp':
+            row['request']['env'].update(ALLOW_AWARE_SHRINK='1', REROUTE_MIN_GAIN_PCT='0.0')
+    w2_only = expected == json.loads(new)
+    checks = {'formal_only_two_W2_environment_changes': w2_only,
               'formal_before_sha256': hashlib.sha256(old).hexdigest(),
               'formal_after_sha256': hashlib.sha256(new).hexdigest()}
     compiled = list(dict.fromkeys(SUITES + [HERE / 'smoke.py', Path(__file__).resolve(),
@@ -101,13 +106,12 @@ def validate(out):
     checks['diff_check'] = True
     checks['protected_bytes_unchanged'] = all(hashlib.sha256(Path(p).read_bytes()).hexdigest() == sha
                                             for p, sha in before.items())
-    untouched = ['documents/16gpu_T08_20261001/', 'code/current/megatron/',
-                 'code/current/tools/resharding/summarize_weavetp_formal.py']
-    diff = subprocess.check_output(['git', 'diff', '634ac91bb66c050d75da7925de5e1c8a1713bf15', '--', *untouched], cwd=REPO)
+    untouched = ['documents/16gpu_T08_20261001/', 'code/current/megatron/']
+    diff = subprocess.check_output(['git', 'diff', '3bc12ce74a0ed048d62a9ffd5ca64d1940779705', '--', *untouched], cwd=REPO)
     checks['protected_diff_empty'] = not diff
     total = sum(r.get('tests', 0) for r in records)
     passed = sum(r.get('passed', 0) for r in records)
-    ok = (all(r['exit_code'] == 0 for r in records) and passed == total and old == new
+    ok = (all(r['exit_code'] == 0 for r in records) and passed == total and w2_only
           and checks['protected_bytes_unchanged'] and checks['protected_diff_empty'])
     write_json(out / 'validation.json', {'gpu_started': False, 'server_connected': False,
                'tests': total, 'passed': passed, 'suites': records, 'checks': checks, 'ok': ok})

@@ -91,6 +91,40 @@ def candidate_gate(stats, *, direction, enabled, allow_aware_shrink, threshold):
     }
 
 
+def executed_geometry(observed):
+    """Adaptive labels are not geometry identities (notably for aware shrink)."""
+    adopted = (observed.get("adopted") or {}).get("plan_id")
+    default = (observed.get("default") or {}).get("plan_id")
+    candidate = (observed.get("candidate") or {}).get("plan_id")
+    if not adopted or not default:
+        return "unrecorded"
+    if adopted == default:
+        return "default"
+    return "aware" if adopted == candidate else "other"
+
+
+def validate_w2_geometry(record, rank_hosts):
+    observed = record["plan_observation"]
+    if observed["index"] != record["index"] or observed["direction"] != record["direction"]:
+        raise ValueError("W2 observation index/direction mismatch")
+    gate = observed["candidate_gate"]
+    expected = candidate_gate(gate["source_route_stats"], direction=record["direction"],
+                              enabled=True, allow_aware_shrink=True, threshold=5.0)
+    gain = gate.get("projected_global_gain_pct")
+    if (gate != expected or gate["state"] != "accepted" or not isinstance(gain, (int, float))
+            or isinstance(gain, bool) or not math.isfinite(gain) or gain < 5.0):
+        raise ValueError("W2 directional global gate must pass at 5 percent")
+    if executed_geometry(observed) != "aware" or observed["adopted"] != observed["candidate"]:
+        raise ValueError("W2 adopted geometry must equal aware candidate and differ from default")
+    for name in ("default", "candidate", "adopted"):
+        plan = observed[name]
+        hashes = plan["rank_plan_sha256"]
+        if (len(hashes) != 16 or any(len(h) != 64 or any(c not in "0123456789abcdef" for c in h) for h in hashes)
+                or plan["plan_id"] != hashlib.sha256("\n".join(hashes).encode("ascii")).hexdigest()
+                or plan["traffic"] != traffic_summary(plan["receiver_rows"], rank_hosts)):
+            raise ValueError(f"W2 invalid {name} geometry/traffic evidence")
+
+
 def receiver_rows(plan, bundle, rank, kv_kind):
     """Only recv_ops; send mirrors never count. Keep local copies separately."""
     parameters = dict(bundle.named_parameters())

@@ -1,0 +1,27 @@
+{
+  "profile_sha256": "ea86ff22f1aab45ab6d306516022354a16c5e529cbcc94f91a6eee209e18449b",
+  "source": "documents/16gpu_cpu_explore_20261001/outputs/t09_20261003T210744/analysis.json",
+  "shared_nic_GBps": 2.84,
+  "switches": [
+    {
+      "index": 0,
+      "direction": "2->4",
+      "adopted_cross_node_bytes": 408813056
+    },
+    {
+      "index": 1,
+      "direction": "4->2",
+      "adopted_cross_node_bytes": 4959240192
+    },
+    {
+      "index": 2,
+      "direction": "2->4",
+      "adopted_cross_node_bytes": 409074176
+    },
+    {
+      "index": 3,
+      "direction": "4->2",
+      "adopted_cross_node_bytes": 4959240192
+    }
+  ]
+}

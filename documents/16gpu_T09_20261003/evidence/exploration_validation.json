@@ -1,0 +1,32 @@
+{
+  "suites": [
+    {
+      "suite": "metadata",
+      "tests": 8,
+      "passed": 8,
+      "exit_code": 0
+    },
+    {
+      "suite": "timing",
+      "tests": 6,
+      "passed": 6,
+      "exit_code": 0
+    },
+    {
+      "suite": "old_w2",
+      "tests": 6,
+      "passed": 6,
+      "exit_code": 0
+    },
+    {
+      "suite": "analysis",
+      "tests": 5,
+      "passed": 5,
+      "exit_code": 0
+    }
+  ],
+  "tests": 25,
+  "passed": 25,
+  "gpu_started": false,
+  "server_connected": false
+}

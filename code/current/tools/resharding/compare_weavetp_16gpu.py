@@ -24,7 +24,7 @@ from pathlib import Path, PurePosixPath
 
 from profile_weavetp_16gpu import load_profile
 from summarize_weavetp_formal import DIRECTIONS, seconds, switch_metrics, validate_config
-from weavetp_observations import validate_parallel_groups
+from weavetp_observations import validate_parallel_groups, validate_w2_geometry
 
 HERE = Path(__file__).resolve().parent
 _rpc_lock = threading.Lock()
@@ -99,6 +99,8 @@ def make_cases(settings):
                 "PROFILE": settings["profile"], "CHECKPOINT": settings["checkpoint"],
                 "OUT_DIR": out, "RUN_ID": f"{Path(root).name}/{case}/r{repeat}",
             }
+            if aware:
+                env.update(ALLOW_AWARE_SHRINK="1", REROUTE_MIN_GAIN_PCT="0.0")
             if settings.get("mps_owner"):
                 env["MPS_OWNER"] = settings["mps_owner"]
             yield {"case": case, "repeat": repeat, "out_dir": out, "env": env,
@@ -396,7 +398,32 @@ def validate_pair(prepared, request):
         raise ValueError("code/profile differs from smoke preflight")
 
 
-def validate_result(path, case):
+def validate_w2_evidence(path, exits=None):
+    """Use executor receipts because the benchmark does not emit min gain."""
+    out = Path(path).parent
+    request = json.loads((out / "request.json").read_bytes())
+    expected = {"ALLOW_AWARE_SHRINK": "1", "REROUTE_MIN_GAIN_PCT": "0.0"}
+    if request.get("case") != "weavetp" or any(request["env"].get(k) != v for k, v in expected.items()):
+        raise ValueError("W2 request configuration missing or mismatched")
+    marker = out / "complete.json"
+    if marker.is_file():
+        complete = json.loads(marker.read_bytes())
+        if complete["config_sha256"] != config_hash(request) or complete["result_sha256"] != digest(Path(path).read_bytes()):
+            raise ValueError("W2 complete receipt does not match request/result")
+        exits = complete["exits"]
+    # Before complete exists, use the executor's two RPC receipts. The peer's
+    # exit.node1.json is on a different filesystem, never a local input here.
+    if not isinstance(exits, list) or len(exits) != 2:
+        raise ValueError("W2 requires two executor exits")
+    for rank, record in enumerate(exits):
+        if (record["rank"] != rank or record["config_sha256"] != config_hash(request)
+                or record["exit_code"] != 0 or record["error"] is not None
+                or record["quiescent"] is not True
+                or any(record["env"].get(k) != v for k, v in expected.items())):
+            raise ValueError(f"W2 node{rank} execution configuration missing or mismatched")
+
+
+def validate_result(path, case, exits=None):
     if smoke_path(path):
         raise ValueError("formal validation rejects smoke paths")
     for name in ("request.json", "complete.json"):
@@ -408,6 +435,11 @@ def validate_result(path, case):
     if data.get("mode") == "smoke":
         raise ValueError("formal validation rejects smoke results")
     validate_config(data, case, 16)
+    if case == "weavetp":
+        validate_w2_evidence(path, exits)
+        validate_parallel_groups(data["parallel_groups"])
+        if any(row["nccl_debug"] != "WARN" for row in data["parallel_groups"]):
+            raise ValueError("W2 all ranks must use NCCL_DEBUG=WARN")
     if data.get("checkpoint_loaded") is not True or data.get("final_active_tp") != 2:
         raise ValueError("checkpoint not loaded or incomplete TP cycle")
     records = data["switches"]
@@ -418,6 +450,8 @@ def validate_result(path, case):
             raise ValueError("switch indices must be 0,1,2,3")
         switch_metrics(record)
         seconds(record["validation_max_diff"], "validation_max_diff")
+        if case == "weavetp":
+            validate_w2_geometry(record, {r["rank"]: r["hostname"] for r in data["parallel_groups"]})
     # The benchmark raises before writing JSON on BF16-relative validation failure.
     return digest(raw)
 
@@ -512,10 +546,10 @@ def run_case(request, call=rpc):
             # for an unreachable peer before recording the failure.
             pool.shutdown(wait=False, cancel_futures=True)
         validate_exits(exits, prepared, request)
-        validator = validate_smoke_result if smoke else validate_result
         complete = {
             "config_sha256": config_hash(request), "exits": exits,
-            "result_sha256": validator(out / "result.json", request["case"]),
+            "result_sha256": (validate_smoke_result(out / "result.json", request["case"]) if smoke
+                              else validate_result(out / "result.json", request["case"], exits)),
         }
         if smoke:
             complete["mode"] = "smoke"

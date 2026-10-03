@@ -21,7 +21,7 @@ import test_profile_weavetp_16gpu as profiles
 import test_weavetp_observations as observations
 
 compare = smoke.compare
-BASELINE = '1934b047d4b89b527340c19d99ab988627597bb2'
+BASELINE = '3bc12ce74a0ed048d62a9ffd5ca64d1940779705'
 HELPER = REPO / 'code/current' / compare.HELPER
 
 
@@ -87,7 +87,11 @@ class SmokeTests(unittest.TestCase):
 
     def test_formal_dry_run_is_byte_identical_to_baseline(self):
         before, after = dry_run(True), dry_run()
-        self.assertEqual(before, after)
+        expected = json.loads(before)
+        for row in expected:
+            if row['request']['case'] == 'weavetp':
+                row['request']['env'].update(ALLOW_AWARE_SHRINK='1', REROUTE_MIN_GAIN_PCT='0.0')
+        self.assertEqual(expected, json.loads(after))
         self.assertEqual(len(json.loads(after)), 9)
 
     def test_smoke_dry_run_has_one_case_and_only_switch_setting_differs(self):
@@ -210,8 +214,9 @@ class SmokeTests(unittest.TestCase):
         for name in ('request.json', 'complete.json'):
             directory = self.path / name.replace('.', '_')
             path = self.write_result(self.four_switches(), directory / 'result.json')
-            # Four records alone would pass the formal shape checks.
-            compare.validate_result(path, 'weavetp')
+            # W2 also needs executor receipts; four records alone are insufficient.
+            with self.assertRaises(FileNotFoundError):
+                compare.validate_result(path, 'weavetp')
             compare.save(directory / name, {'mode': 'smoke'})
             with self.assertRaisesRegex(ValueError, 'smoke'):
                 compare.validate_result(path, 'weavetp')
