@@ -22,7 +22,7 @@ class ReviewRegressions(unittest.TestCase):
         fixture.setUp()
         self.addCleanup(fixture.doCleanups)
         compare = control.compare
-        idle = {"gpus": "\n".join(f"{i}, GPU-{i}, 65" for i in range(8)), "processes": ""}
+        idle = {"gpus": "\n".join(f"{i}, GPU-{i}, 65, 0" for i in range(8)), "processes": ""}
         checkpoint = fixture.path / "checkpoint"
         checkpoint.mkdir()
         fixture.request["env"]["CHECKPOINT"] = str(checkpoint)

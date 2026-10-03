@@ -1,0 +1,100 @@
+{
+  "gpu_started": false,
+  "server_connected": false,
+  "tests": 158,
+  "passed": 158,
+  "suites": [
+    {
+      "suite": "code\\current\\tests\\unit_tests\\resharding\\test_summarize_weavetp_formal.py",
+      "exit_code": 0,
+      "tests": 28,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "passed": 28
+    },
+    {
+      "suite": "code\\current\\tests\\unit_tests\\resharding\\test_compare_weavetp_16gpu.py",
+      "exit_code": 0,
+      "tests": 29,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "passed": 29
+    },
+    {
+      "suite": "code\\current\\tests\\unit_tests\\resharding\\test_profile_weavetp_16gpu.py",
+      "exit_code": 0,
+      "tests": 18,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "passed": 18
+    },
+    {
+      "suite": "code\\current\\tests\\unit_tests\\resharding\\test_server_acceptance.py",
+      "exit_code": 0,
+      "tests": 11,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "passed": 11
+    },
+    {
+      "suite": "code\\current\\tests\\unit_tests\\resharding\\test_weavetp_review_findings.py",
+      "exit_code": 0,
+      "tests": 4,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "passed": 4
+    },
+    {
+      "suite": "code\\current\\tests\\unit_tests\\resharding\\test_weavetp_observations.py",
+      "exit_code": 0,
+      "tests": 25,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "passed": 25
+    },
+    {
+      "suite": "documents\\16gpu_T06_T07_review_20261001\\reproduce_findings.py",
+      "exit_code": 0,
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "passed": 3
+    },
+    {
+      "suite": "documents\\16gpu_T08_20261001\\check_commands.py",
+      "exit_code": 0,
+      "tests": 16,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "passed": 16
+    },
+    {
+      "suite": "documents\\16gpu_T085_20261001\\test_smoke.py",
+      "exit_code": 0,
+      "tests": 24,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "passed": 24
+    }
+  ],
+  "checks": {
+    "formal_byte_identical": true,
+    "formal_before_sha256": "08243d344b7a25e7ebd728fa85f3f46243752fb39791f68b3324d1511c0a1045",
+    "formal_after_sha256": "08243d344b7a25e7ebd728fa85f3f46243752fb39791f68b3324d1511c0a1045",
+    "py_compile_files": 16,
+    "bash_n_files": 7,
+    "diff_check": true,
+    "protected_bytes_unchanged": true,
+    "protected_diff_empty": true
+  },
+  "ok": true
+}

@@ -100,7 +100,7 @@ NCCL_DEBUG=WARN
 - SL3060 直接读取已有 /data/models checkpoint，避免复制第二份。SL3061 如缺资源，先列明源、目标、大小与剩余空间。
 - **安装任何东西、或复制超过 10 GB 前必须停下征求用户同意。** 不拆分复制绕过限制。不得升级或安装 PyTorch/CUDA/NCCL/TE/Apex。
 - 使用既有解释器时关闭向原环境写入 Python 字节码，将 CUDA、Torch 扩展、Triton、HF、pip 等缓存及临时目录重定向到 /data。
-- 每次 GPU 任务前检查两机全部 16 卡：无他人 GPU 作业、每卡显存接近约 65 MiB 的既有 MPS 基线才算空闲。发现占用立即停止报告，不等待重试，不挂守候脚本。
+- 每次 GPU 任务前检查两机全部 16 卡：每卡 memory.used ≤200 MiB、utilization.gpu=0，且除 MPS_OWNER 的 nvidia-cuda-mps-server 外没有其他计算进程，三项同时满足才算空闲（2026-10-03 用户修订，允许长期稳定的 MPS 残留显存）。任一不满足即按 GPU 和原因报告并停止，不等待重试，不挂守候脚本。结束后仍要求显存不高于各卡启动前基线 +16 MiB。
 - SL3060 上 指定 MPS 用户 的 nvidia-cuda-mps-server 必须保留，不关闭 MPS，不 kill 他人进程。
 - 每次失败或中断后，仅清理命令行包含本次 OUT_DIR 的任务进程，确认本任务已退出且显存恢复运行前基线。这里不是要求关闭 MPS 后的物理零显存。不能确认进程归属时不清理，报告剩余问题。
 

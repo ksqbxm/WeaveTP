@@ -12,7 +12,7 @@
 
 - 冒烟不做 NET/IB 或 Socket 检查，不新增替代检查；该阶段由 T08 负责。
 - 本轮不修 PS1，compare 的 `rpc`、`rpc_command` 保持原样；没有新增 PS1 保护或 source 包装到这两个函数。
-- 冒烟与正式共用 `check_idle`：每卡 81 MiB 上限、相同进程归属规则。结束后仍以相同 GPU UUID、无本任务进程、显存不高于启动基线 +16 MiB 为恢复标准。
+- 冒烟与正式共用 `check_idle`：按 2026-10-03 用户修订，每卡 ≤200 MiB、利用率 0%，计算进程仅允许 MPS_OWNER 的 nvidia-cuda-mps-server。结束后仍以相同 GPU UUID、无本任务进程、显存不高于启动基线 +16 MiB 为恢复标准。
 - 不改写 benchmark 的 `result.json`，只读取原始字节并记录其 SHA-256。`mode=smoke` 仅写入协调器 request 和完成记录；不向 benchmark 结果插入字段。
 - 这是独立 T08.5 冒烟，结果不计入正式九次 launch，不能替代 T08 完成或 T09 数据。
 
@@ -147,3 +147,7 @@ test -z "$(git -C "$REPO" status --porcelain --untracked-files=all)"
 ```
 
 两机都必须得到 CPU 验收 `ok=true`；这不代表真实冒烟已经通过。运行产生的服务器日志、JSON、报告和编译缓存均保留在 /data，不提交 GitHub。
+
+## 2026-10-03 空闲判定修订
+
+本次仅调整共用资源门禁及测试。test_smoke 的 dry-run 基线更新为 `1934b047d4b89b527340c19d99ab988627597bb2`；基线源码由标准输入执行，避免 Windows 命令行长度限制。冒烟/正式准备与运行测试更新为 200/201 MiB 边界及带利用率的查询记录；不再把旧 check_idle 的 AST 锁定为不变，仍锁定 gpu_memory、进程选择、清理和 RPC。T08 全目录保持不变。新的验收记录见 [空闲判定修订报告](../16gpu_idle_20261003/trial_report.md)，本目录 SHA 清单同步更新。

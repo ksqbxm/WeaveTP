@@ -264,11 +264,58 @@ class CompareTests(unittest.TestCase):
                 compare.settings_from_env()
 
     def test_gpu_occupancy_refuses_without_waiting(self):
-        state = {"gpus": "\n".join(f"{i}, GPU-{i}, 65" for i in range(8)), "processes": ""}
-        compare.check_idle(state, 0)
-        state["gpus"] = state["gpus"].replace("GPU-3, 65", "GPU-3, 82")
-        with self.assertRaisesRegex(ValueError, "GPU memory"):
-            compare.check_idle(state, 0)
+        for used, utilization, error in ((159, 0, None), (200, 0, None),
+                                         (159, 5, "utilization.gpu=5"),
+                                         (300, 0, "memory.used=300"),
+                                         (201, 0, "memory.used=201")):
+            state = {"gpus": "\n".join(f"{i}, GPU-{i}, 65, 0" for i in range(8)), "processes": ""}
+            state["gpus"] = state["gpus"].replace("GPU-4, 65, 0", f"GPU-4, {used}, {utilization}")
+            with self.subTest(used=used, utilization=utilization):
+                if error:
+                    with self.assertRaisesRegex(ValueError, "GPU 4.*" + error):
+                        compare.check_idle(state, 0)
+                else:
+                    compare.check_idle(state, 0)
+
+    def test_gpu_process_gate_allows_only_configured_mps_owner(self):
+        state = {"gpus": "\n".join(f"{i}, GPU-{i}, 159, 0" for i in range(8))}
+        pwd = mock.Mock()
+        for rank in (0, 1):
+            for name, owner, allowed in (("python", "yiwei", False),
+                                          ("/usr/bin/nvidia-cuda-mps-server", "yiwei", True),
+                                          ("nvidia-cuda-mps-server", "other", False)):
+                state["processes"] = f"GPU-4, 123, {name}"
+                pwd.getpwuid.return_value.pw_name = owner
+                with self.subTest(rank=rank, name=name, owner=owner), \
+                        mock.patch.dict(sys.modules, pwd=pwd), \
+                        mock.patch.object(Path, "stat", return_value=mock.Mock(st_uid=123)):
+                    if allowed:
+                        compare.check_idle(state, rank, "yiwei")
+                    else:
+                        with self.assertRaisesRegex(ValueError, "GPU-4.*compute process.*123"):
+                            compare.check_idle(state, rank, "yiwei")
+
+    def test_gpu_query_includes_utilization_and_process_gpu(self):
+        with mock.patch.object(compare.subprocess, "check_output", side_effect=["gpu rows", "process rows"]) as query:
+            self.assertEqual(compare.gpu_state(), {"gpus": "gpu rows", "processes": "process rows"})
+        self.assertEqual(query.call_args_list[0].args[0][1],
+                         "--query-gpu=index,uuid,memory.used,utilization.gpu")
+        self.assertEqual(query.call_args_list[1].args[0][1],
+                         "--query-compute-apps=gpu_uuid,pid,process_name")
+
+    def test_cleanup_still_uses_launch_baseline_plus_16(self):
+        out = Path(self.request["out_dir"])
+        out.mkdir(parents=True)
+        baseline = {"gpus": "\n".join(f"{i}, GPU-{i}, 159, 0" for i in range(8)), "processes": ""}
+        compare.save(out / "prepared.node0.json", {"gpu_before": baseline})
+        for used, restored in ((175, True), (176, False)):
+            after = dict(baseline, gpus=baseline["gpus"].replace("GPU-4, 159", f"GPU-4, {used}"))
+            with self.subTest(used=used), \
+                    mock.patch.object(compare, "gpu_state", return_value=after), \
+                    mock.patch.object(compare, "tagged_processes", return_value=[]), \
+                    mock.patch.object(compare.signal, "SIGKILL", 9, create=True), \
+                    mock.patch.object(compare.time, "sleep"):
+                self.assertEqual(compare.cleanup(self.request, 0)["ok"], restored)
 
     def test_cleanup_selection_requires_exact_tag_and_worker(self):
         proc = self.path / "proc"
@@ -291,7 +338,7 @@ class CompareTests(unittest.TestCase):
     def test_cleanup_preserves_unrelated_processes_and_records_memory(self):
         out = Path(self.request["out_dir"])
         out.mkdir(parents=True)
-        idle = {"gpus": "\n".join(f"{i}, GPU-{i}, 65" for i in range(8)), "processes": ""}
+        idle = {"gpus": "\n".join(f"{i}, GPU-{i}, 65, 0" for i in range(8)), "processes": ""}
         compare.save(out / "prepared.node0.json", {"gpu_before": idle})
         with mock.patch.object(compare, "gpu_state", return_value=idle), \
                 mock.patch.object(compare, "tagged_processes", side_effect=[[123], [], []]), \
@@ -304,7 +351,7 @@ class CompareTests(unittest.TestCase):
         self.assertEqual(len(list(out.glob("cleanup.node0.*.json"))), 1)
 
     def test_node_receipt_persists_exit_and_effective_environment(self):
-        idle = {"gpus": "\n".join(f"{i}, GPU-{i}, 65" for i in range(8)), "processes": ""}
+        idle = {"gpus": "\n".join(f"{i}, GPU-{i}, 65, 0" for i in range(8)), "processes": ""}
         checkpoint = self.path / "checkpoint"
         checkpoint.mkdir()
         self.request["env"]["CHECKPOINT"] = str(checkpoint)
@@ -328,7 +375,7 @@ class CompareTests(unittest.TestCase):
                 compare.node_action("prepare", self.request, 1)
 
     def test_node_prepare_cannot_be_reused_after_configuration_change(self):
-        idle = {"gpus": "\n".join(f"{i}, GPU-{i}, 65" for i in range(8)), "processes": ""}
+        idle = {"gpus": "\n".join(f"{i}, GPU-{i}, 65, 0" for i in range(8)), "processes": ""}
         checkpoint = self.path / "checkpoint"
         checkpoint.mkdir()
         self.request["env"]["CHECKPOINT"] = str(checkpoint)
@@ -344,7 +391,7 @@ class CompareTests(unittest.TestCase):
             popen.assert_not_called()
 
     def test_node_timeout_records_failure_and_cleans_only_tagged_task(self):
-        idle = {"gpus": "\n".join(f"{i}, GPU-{i}, 65" for i in range(8)), "processes": ""}
+        idle = {"gpus": "\n".join(f"{i}, GPU-{i}, 65, 0" for i in range(8)), "processes": ""}
         checkpoint = self.path / "checkpoint"
         checkpoint.mkdir()
         self.request["env"]["CHECKPOINT"] = str(checkpoint)
@@ -363,7 +410,7 @@ class CompareTests(unittest.TestCase):
             cleanup.assert_called_once_with(self.request, 1)
 
     def test_peer_stop_before_delayed_launch_cannot_start_gpu(self):
-        idle = {"gpus": "\n".join(f"{i}, GPU-{i}, 65" for i in range(8)), "processes": ""}
+        idle = {"gpus": "\n".join(f"{i}, GPU-{i}, 65, 0" for i in range(8)), "processes": ""}
         checkpoint = self.path / "checkpoint"
         checkpoint.mkdir()
         self.request["env"]["CHECKPOINT"] = str(checkpoint)
@@ -408,7 +455,7 @@ class CompareTests(unittest.TestCase):
         self.assertIn("require the formal NNODES=2", result.stderr)
 
     def test_port_in_use_blocks_prepare_without_starting_process(self):
-        idle = {"gpus": "\n".join(f"{i}, GPU-{i}, 65" for i in range(8)), "processes": ""}
+        idle = {"gpus": "\n".join(f"{i}, GPU-{i}, 65, 0" for i in range(8)), "processes": ""}
         checkpoint = self.path / "checkpoint"
         checkpoint.mkdir()
         self.request["env"]["CHECKPOINT"] = str(checkpoint)

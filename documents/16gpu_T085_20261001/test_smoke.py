@@ -21,7 +21,7 @@ import test_profile_weavetp_16gpu as profiles
 import test_weavetp_observations as observations
 
 compare = smoke.compare
-BASELINE = '634ac91bb66c050d75da7925de5e1c8a1713bf15'
+BASELINE = '1934b047d4b89b527340c19d99ab988627597bb2'
 HELPER = REPO / 'code/current' / compare.HELPER
 
 
@@ -43,16 +43,18 @@ def dry_run(baseline=False, smoke_mode=False):
     if smoke_mode:
         env['ROOT_OUT'] = env['WORK'] + '/smoke/smoke_DRY_ONLY'
     command = [sys.executable, '-B', '-X', 'utf8']
+    program = None
     if baseline:
         source = subprocess.check_output(['git', 'show', BASELINE + ':code/current/' + compare.HELPER], cwd=REPO)
         program = ('import sys; sys.path.insert(0, ' + repr(str(HELPER.parent)) + '); '
                    'exec(compile(' + repr(source) + ', ' + repr(str(HELPER)) + ", 'exec'), "
                    "{'__name__': '__main__', '__file__': " + repr(str(HELPER)) + '})')
-        command += ['-c', program]
+        command += ['-']
     else:
         command += [str(HELPER)]
     command += ['--dry-run'] + (['--smoke'] if smoke_mode else [])
-    return subprocess.run(command, env=env, capture_output=True, check=True, timeout=30).stdout
+    return subprocess.run(command, input=program.encode() if program is not None else None,
+                          env=env, capture_output=True, check=True, timeout=30).stdout
 
 
 class SmokeTests(unittest.TestCase):
@@ -257,31 +259,31 @@ class SmokeTests(unittest.TestCase):
         self.assertNotIn('run', [row[-1] for row in nodes.calls])
 
     def test_smoke_and_formal_share_idle_and_recovery_functions(self):
-        # Pin the actual gate/ownership/cleanup implementations to the baseline.
+        # Preserve recovery/RPC implementations; exercise the shared idle gate below.
         import ast
         before = ast.parse(subprocess.check_output(
             ['git', 'show', BASELINE + ':code/current/' + compare.HELPER], cwd=REPO).decode())
         after = ast.parse(HELPER.read_text(encoding='utf-8'))
-        for name in ('check_idle', 'gpu_memory', 'tagged_processes', 'cleanup', 'rpc', 'rpc_command'):
+        for name in ('gpu_memory', 'tagged_processes', 'cleanup', 'rpc', 'rpc_command'):
             old = next(n for n in before.body if getattr(n, 'name', None) == name)
             new = next(n for n in after.body if getattr(n, 'name', None) == name)
             self.assertEqual(ast.dump(old), ast.dump(new), name)
         for mode in ('formal', 'smoke'):
-            for memory in (81, 82):
+            for memory in (200, 201):
                 request = copy.deepcopy(self.request)
                 request['out_dir'] = str(self.path / f'{mode}_{memory}')
                 request['env']['OUT_DIR'] = request['out_dir']
                 request['env']['CHECKPOINT'] = str(self.path)
                 if mode == 'formal':
                     request.pop('mode')
-                state = {'gpus': '\n'.join(f'{i}, GPU-{i}, {memory}' for i in range(8)), 'processes': ''}
+                state = {'gpus': '\n'.join(f'{i}, GPU-{i}, {memory}, 0' for i in range(8)), 'processes': ''}
                 with mock.patch.object(compare, 'check_output_mode'), \
                         mock.patch.object(compare, 'data_path', side_effect=str), \
                         mock.patch.object(compare.socket, 'gethostname', return_value='SL3061'), \
                         mock.patch.object(compare, 'identity', return_value={}), \
                         mock.patch.object(compare, 'gpu_state', return_value=state), \
                         mock.patch.object(compare.subprocess, 'Popen') as popen:
-                    if memory == 81:
+                    if memory == 200:
                         compare.node_action('prepare', request, 1)
                         saved = json.loads(Path(request['out_dir'], 'request.json').read_bytes())
                         self.assertEqual(saved.get('mode'), 'smoke' if mode == 'smoke' else None)
@@ -289,13 +291,13 @@ class SmokeTests(unittest.TestCase):
                             popen.return_value.wait.return_value = 0
                             self.assertTrue(compare.node_action('run', request, 1)['quiescent'])
                     else:
-                        with self.assertRaisesRegex(ValueError, r'65 \+ 16'):
+                        with self.assertRaisesRegex(ValueError, r'memory.used=201.*200 MiB'):
                             compare.node_action('prepare', request, 1)
                         popen.assert_not_called()
 
     def test_smoke_timeout_and_interrupt_reuse_existing_cleanup(self):
         self.request['env']['CHECKPOINT'] = str(self.path)
-        state = {'gpus': '\n'.join(f'{i}, GPU-{i}, 65' for i in range(8)), 'processes': ''}
+        state = {'gpus': '\n'.join(f'{i}, GPU-{i}, 65, 0' for i in range(8)), 'processes': ''}
         for reason in (subprocess.TimeoutExpired('worker', 3600), KeyboardInterrupt('operator')):
             request = copy.deepcopy(self.request)
             request['out_dir'] = str(self.path / type(reason).__name__)
@@ -360,7 +362,7 @@ builtin source "$1"
                    NODE1_CODE_DIR=request['nodes'][1]['code_dir'], PYTHON=sys.executable,
                    NODE0_PYTHON=sys.executable, WEAVETP_COMMIT='a' * 40,
                    **{k: request['env'][k] for k in ('MASTER_ADDR', 'MASTER_PORT', 'CHECKPOINT', 'NCCL_DEBUG')})
-        state = {'gpus': '\n'.join(f'{i}, GPU-{i}, 65' for i in range(8)), 'processes': ''}
+        state = {'gpus': '\n'.join(f'{i}, GPU-{i}, 65, 0' for i in range(8)), 'processes': ''}
         for failure in (None, 'host', 'commit', 'disk', 'warn', 'profile', 'busy'):
             changed = dict(env)
             if failure == 'warn':

@@ -179,8 +179,8 @@ def gpu_state():
         return subprocess.check_output(
             ["nvidia-smi", f"--query-{entity}={fields}", "--format=csv,noheader,nounits"],
             text=True, timeout=15).strip()
-    return {"gpus": query("index,uuid,memory.used", "gpu"),
-            "processes": query("pid,process_name", "compute-apps")}
+    return {"gpus": query("index,uuid,memory.used,utilization.gpu", "gpu"),
+            "processes": query("gpu_uuid,pid,process_name", "compute-apps")}
 
 
 def gpu_memory(state):
@@ -191,16 +191,23 @@ def gpu_memory(state):
 
 
 def check_idle(state, rank, mps_owner=None):
-    # 65 MiB MPS baseline with conservative headroom; no idle-wait/retry loop.
-    if any(value > 81 for value in gpu_memory(state).values()):
-        raise ValueError("GPU memory exceeds idle/MPS baseline (65 + 16 MiB ceiling)")
+    gpu_memory(state)  # Require all eight local GPUs before checking occupancy.
+    for row in state["gpus"].splitlines():
+        index, uuid, used, utilization = (field.strip() for field in row.split(","))
+        label = f"node{rank} GPU {index} ({uuid})"
+        if int(used) > 200:
+            raise ValueError(f"{label}: memory.used={used} MiB exceeds idle limit 200 MiB")
+        if int(utilization) != 0:
+            raise ValueError(f"{label}: utilization.gpu={utilization}% must be 0%")
     for row in state["processes"].splitlines():
-        pid, name = row.split(",", 1)
+        uuid, pid, name = (field.strip() for field in row.split(",", 2))
         import pwd
 
         owner = pwd.getpwuid(Path(f"/proc/{int(pid)}").stat().st_uid).pw_name
-        if rank != 0 or Path(name.strip()).name != "nvidia-cuda-mps-server" or owner != mps_owner:
-            raise ValueError(f"GPU occupied: {row}; owner={owner}")
+        if Path(name).name != "nvidia-cuda-mps-server" or owner != mps_owner:
+            raise ValueError(f"node{rank} GPU {uuid}: disallowed compute process pid={pid} "
+                             f"name={name} owner={owner}; only MPS_OWNER={mps_owner} "
+                             "nvidia-cuda-mps-server is allowed")
 
 
 def tagged_processes(out, proc_root=Path("/proc")):
