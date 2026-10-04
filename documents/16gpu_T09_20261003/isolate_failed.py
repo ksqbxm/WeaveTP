@@ -29,48 +29,55 @@ def case_processes(out, proc=Path('/proc')):
 def node_action(payload, rank, action):
     request = payload['request']
     root, source, target = (Path(payload[k]) for k in ('root_out', 'source', 'target'))
-    lock = root / 'isolate.lock'
-    controller_lock = root / 'compare.lock'
+    lock = root / 'compare.lock'
     t09.formal_path(str(root), payload['work'])
     t09.require(socket.gethostname().split('.')[0].lower() == request['nodes'][rank]['hostname'].lower(), 'wrong host')
     t09.require(source == root / request['case'] / f"r{request['repeat']}"
                 and target.parent == root / '_failed' and target.name == payload['transaction'], 'invalid isolation paths')
     t09.require(source.resolve() == source and target.resolve() == target, 'isolation paths must not use symlinks')
-    if action != 'prepare':
-        t09.require(t09.read(controller_lock) == payload, 'controller/isolation lock mismatch')
-    t09.require(not case_processes(str(source)), 'case still has tagged processes; isolation does not kill them')
+    receipt = {'rank': rank, 'action': action, 'ok': True}
     if action == 'prepare':
-        t09.require(source.is_dir() and not target.exists(), 'source missing or target exists')
-        t09.require(not (source / 'complete.json').exists(), 'refuse to isolate a completed case')
-        saved = t09.read(source / 'request.json')
-        t09.require(saved['case'] == request['case'] and saved['repeat'] == request['repeat']
-                    and saved['out_dir'] == str(source), 'case request identity mismatch')
-        # Same exclusive lock as the controller closes the check/start race.
-        t09.compare.save(controller_lock, payload)
+        # Lock before examining processes/evidence, so a controller cannot start between them.
         t09.compare.save(lock, payload)
-        target.parent.mkdir(exist_ok=True)
-        t09.require(source.stat().st_dev == target.parent.stat().st_dev, 'rename must stay on same filesystem')
-    else:
-        t09.require(t09.read(lock) == payload, 'isolation transaction lock mismatch')
-        if action == 'move':
-            t09.require(source.is_dir() and not target.exists(), 'source/target changed after prepare')
-            t09.compare.save(source / f"isolation.{payload['transaction']}.json",
-                             {'reason': payload['reason'], 'source': str(source), 'target': str(target),
-                              'rank': rank, 'transaction': payload['transaction']})
-            source.rename(target)
-        elif action == 'verify':
-            t09.require(target.is_dir() and not source.exists(), 'move unconfirmed')
-        elif action == 'rollback':
-            if target.exists():
-                t09.require(not source.exists(), 'both source and target exist; preserve evidence')
-                target.rename(source)
-            t09.require(source.is_dir() and not target.exists(), 'rollback unconfirmed')
-        elif action == 'unlock':
+        try:
+            t09.require(not case_processes(str(source)), 'case still has tagged processes; isolation does not kill them')
+            t09.require(source.is_dir() and not target.exists(), 'source missing or target exists')
+            t09.require(not (source / 'complete.json').exists(), 'refuse to isolate a completed case')
+            saved = t09.read(source / 'request.json')
+            t09.require(saved['case'] == request['case'] and saved['repeat'] == request['repeat']
+                        and saved['out_dir'] == str(source), 'case request identity mismatch')
+            target.parent.mkdir(exist_ok=True)
+            t09.require(source.stat().st_dev == target.parent.stat().st_dev, 'rename must stay on same filesystem')
+        except BaseException:
             lock.unlink()
-            controller_lock.unlink()
-        else:
-            raise ValueError('unknown isolation action')
-    return {'rank': rank, 'action': action, 'ok': True}
+            raise
+        return receipt
+    owned = lock.is_file() and t09.read(lock) == payload
+    if action == 'rollback' and not owned:
+        # A rejected prepare made no move. Do not remove another controller's lock.
+        t09.require(not target.exists(), 'unowned isolation target; preserve evidence')
+        return {**receipt, 'locked': False}
+    t09.require(owned, 'isolation transaction lock mismatch')
+    t09.require(not case_processes(str(source)), 'case still has tagged processes; isolation does not kill them')
+    if action == 'move':
+        t09.require(source.is_dir() and not target.exists(), 'source/target changed after prepare')
+        t09.compare.save(source / f"isolation.{payload['transaction']}.json",
+                         {'reason': payload['reason'], 'source': str(source), 'target': str(target),
+                          'rank': rank, 'transaction': payload['transaction']})
+        source.rename(target)
+    elif action == 'verify':
+        t09.require(target.is_dir() and not source.exists(), 'move unconfirmed')
+    elif action == 'rollback':
+        if target.exists():
+            t09.require(not source.exists(), 'both source and target exist; preserve evidence')
+            target.rename(source)
+        t09.require(source.is_dir() and not target.exists(), 'rollback unconfirmed')
+        return {**receipt, 'locked': True}
+    elif action == 'unlock':
+        lock.unlink()
+    else:
+        raise ValueError('unknown isolation action')
+    return receipt
 
 
 def rpc(payload, rank, action):
@@ -79,7 +86,12 @@ def rpc(payload, rank, action):
                             encoding='utf-8', timeout=90)
     t09.require(result.returncode == 0, f'node{rank} {action} failed: {result.stderr}')
     receipt = json.loads(result.stdout)
-    t09.require(receipt == {'rank': rank, 'action': action, 'ok': True}, 'unexpected isolation receipt')
+    expected = {'rank': rank, 'action': action, 'ok': True}
+    if action == 'rollback':
+        t09.require(type(receipt.get('locked')) is bool, 'missing rollback lock ownership')
+        expected['locked'] = receipt['locked']
+    t09.require(receipt == expected, 'unexpected isolation receipt')
+    return receipt
 
 
 def coordinate(payload, call=rpc):
@@ -94,18 +106,20 @@ def coordinate(payload, call=rpc):
         for rank in (0, 1):
             call(payload, rank, 'verify')
     except BaseException as original:
-        errors = []
+        errors, owned = [], []
         for rank in prepared:
             try:
-                call(payload, rank, 'rollback')
+                if call(payload, rank, 'rollback')['locked']:
+                    owned.append(rank)
             except BaseException as exc:
                 errors.append(f'node{rank}: {exc}')
         if errors:
             raise RuntimeError('isolation/rollback UNCONFIRMED; preserve locks; no resume: ' + '; '.join(errors)) from original
-        for rank in prepared:
+        for rank in reversed(owned):
             call(payload, rank, 'unlock')
         raise RuntimeError(f'isolation failed; both original locations restored: {original}') from original
-    for rank in (0, 1):
+    # Keep the controller's lock until the peer unlock is confirmed.
+    for rank in (1, 0):
         call(payload, rank, 'unlock')
     print(f"ISOLATED both nodes: {payload['target']} reason={payload['reason']}", flush=True)
 

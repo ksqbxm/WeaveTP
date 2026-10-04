@@ -87,7 +87,9 @@ def node_preflight(payload, rank, env):
             'PROFILE hash differs from T08 evidence')
     free = shutil.disk_usage('/data').free
     require(free >= MIN_FREE_BYTES, f'/data needs >= {MIN_FREE_BYTES} bytes; free={free}')
-    require(not (Path(payload['root_out']) / 'isolate.lock').exists(), 'unresolved isolation lock')
+    # Node 0 holds the controller lock; a peer lock belongs to manual isolation.
+    if rank == 1:
+        require(not (Path(payload['root_out']) / 'compare.lock').exists(), 'unresolved peer lock')
     state = compare.gpu_state()
     compare.check_idle(state, rank, env.get('MPS_OWNER'))
     return {'rank': rank, 'identity': payload['identity'], 'free_bytes': free,
@@ -142,7 +144,10 @@ def round_summary(settings, repeat):
         if not (out / 'complete.json').is_file():
             rows.append(f"{request['case']}=pending")
             continue
-        compare.validate_result(out / 'result.json', request['case'])
+        complete = read(out / 'complete.json')
+        result_sha = compare.validate_result(out / 'result.json', request['case'])
+        require(complete['config_sha256'] == compare.config_hash(request)
+                and complete['result_sha256'] == result_sha, 'round completion does not match request/result')
         switches = read(out / 'result.json')['switches']
         expansion = sum(switches[i]['switch_wall_s'] for i in (0, 2)) / 2
         shrink = sum(switches[i]['switch_wall_s'] for i in (1, 3)) / 2
@@ -194,7 +199,6 @@ def main(argv=None):
     require(REPO / 'code/current' == Path(env['CODE_DIR']), 'entrypoint must belong to CODE_DIR checkout')
     root = Path(settings['root_out'])
     root.mkdir(parents=True, exist_ok=True)
-    require(not (root / 'isolate.lock').exists(), 'unresolved isolation; do not resume')
     lock = root / 'compare.lock'
     compare.save(lock, {'pid': os.getpid(), 'hostname': socket.gethostname()})
     try:

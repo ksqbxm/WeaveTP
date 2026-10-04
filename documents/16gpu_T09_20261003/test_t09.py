@@ -238,6 +238,18 @@ class OperationsTests(unittest.TestCase):
     def test_disk_constant_matches_budget(self):
         self.assertEqual(t09.MIN_FREE_BYTES, max(5_000_000_000, 9 * 500_000_000 * 2))
 
+    def test_round_summary_rejects_stale_or_changed_completion(self):
+        request = self.fixture.requests[0]
+        compare.run_case(request, control.Nodes(self.fixture.result))
+        out = Path(request['out_dir'])
+        original = t09.read(out / 'complete.json')
+        for field in ('config_sha256', 'result_sha256'):
+            with self.subTest(field=field):
+                marker = {**original, field: '0' * 64}
+                (out / 'complete.json').write_text(json.dumps(marker), encoding='utf-8')
+                with self.assertRaisesRegex(ValueError, 'completion'), contextlib.redirect_stdout(io.StringIO()):
+                    t09.round_summary(self.settings, 1)
+
     def test_preflight_checks_both_nodes_and_rejects_each_gate(self):
         work = self.fixture.path
         code = work / 'repo' / 'code/current'
@@ -270,6 +282,13 @@ class OperationsTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, '/data needs'):
                     t09.node_preflight(payload, rank, env)
                 disk.return_value.free += 1
+                root = Path(payload['root_out'])
+                root.mkdir(parents=True, exist_ok=True)
+                if rank == 1:
+                    compare.save(root / 'compare.lock', {'transaction': 'unfinished isolation'})
+                    with self.assertRaisesRegex(ValueError, 'lock'):
+                        t09.node_preflight(payload, rank, env)
+                    (root / 'compare.lock').unlink()
                 for key, value in (('NCCL_DEBUG', 'INFO'), ('WEAVETP_COMMIT', 'c' * 40), ('NODE_RANK', 'bad')):
                     with self.assertRaises(ValueError):
                         t09.node_preflight(payload, rank, {**env, key: value})
@@ -297,6 +316,65 @@ class OperationsTests(unittest.TestCase):
 
 
 class IsolationTests(unittest.TestCase):
+    def node_fixtures(self):
+        fixture = control.CompareTests()
+        fixture.setUp()
+        self.addCleanup(fixture.doCleanups)
+        payloads = []
+        for rank in (0, 1):
+            root = fixture.path / f'node{rank}'
+            request = copy.deepcopy(fixture.requests[0])
+            source = root / 'fixed/r1'
+            source.mkdir(parents=True)
+            request['out_dir'] = str(source)
+            compare.save(source / 'request.json', request)
+            payloads.append({'request': request, 'root_out': str(root), 'work': str(root.parent),
+                             'source': str(source), 'target': str(root / '_failed/fixed_r1_fixture'),
+                             'transaction': 'fixed_r1_fixture', 'reason': 'reason'})
+        return payloads
+
+    def test_prepare_rejection_releases_owned_lock_and_preserves_foreign_lock(self):
+        payloads = self.node_fixtures()
+        def call(payload, rank, action):
+            with mock.patch.object(isolate.socket, 'gethostname', return_value=f'SL306{rank}'):
+                return isolate.node_action(payloads[rank], rank, action)
+
+        peer = Path(payloads[1]['root_out'])
+        for rejection in ('completed', 'foreign_lock'):
+            with self.subTest(rejection=rejection):
+                rejected = peer / ('fixed/r1/complete.json' if rejection == 'completed' else 'compare.lock')
+                compare.save(rejected, {'untouched': True})
+                with mock.patch.object(t09, 'formal_path'), mock.patch.object(isolate, 'case_processes', return_value=[]):
+                    with self.assertRaisesRegex(RuntimeError, 'both original locations restored'):
+                        isolate.coordinate({}, call)
+                self.assertFalse((Path(payloads[0]['root_out']) / 'compare.lock').exists())
+                self.assertEqual(t09.read(rejected), {'untouched': True})
+                if rejection == 'completed':
+                    self.assertFalse((peer / 'compare.lock').exists())
+                for payload in payloads:
+                    self.assertTrue(Path(payload['source']).is_dir())
+                    self.assertFalse(Path(payload['target']).exists())
+                rejected.unlink()
+
+    def test_lost_reply_after_prepare_or_move_restores_real_directories(self):
+        for failed_action in ('prepare', 'move'):
+            with self.subTest(failed_action=failed_action):
+                payloads = self.node_fixtures()
+                originals = [Path(p['source'], 'request.json').read_bytes() for p in payloads]
+                def call(payload, rank, action):
+                    with mock.patch.object(isolate.socket, 'gethostname', return_value=f'SL306{rank}'):
+                        receipt = isolate.node_action(payloads[rank], rank, action)
+                    if rank == 1 and action == failed_action:
+                        raise RuntimeError('reply lost after successful filesystem operation')
+                    return receipt
+                with mock.patch.object(t09, 'formal_path'), mock.patch.object(isolate, 'case_processes', return_value=[]):
+                    with self.assertRaisesRegex(RuntimeError, 'both original locations restored'):
+                        isolate.coordinate({}, call)
+                for payload, raw in zip(payloads, originals):
+                    self.assertEqual(Path(payload['source'], 'request.json').read_bytes(), raw)
+                    self.assertFalse(Path(payload['target']).exists())
+                    self.assertFalse(Path(payload['root_out'], 'compare.lock').exists())
+
     def test_node_rename_records_reason_and_rollback_preserves_bytes(self):
         fixture = control.CompareTests()
         fixture.setUp()
@@ -361,7 +439,7 @@ class IsolationTests(unittest.TestCase):
         calls = []
         isolate.coordinate({'target': 'fixture', 'reason': 'CPU fixture'}, lambda p, r, a: calls.append((r, a)))
         self.assertEqual(calls, [(0, 'prepare'), (1, 'prepare'), (0, 'move'), (1, 'move'),
-                                 (0, 'verify'), (1, 'verify'), (0, 'unlock'), (1, 'unlock')])
+                                 (0, 'verify'), (1, 'verify'), (1, 'unlock'), (0, 'unlock')])
 
     def test_second_move_failure_restores_both_before_unlock(self):
         calls, moved = [], set()
@@ -373,10 +451,11 @@ class IsolationTests(unittest.TestCase):
                 moved.add(rank)
             if action == 'rollback':
                 moved.discard(rank)
+                return {'locked': True}
         with self.assertRaisesRegex(RuntimeError, 'both original locations restored'):
             isolate.coordinate({}, call)
         self.assertEqual(moved, set())
-        self.assertEqual(calls[-4:], [(0, 'rollback'), (1, 'rollback'), (0, 'unlock'), (1, 'unlock')])
+        self.assertEqual(calls[-4:], [(0, 'rollback'), (1, 'rollback'), (1, 'unlock'), (0, 'unlock')])
 
     def test_lost_move_reply_and_unreachable_rollback_preserve_locks(self):
         calls = []
@@ -384,9 +463,21 @@ class IsolationTests(unittest.TestCase):
             calls.append((rank, action))
             if rank == 1 and action in ('move', 'rollback'):
                 raise RuntimeError('unreachable')
+            if action == 'rollback':
+                return {'locked': True}
         with self.assertRaisesRegex(RuntimeError, 'UNCONFIRMED'):
             isolate.coordinate({}, call)
         self.assertNotIn('unlock', [a for r, a in calls])
+
+    def test_peer_unlock_failure_keeps_controller_locked(self):
+        calls = []
+        def call(payload, rank, action):
+            calls.append((rank, action))
+            if (rank, action) == (1, 'unlock'):
+                raise RuntimeError('peer unlock unconfirmed')
+        with self.assertRaisesRegex(RuntimeError, 'peer unlock unconfirmed'):
+            isolate.coordinate({}, call)
+        self.assertNotIn((0, 'unlock'), calls)
 
 
 if __name__ == '__main__':

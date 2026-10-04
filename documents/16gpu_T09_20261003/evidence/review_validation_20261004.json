@@ -1,0 +1,128 @@
+{
+  "tests": 181,
+  "passed": 181,
+  "suites": [
+    {
+      "suite": "code\\current\\tests\\unit_tests\\resharding\\test_summarize_weavetp_formal.py",
+      "exit_code": 0,
+      "tests": 28,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "passed": 28
+    },
+    {
+      "suite": "code\\current\\tests\\unit_tests\\resharding\\test_compare_weavetp_16gpu.py",
+      "exit_code": 0,
+      "tests": 29,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "passed": 29
+    },
+    {
+      "suite": "code\\current\\tests\\unit_tests\\resharding\\test_profile_weavetp_16gpu.py",
+      "exit_code": 0,
+      "tests": 18,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "passed": 18
+    },
+    {
+      "suite": "code\\current\\tests\\unit_tests\\resharding\\test_server_acceptance.py",
+      "exit_code": 0,
+      "tests": 11,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "passed": 11
+    },
+    {
+      "suite": "code\\current\\tests\\unit_tests\\resharding\\test_weavetp_review_findings.py",
+      "exit_code": 0,
+      "tests": 4,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "passed": 4
+    },
+    {
+      "suite": "code\\current\\tests\\unit_tests\\resharding\\test_weavetp_observations.py",
+      "exit_code": 0,
+      "tests": 25,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "passed": 25
+    },
+    {
+      "suite": "documents\\16gpu_T06_T07_review_20261001\\reproduce_findings.py",
+      "exit_code": 0,
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "passed": 3
+    },
+    {
+      "suite": "documents\\16gpu_T08_20261001\\check_commands.py",
+      "exit_code": 0,
+      "tests": 17,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "passed": 17
+    },
+    {
+      "suite": "documents\\16gpu_T085_20261001\\test_smoke.py",
+      "exit_code": 0,
+      "tests": 24,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "passed": 24
+    },
+    {
+      "suite": "documents\\16gpu_T09_20261003\\test_t09.py",
+      "exit_code": 0,
+      "tests": 22,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "passed": 22
+    }
+  ],
+  "dry_runs": {
+    "all": {
+      "sha256": "3fe96d75b162cc911491a12b6f0f77c23292288c0f2b5146f5540f743d06281d",
+      "cases": 9
+    },
+    "only_weavetp_r1": {
+      "sha256": "bb99b325c53d0f37aa57ab795d5d13b959dc6370cc08b8eeb00fc8cb8536ebb3",
+      "cases": 1
+    },
+    "r1": {
+      "sha256": "d4b67bef0b70b82d58acb3489e583d4bb480d5a30db053bef5abcf6e08dc0717",
+      "cases": 3
+    }
+  },
+  "statistics_functions_unchanged": [
+    "seconds",
+    "same_setting",
+    "switch_metrics",
+    "aggregate",
+    "check_table2",
+    "improvement",
+    "displayed_pct",
+    "compare_percentages",
+    "comparisons",
+    "summarize",
+    "markdown_table",
+    "main"
+  ],
+  "protected_diff_empty": true,
+  "gpu_started": false,
+  "server_connected": false,
+  "ok": true
+}

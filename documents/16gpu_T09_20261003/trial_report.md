@@ -10,6 +10,22 @@
 
 配置来源为执行器 request.json 和两端 exit 回执；首次完成前核验执行器已收集的两端 RPC exit 回执（peer 文件不在 master 本地），complete.json 写成后及续跑时读取其 exits，并核对 request/config/result hash。benchmark 没有输出 gain 字段，故不把该缺失字段冒充运行取证；benchmark 与 megatron/ 完全未改。
 
+## 2026-10-04 审阅与修复
+
+审阅基线为已发布的 `e608248ceca6cbfb6ab87f1e2bfc6abad7e40ca7`。本轮重新阅读 CODEX.md、总计划、分步 T09、适用 AGENTS.md 和贡献说明，检查正式配置/取证、执行器续跑、实际计划校验、操作脚本、人工隔离与测试。以下问题先用 CPU 反例复现，再修改；没有调整 W2、wave 上限、9 GB 门槛或预测模型。
+
+| 问题 | 根因与修复 | 回归证据 |
+|---|---|---|
+| 隔离准备被拒绝后，正常失败变成 UNCONFIRMED 并遗留另一端的锁 | 旧回滚要求所有尝试过 prepare 的节点都有两把锁。删除 isolate.lock，只保留 compare.lock；先加锁再检查进程/证据；准备失败释放本端刚取得的锁；回滚明确返回锁归属，不触碰其他事务的锁 | 完成目录拒绝、外来锁拒绝、准备/移动成功但回执丢失；真实临时目录回滚后原 request 字节不变 |
+| 主机先解锁造成并发进入窗口，对端 compare.lock 单独残留时预检不拦截 | 所有正常/回滚出口统一先解锁对端，再解锁主机；对端解锁不确认时保留主机锁；节点 1 预检拒绝 compare.lock | 成功与回滚解锁顺序、对端解锁失败、对端遗留锁门禁 |
+| ONLY/ROUNDS 的轮次小结会展示过期或变动的其他已完成结果 | 原小结只检查 result 内容。现将 complete 的配置 hash 与本次请求对照，并核验 result hash，再输出均值 | Fixed 完成标记的配置 hash 或结果 hash 不符均被拒绝 |
+
+只修改 T09 的 `t09.py`、`isolate_failed.py` 和 `test_t09.py`，同步本报告、总/分步计划与 SHA 清单；不保留旧双锁兼容分支。没有更改 code/current，故本轮未引入 Python import 排序变更。旧 2026-10-03 验收记录保留，不覆盖历史结果。
+
+验收命令：`python -B -X utf8 documents/16gpu_T09_20261003/check_cpu.py --output-dir E:/data/weavetp_t09_review_20261004`。正式链 **181/181** 通过，其中 T09 **22/22**；原 T08.5 **24/24**。九 case、ONLY 单 case、ROUNDS=r1 的 dry-run 分别为 9/1/3 项，全文 SHA 与 2026-10-03 完全相同；Fixed/Directional 六项仍与 `3bc12ce` 逐字节相同。Python 编译、shell 语法、统计 AST、受保护目录 diff 和 `git diff --check` 通过。新回执为 [review_validation_20261004.json](./evidence/review_validation_20261004.json)，T09 原始测试日志为 [review_t09_20261004.log](./evidence/review_t09_20261004.log)，其余日志保存在上述 E:/data 输出目录。
+
+本轮未重跑未变动的探索计算和历史 54 项复核，不把旧结果计入这次 181 项。未连接服务器、未启动 GPU、未做冒烟或部署。跨机器 rename 仍无法原子提交；通信中断且补偿无法确认时保留事务锁、停止，不能将 CPU 模拟通过当成 Linux/SSH 实测。原有缩容 wave 负载风险及 2048 预案仍有效。
+
 ## 第 5 项：每机磁盘写入估算
 
 十进制 MB/GB，按每次独立 launch 的冷缓存保守预算；这不是实测磁盘上界。历史九份 result.json 为 0.509–0.576 MB；16 卡新增组/计划流量观测，因此结果预留 16 MB。launcher 以 tee 写 run.log，执行器又捕获到 nodeN.log；rank 0 会打印完整 JSON，所以日志必须重复预算。正式白名单不传 NCCL_DEBUG_FILE，WARN 消息计入这两份日志，不把 T08 INFO 日志重复算到正式 launch。
@@ -133,7 +149,7 @@ source /data/ubuntu/lxh/weavetp/env.sh
 "$PYTHON" -B -X utf8 "$REPO/documents/16gpu_T09_20261003/isolate_failed.py" weavetp_r1
 ```
 
-两端检查精确 case 标签进程（含监督进程），取得与控制器互斥的 compare.lock，准备通过后将两端相同 case/rK 移入 `_failed/<case>_r<K>_<UTC>/` 并保存原因。不允许隔离已有 complete 的成功 case。单边失败执行补偿回滚；若断连使回滚无法证实，保留 compare.lock/isolate.lock，报 UNCONFIRMED、禁止续跑，需人工修复连接核对两端后处理。两机无共享文件系统，无法提供跨机器原子 rename；不会把不确定状态称为“两边已隔离”。执行器只枚举固定 case/rK，汇总仅接受显式九文件 manifest 并拒绝 _failed，隔离证据不混入统计。
+两端先取得与控制器互斥的 compare.lock，再检查精确 case 标签进程（含监督进程）；准备通过后将两端相同 case/rK 移入 `_failed/<case>_r<K>_<UTC>/` 并保存原因。不允许隔离已有 complete 的成功 case。准备拒绝不遗留本次取得的锁，也不删除其他事务的锁；移动失败执行补偿回滚。若断连使回滚无法证实，保留 compare.lock，报 UNCONFIRMED、禁止续跑，需人工修复连接核对两端后处理。只有对端解锁确认后才释放主机锁，对端遗留 compare.lock 也会阻断 T09 预检。两机无共享文件系统，无法提供跨机器原子 rename；不会把不确定状态称为“两边已隔离”。执行器只枚举固定 case/rK，汇总仅接受显式九文件 manifest 并拒绝 _failed，隔离证据不混入统计。
 
 ## 本地验收与变更文件
 
