@@ -199,6 +199,9 @@ else
 fi
 
 LIVE_FEATURE_ARGS=()
+if [[ "${KV_REQUEST_IDENTITY:-0}" == "1" ]]; then
+    LIVE_FEATURE_ARGS+=(--live-kv-request-identity)
+fi
 if [[ "$PERSISTENT_PACK_BUFFERS" == "1" ]]; then
     LIVE_FEATURE_ARGS+=(--live-persistent-pack-buffers)
 fi

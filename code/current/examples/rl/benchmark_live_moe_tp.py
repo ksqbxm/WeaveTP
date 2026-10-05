@@ -128,10 +128,14 @@ class LiveTopologyInvariantTopKRouter(TopKRouter):
 
 
 class StaticKVCacheModule(torch.nn.Module):
-    """Expose a StaticInferenceContext KV cache to the reshard planner."""
+    """Expose KV shards with a request/batch identity stable across TP layouts."""
 
-    def __init__(self, context: StaticInferenceContext, pg_collection) -> None:
+    def __init__(
+        self, context: StaticInferenceContext, pg_collection, *, request_id: str | None
+    ) -> None:
         super().__init__()
+        if request_id is not None and (not isinstance(request_id, str) or not request_id.strip()):
+            raise ValueError("KV request_id must be a non-empty string")
         self.pg_collection = pg_collection
         self._entries: list[tuple[str, torch.nn.Parameter]] = []
         for layer_number in sorted(context.key_value_memory_dict):
@@ -147,6 +151,8 @@ class StaticKVCacheModule(torch.nn.Module):
                 parameter.partition_stride = 1
                 parameter.allreduce = True
                 name = f"layer_{int(layer_number):04d}.{kind}"
+                if request_id is not None:
+                    name = f"request_{request_id}::{name}"
                 self._entries.append((name, parameter))
         if not self._entries:
             raise RuntimeError("real model forward did not allocate a static KV cache")
@@ -179,6 +185,11 @@ class LiveStateBundle(torch.nn.Module):
 
 def add_live_args(parser):
     group = parser.add_argument_group(title="live MoE TP benchmark")
+    group.add_argument(
+        "--live-kv-request-identity",
+        action="store_true",
+        help="Scope KV transfers and synthetic tokens by TP4 request domain (opt-in).",
+    )
     group.add_argument(
         "--live-model-preset",
         choices=("synthetic", "deepseek-v2-lite"),
@@ -651,9 +662,41 @@ def _load_bandwidth_matrix(args, world_size: int) -> dict[tuple[int, int], float
     }
 
 
+def _configure_request_domains(args, src_pg, dst_pg, control_group) -> dict:
+    """Pair synthetic requests by TP4 DP ordinal, shared by two TP2 replicas.
+
+    Real request callers must supply their own stable request/batch identity to
+    StaticKVCacheModule instead of inferring identity from physical DP ordinals.
+    """
+    domain_id = dist.get_rank(dst_pg.dp)
+    local_mapping = {
+        "rank": dist.get_rank(),
+        "request_id": str(domain_id),
+        "token_offset": domain_id,
+        "tp2_ranks": dist.get_process_group_ranks(src_pg.tp),
+        "tp4_ranks": dist.get_process_group_ranks(dst_pg.tp),
+    }
+    rank_mapping = [None] * dist.get_world_size(control_group)
+    dist.all_gather_object(rank_mapping, local_mapping, group=control_group)
+    # Every rank checks the same gathered topology before either model prefills.
+    if any(not set(row["tp2_ranks"]).issubset(row["tp4_ranks"]) for row in rank_mapping):
+        raise ValueError("synthetic KV request domains require TP2 groups nested within TP4 groups")
+    domain_count = len({row["request_id"] for row in rank_mapping})
+    if args.padded_vocab_size < domain_count:
+        raise ValueError("padded vocab size must distinguish every KV request domain")
+    args.live_request_domain_id = domain_id
+    return {
+        "scheme": "synthetic-tp4-dp-request-domains-v1",
+        "domain_count": domain_count,
+        "rank_mapping": rank_mapping,
+    }
+
+
 def _make_tokens(args, length: int, *, offset: int = 0) -> torch.Tensor:
     device = torch.device("cuda", torch.cuda.current_device())
     values = torch.arange(offset, offset + length, device=device, dtype=torch.long)
+    if args.live_kv_request_identity:
+        values = values + args.live_request_domain_id
     values = (values + 17).remainder(args.padded_vocab_size)
     return values.unsqueeze(0).expand(args.micro_batch_size, -1).contiguous()
 
@@ -691,6 +734,8 @@ def _decode(
     token_value: int,
 ) -> tuple[torch.Tensor, float]:
     device = torch.device("cuda", torch.cuda.current_device())
+    if args.live_kv_request_identity:
+        token_value += args.live_request_domain_id
     tokens = torch.full(
         (args.micro_batch_size, 1),
         token_value % args.padded_vocab_size,
@@ -1408,6 +1453,10 @@ def run_live_benchmark() -> None:
     all_ranks = list(range(world_size))
     reshard_group = dist.new_group(ranks=all_ranks, backend="nccl")
     control_group = dist.new_group(ranks=all_ranks, backend="gloo")
+    if args.live_kv_request_identity:
+        kv_request_domains = _configure_request_domains(
+            args, src_model.pg_collection, dst_model.pg_collection, control_group
+        )
     parallel_groups = (
         observations.observe_parallel_groups(
             torch, dist, {src_tp: src_model.pg_collection, dst_tp: dst_model.pg_collection},
@@ -1482,8 +1531,9 @@ def run_live_benchmark() -> None:
             candidate_layers=dst_layer_outputs,
             control_group=control_group,
         )
-    src_kv = StaticKVCacheModule(src_context, src_model.pg_collection)
-    dst_kv = StaticKVCacheModule(dst_context, dst_model.pg_collection)
+    request_id = str(args.live_request_domain_id) if args.live_kv_request_identity else None
+    src_kv = StaticKVCacheModule(src_context, src_model.pg_collection, request_id=request_id)
+    dst_kv = StaticKVCacheModule(dst_context, dst_model.pg_collection, request_id=request_id)
     src_bundle = LiveStateBundle(src_model, src_kv)
     dst_bundle = LiveStateBundle(dst_model, dst_kv)
 
@@ -2269,6 +2319,8 @@ def run_live_benchmark() -> None:
             str(tp): tracker.snapshot() for tp, tracker in trackers.items()
         },
     }
+    if args.live_kv_request_identity:
+        result["kv_request_domains"] = kv_request_domains
     _write_results(args, result)
     if rank == 0:
         print(json.dumps(result, indent=2))

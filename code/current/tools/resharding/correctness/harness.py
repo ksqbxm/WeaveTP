@@ -1,12 +1,22 @@
 """Adapters exercising actual Megatron planner and launch/wait/commit on tiny tensors."""
 from dataclasses import replace
+from types import SimpleNamespace
+from unittest.mock import patch
 
 import torch
 
 from megatron.core.resharding.async_execution import launch_reshard_plan
 from megatron.core.resharding.copy_services.base import CopyHandle, CopyService
-from megatron.core.resharding.planner import _determine_source_ranks_for_dst_param
-from megatron.core.resharding.utils import ParameterMetadata, ReshardPlan, TransferOp
+from megatron.core.resharding.planner import (
+    _determine_source_ranks_for_dst_param,
+    build_centralized_reshard_plan,
+)
+from megatron.core.resharding.utils import (
+    ParameterMetadata,
+    ReshardPlan,
+    TransferOp,
+    extract_param_metadata,
+)
 
 from .reference import Layout
 
@@ -51,6 +61,39 @@ def plans_for(shape, src_layout, dst_layout, name='w', dtype=torch.float32, task
             plans[peer].send_ops.append(TransferOp(name, rank, True, source_index, target_index, task))
             plans[rank].recv_ops.append(TransferOp(name, peer, False, target_index, source_index, task))
             task += 1
+    return plans
+
+
+def centralized_plans(sources, targets, **kwargs):
+    """Run real metadata extraction and central planning with CPU collective doubles.
+
+    Fixture process groups are rank lists; only distributed process-group queries
+    and metadata gather/scatter are mocked. Source selection is never mocked.
+    """
+    size = len(sources)
+    plans = {}
+    with patch('torch.distributed.get_process_group_ranks', side_effect=list), \
+            patch('torch.distributed.get_world_size', return_value=size):
+        gathered = iter([
+            [[extract_param_metadata(p, name, rank, modules[rank].pg_collection)
+              for name, p in modules[rank].named_parameters()] for rank in range(size)]
+            for modules in (sources, targets)
+        ])
+
+        def gather(local, output, **_kwargs):
+            output[:] = next(gathered)
+            assert local == output[0]
+
+        def scatter(output, all_plans, **_kwargs):
+            plans.update(enumerate(all_plans))
+            output[0] = all_plans[0]
+
+        with patch('torch.distributed.gather_object', side_effect=gather), \
+                patch('torch.distributed.scatter_object_list', side_effect=scatter):
+            build_centralized_reshard_plan(
+                sources[0], targets[0],
+                group=SimpleNamespace(rank=lambda: 0, size=lambda: size), **kwargs,
+            )
     return plans
 
 

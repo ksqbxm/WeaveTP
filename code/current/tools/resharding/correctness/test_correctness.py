@@ -6,6 +6,7 @@ import unittest
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import Mock, patch
 
 import torch
 
@@ -14,15 +15,33 @@ from megatron.core.resharding.live import restrict_plan_sequence
 from megatron.core.resharding.planner import _determine_source_ranks_for_dst_param
 from megatron.core.resharding.transforms import ReshardTransform
 from megatron.core.resharding.utils import (
-    ReshardPlan, TransferOp, assign_ep_resolved_name_inplace, select_src_metadata_balanced,
+    ReshardPlan,
+    TransferOp,
+    assign_ep_resolved_name_inplace,
+    select_src_metadata_balanced,
 )
 from tools.resharding.residency_audit_probe import ResidencyAuditProbe
 
 from .harness import (
-    Bundle, Mailbox, MailService, finish_all, fixture_tensors, launch_all, metadata, param, plans_for,
+    Bundle,
+    Mailbox,
+    MailService,
+    centralized_plans,
+    finish_all,
+    fixture_tensors,
+    launch_all,
+    metadata,
+    param,
+    plans_for,
 )
 from .reference import (
-    Identity, Layout, StateError, StateGate, assert_live_source, exact_chunks, markers,
+    Identity,
+    Layout,
+    StateError,
+    StateGate,
+    assert_live_source,
+    exact_chunks,
+    markers,
     verify_prefix_identity,
 )
 
@@ -38,10 +57,12 @@ def benchmark_helpers():
     root = Path(__file__).resolve().parents[3]
     path = root / 'examples/rl/benchmark_live_moe_tp.py'
     tree = ast.parse(path.read_text(encoding='utf-8'))
-    names = {'StaticKVCacheModule', 'LiveStateBundle', '_poison_kv'}
+    names = {'StaticKVCacheModule', 'LiveStateBundle', '_poison_kv',
+             '_configure_request_domains', '_make_tokens', '_decode'}
     nodes = [node for node in tree.body if isinstance(node, (ast.ClassDef, ast.FunctionDef)) and node.name in names]
     assert {n.name for n in nodes} == names
-    namespace = dict(torch=torch, GPTModel=torch.nn.Module, StaticInferenceContext=object)
+    namespace = dict(torch=torch, dist=torch.distributed,
+                     GPTModel=torch.nn.Module, StaticInferenceContext=object)
     exec(compile(ast.Module(nodes, type_ignores=[]), str(path), 'exec'), namespace)
     return namespace
 
@@ -348,35 +369,254 @@ class KVTests(unittest.TestCase):
                                  'reference_repair': False})
 
 
+class RequestDomainTests(unittest.TestCase):
+    def setUp(self):
+        self.helpers = benchmark_helpers()
+
+    @staticmethod
+    def _pg(rank, tp):
+        return SimpleNamespace(tp=list(range(rank // tp * tp, (rank // tp + 1) * tp)),
+                               dp=list(range(rank % tp, 8, tp)), pp=[rank])
+
+    def _bundles(self, tp, *, target=False, scoped=True, dtype=torch.float32, missing=False):
+        bundles, expected = {}, {}
+        for rank in range(8):
+            pg = self._pg(rank, tp)
+            layout = Layout(tuple(pg.tp), 2)
+            domain = rank // 4
+            full = [markers((8, 2, 8, channels), domain * 2 + kind, dtype)
+                    for kind, channels in enumerate((3, 2))]
+            shards = [layout.shard(tensor, rank) for tensor in full]
+            tensors = [torch.full_like(tensor, float('nan')) if target else tensor.clone()
+                       for tensor in shards]
+            context = SimpleNamespace(key_value_memory_dict={1: tuple(tensors)})
+            request_id = 'absent' if missing and domain == 0 else str(domain)
+            kv = self.helpers['StaticKVCacheModule'](context, pg, request_id=request_id)
+            weight = markers((3, 4), 6, dtype)
+            model = Bundle({'w': param(torch.full_like(weight, float('nan')) if target else weight.clone())})
+            model.config, model.pg_collection = None, pg
+            bundle = self.helpers['LiveStateBundle'](model, kv)
+            if not scoped:
+                bundle._entries = [(f'kv::{name.split("::")[-1]}' if name.startswith('kv::') else name, p)
+                                   for name, p in bundle.named_parameters()]
+            bundles[rank] = bundle
+            expected[rank] = dict(zip(dict(bundle.named_parameters()), [weight, *shards]))
+        return bundles, expected
+
+    @staticmethod
+    def _policy(aware=False, exclude=False, reverse=False):
+        options = {'source_exclude_local': exclude}
+        if aware:
+            options.update(
+                prefer_local_source=False, source_latency_us=0.0,
+                source_bandwidth_gbps={
+                    (s, d): (1000.0 + (7 - s if reverse else s)) if s // 4 != d // 4 else 1.0
+                    for s in range(8) for d in range(8)
+                },
+                source_reroute_min_bytes=0, source_reroute_min_gain_pct=0.0,
+                source_reroute_min_contention_gain_pct=0.0, source_reroute_min_global_gain_pct=0.0,
+            )
+        return options
+
+    def _assert_scoped(self, plans):
+        for rank, plan in plans.items():
+            for op in plan.recv_ops + plan.send_ops:
+                if op.param_name.startswith('kv::'):
+                    self.assertEqual(rank // 4, op.peer_rank // 4)
+                    self.assertTrue(op.param_name.startswith(f'kv::request_{rank // 4}::'))
+
+    def test_roundtrip_prefix_delta_and_replanning_preserve_request_contents(self):
+        weight_crossings = 0
+        for dtype in (torch.float32, torch.bfloat16):
+            for aware, exclude in ((False, False), (False, True), (True, False), (True, True)):
+                with self.subTest(dtype=dtype, aware=aware, exclude=exclude):
+                    sources, source_expected = self._bundles(2, dtype=dtype)
+                    for module in sources.values():
+                        for name, p in module.named_parameters():
+                            if name.startswith('kv::'):
+                                p.data[2:] = float('nan')
+                    for tp, prefix_end, delta_end in ((4, 2, 5), (2, 5, 7)):
+                        targets, expected = self._bundles(tp, target=True, dtype=dtype)
+                        options = self._policy(aware, exclude)
+                        plans = centralized_plans(sources, targets, **options)
+                        self._assert_scoped(plans)
+                        if aware:
+                            plans = centralized_plans(sources, targets, **self._policy(True, exclude, True))
+                            self._assert_scoped(plans)
+                        baseline = {r: getattr(p, 'baseline_plan', p) for r, p in plans.items()}
+                        self._assert_scoped(baseline)
+                        weight_crossings += sum(
+                            op.param_name.startswith('weight::') and op.peer_rank // 4 != r // 4
+                            for r, p in plans.items() for op in p.recv_ops
+                        )
+                        counts = {r: {n: torch.zeros_like(t, dtype=torch.int16)
+                                      for n, t in expected[r].items() if n.startswith('kv::')}
+                                  for r in targets}
+                        for begin, end in ((0, prefix_end), (prefix_end, delta_end)):
+                            if begin:
+                                # Append new tokens after prefix transport, as in live overlap.
+                                for r, module in sources.items():
+                                    for name, p in module.named_parameters():
+                                        if name.startswith('kv::'):
+                                            p.data[begin:end].copy_(source_expected[r][name][begin:end])
+                            before = {r: {n: p.detach().clone() for n, p in m.named_parameters()}
+                                      for r, m in sources.items()}
+                            phase = {r: restrict_plan_sequence(p, start=begin, end=end,
+                                                               include_non_kv=begin == 0)
+                                     for r, p in (baseline if begin else plans).items()}
+                            txns, _ = launch_all(phase, sources, targets)
+                            finish_all(txns)
+                            for r, module in targets.items():
+                                for op in phase[r].recv_ops:
+                                    if op.param_name.startswith('kv::'):
+                                        counts[r][op.param_name][op.my_slice] += 1
+                                for name, p in module.named_parameters():
+                                    if name.startswith('kv::'):
+                                        exact_chunks(p[:end], expected[r][name][:end], f'{r}: {name}')
+                                        self.assertTrue(bool((counts[r][name][:end] == 1).all()))
+                                        self.assertTrue(bool((counts[r][name][end:] == 0).all()))
+                                        self.assertTrue(bool(torch.isnan(p[end:]).all()))
+                                    else:
+                                        exact_chunks(p, expected[r][name], 'shared weights')
+                            for r, module in sources.items():
+                                for name, p in module.named_parameters():
+                                    torch.testing.assert_close(p, before[r][name], rtol=0, atol=0, equal_nan=True)
+                        # Reverse migration uses the actual migrated state, not rebuilt data.
+                        sources, source_expected = targets, expected
+        self.assertGreater(weight_crossings, 0, 'weights must remain eligible across request domains')
+        EVIDENCE.append({'case': 'KV request domains', 'ranks': 8, 'requests': 2,
+                         'directions': ['2->4', '4->2'], 'dtypes': ['float32', 'bfloat16'],
+                         'central_planner': 'actual', 'transport': 'CPU mailbox',
+                         'cross_request_kv_transfers': 0, 'cross_request_weight_transfers': weight_crossings,
+                         'GPU': 'NOT_RUN'})
+
+    def test_old_unscoped_names_reproduce_cross_request_corruption(self):
+        for stp, dtp in ((2, 4), (4, 2)):
+            for aware in (False, True):
+                with self.subTest(direction=(stp, dtp), aware=aware):
+                    sources, _ = self._bundles(stp, scoped=False)
+                    targets, expected = self._bundles(dtp, target=True, scoped=False)
+                    plans = centralized_plans(sources, targets, **self._policy(aware, True))
+                    crossings = [(r, op) for r, p in plans.items() for op in p.recv_ops
+                                 if op.param_name.startswith('kv::') and op.peer_rank // 4 != r // 4]
+                    self.assertTrue(crossings)
+                    phase = {r: restrict_plan_sequence(p, start=0, end=5, include_non_kv=False)
+                             for r, p in plans.items()}
+                    txns, _ = launch_all(phase, sources, targets)
+                    finish_all(txns)
+                    rank, op = crossings[0]
+                    with self.assertRaises(StateError):
+                        exact_chunks(dict(targets[rank].named_parameters())[op.param_name][:5],
+                                     expected[rank][op.param_name][:5], 'old cross-request copy')
+
+    def test_missing_request_source_is_rejected_without_fallback(self):
+        sources, _ = self._bundles(2)
+        targets, _ = self._bundles(4, target=True, missing=True)
+        for aware in (False, True):
+            with self.subTest(aware=aware), self.assertRaisesRegex(RuntimeError, 'request_absent.*not found'):
+                centralized_plans(sources, targets, **self._policy(aware))
+
+    def test_wrapper_requires_explicit_nonempty_request_identity(self):
+        context = SimpleNamespace(key_value_memory_dict={1: (torch.zeros(2, 1, 2, 3),) * 2})
+        wrapper = self.helpers['StaticKVCacheModule']
+        with self.assertRaises(TypeError):
+            wrapper(context, None)
+        for identity in ('', '  ', 0):
+            with self.subTest(identity=identity), self.assertRaisesRegex(ValueError, 'request_id'):
+                wrapper(context, None, request_id=identity)
+        a = dict(wrapper(context, None, request_id='A').named_parameters())
+        b = dict(wrapper(context, None, request_id='B').named_parameters())
+        self.assertTrue(a.keys().isdisjoint(b))
+        disabled = dict(wrapper(context, None, request_id=None).named_parameters())
+        self.assertEqual(set(disabled), {'layer_0001.key', 'layer_0001.value'})
+
+    def test_request_mapping_and_topology_validation_are_collective(self):
+        mapping = [{'rank': r, 'request_id': str(r // 4), 'token_offset': r // 4,
+                    'tp2_ranks': self._pg(r, 2).tp, 'tp4_ranks': self._pg(r, 4).tp}
+                   for r in range(8)]
+        for fault in (None, 'topology', 'vocab'):
+            rows = [dict(row) for row in mapping]
+            if fault == 'topology':
+                rows[7]['tp2_ranks'] = [3, 7]
+            for rank in range(8):
+                args = SimpleNamespace(padded_vocab_size=1 if fault == 'vocab' else 32)
+                src_pg, dst_pg = self._pg(rank, 2), self._pg(rank, 4)
+
+                def gather(output, local, **_kwargs):
+                    self.assertEqual(local, mapping[rank])
+                    output[:] = rows
+
+                with self.subTest(fault=fault, rank=rank), \
+                        patch('torch.distributed.get_rank', side_effect=lambda group=None: rank if group is None else group.index(rank)), \
+                        patch('torch.distributed.get_world_size', return_value=8), \
+                        patch('torch.distributed.get_process_group_ranks', side_effect=list), \
+                        patch('torch.distributed.all_gather_object', side_effect=gather):
+                    if fault:
+                        with self.assertRaisesRegex(ValueError, 'nested' if fault == 'topology' else 'vocab'):
+                            self.helpers['_configure_request_domains'](args, src_pg, dst_pg, 'control')
+                        self.assertFalse(hasattr(args, 'live_request_domain_id'))
+                    else:
+                        record = self.helpers['_configure_request_domains'](args, src_pg, dst_pg, 'control')
+                        self.assertEqual(args.live_request_domain_id, rank // 4)
+                        self.assertEqual(json.loads(json.dumps(record))['rank_mapping'], mapping)
+                        self.assertEqual(record['domain_count'], 2)
+
+    def test_prefill_and_decode_tokens_are_offset_once_per_request(self):
+        event = Mock()
+        event.elapsed_time.return_value = 0.0
+        self.helpers['_apply_hotspot_pressure'] = lambda *_args: None
+        with patch('torch.cuda.current_device', return_value=0), \
+                patch('torch.device', return_value='cpu'), \
+                patch('torch.cuda.Event', return_value=event):
+            for rank in range(8):
+                args = SimpleNamespace(live_kv_request_identity=True, live_request_domain_id=rank // 4,
+                                       padded_vocab_size=32, micro_batch_size=2)
+                for _tp in (2, 4):
+                    tokens = self.helpers['_make_tokens'](args, 3, offset=30)
+                    expected = torch.tensor([[15, 16, 17], [15, 16, 17]]) + rank // 4
+                    self.assertTrue(torch.equal(tokens, expected))
+                    model = Mock(side_effect=lambda tokens, *_a, **_kw: tokens.clone())
+                    context = SimpleNamespace(sequence_len_offset=3, enable_decode_mode=lambda: None)
+                    tokens, _ = self.helpers['_decode'](model, context, args, token_value=31)
+                    self.assertTrue(torch.equal(tokens, torch.full((2, 1), (31 + rank // 4) % 32)))
+                    self.assertEqual(context.sequence_len_offset, 4)
+                    self.assertEqual(args.live_request_domain_id, rank // 4)
+
+
 class StorageAndExecutionTests(unittest.TestCase):
     def test_actual_benchmark_wrapper_alias_and_nan(self):
         helpers = benchmark_helpers()
         k = markers((5, 1, 2, 3), 1)
         v = markers((5, 1, 2, 2), 2)
         context = SimpleNamespace(key_value_memory_dict={1: (k, v)}, sequence_len_offset=3)
-        wrapped = helpers['StaticKVCacheModule'](context, None)
+        wrapped = helpers['StaticKVCacheModule'](context, None, request_id='A')
         entries = dict(wrapped.named_parameters())
-        self.assertEqual(entries['layer_0001.key'].data_ptr(), k.data_ptr())
-        self.assertEqual(entries['layer_0001.key'].partition_dim, 2)
+        key = entries['request_A::layer_0001.key']
+        self.assertEqual(key.data_ptr(), k.data_ptr())
+        self.assertEqual(key.partition_dim, 2)
+        self.assertTrue(key.tensor_model_parallel)
+        self.assertTrue(key.allreduce)
+        self.assertEqual(key.partition_stride, 1)
         w = param(markers((2, 3)))
         model = Bundle({'w': w})
         model.config, model.pg_collection = None, None
         bundle = helpers['LiveStateBundle'](model, wrapped)
         self.assertIs(dict(bundle.named_parameters())['weight::w'], w)
+        self.assertIs(dict(bundle.named_parameters())['kv::request_A::layer_0001.key'], key)
         prefix_before = k.clone()
         helpers['_poison_kv'](context, 3)
-        self.assertTrue(bool(torch.isnan(entries['layer_0001.key'][:3]).all()))
+        self.assertTrue(bool(torch.isnan(key[:3]).all()))
         exact_chunks(k[3:], prefix_before[3:], 'capacity beyond poison')
         # Actual shared wrapper sees poison, hence it cannot be treated as an independent copy.
         with self.assertRaises(StateError) as raised:
-            exact_chunks(entries['layer_0001.key'][:3], prefix_before[:3])
+            exact_chunks(key[:3], prefix_before[:3])
         EVIDENCE.append({'fault': 'actual poison alias', 'detected': True, 'error': str(raised.exception),
                          'write_range': [0, 3], 'capacity_range_untouched': [3, 5]})
         output = os.environ.get('WEAVETP_CORRECTNESS_OUTPUT')
         if output:
             path = ResidencyAuditProbe(Path(output) / 'probe', rank=0, run_id='step03_cpu').capture(
                 stage='poisoned_cpu_fixture', layout='tiny-static-KV',
-                named_tensors=[('context.key', k), ('wrapper.key', entries['layer_0001.key']), ('w', w)],
+                named_tensors=[('context.key', k), ('wrapper.key', key), ('w', w)],
                 context={'request_id': 'fixture-A', 'offset': 3},
             )
             data = json.loads(path.read_text(encoding='utf-8'))
