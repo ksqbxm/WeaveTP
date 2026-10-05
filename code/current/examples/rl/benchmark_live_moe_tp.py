@@ -18,6 +18,7 @@ import statistics
 import sys
 import time
 from concurrent.futures import Future, ThreadPoolExecutor
+from contextlib import nullcontext
 from dataclasses import replace
 from pathlib import Path
 from typing import Iterable
@@ -28,8 +29,6 @@ import torch.distributed as dist
 REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
-
-from tools.resharding import weavetp_observations as observations
 
 from megatron.core.inference.contexts import StaticInferenceContext
 from megatron.core.models.gpt.gpt_layer_specs import (
@@ -63,6 +62,14 @@ from megatron.training import print_rank_0
 from megatron.training.arguments import core_transformer_config_from_args, parse_and_validate_args
 from megatron.training.checkpointing import load_checkpoint
 from megatron.training.initialize import initialize_megatron
+from tools.resharding import weavetp_observations as observations
+from tools.resharding.standby_weights import (
+    StandbyWeights,
+    cuda_memory,
+    release_standby,
+    storage_bytes,
+    validate_release_mode,
+)
 
 _HOTSPOT_PRESSURE_BUFFERS: dict[
     tuple[int, int], tuple[torch.Tensor, torch.Tensor]
@@ -185,6 +192,11 @@ class LiveStateBundle(torch.nn.Module):
 
 def add_live_args(parser):
     group = parser.add_argument_group(title="live MoE TP benchmark")
+    group.add_argument(
+        "--live-release-standby-weights",
+        action="store_true",
+        help="Release inactive weight storage; rebuild and poison before full migration (opt-in).",
+    )
     group.add_argument(
         "--live-kv-request-identity",
         action="store_true",
@@ -1111,16 +1123,17 @@ def _run_async_waves(
         wave_plan = filter_plan_by_task_ids(plan, task_ids)
         wave_start = time.perf_counter()
         pressure_start = len(foreground_pressure)
-        transaction = launch_reshard_plan(
-            wave_plan,
-            src_bundle,
-            dst_bundle,
-            service,
-            group=reshard_group,
-            synchronize_group=False,
-            synchronize_device=False,
-            release_cache=False,
-        )
+        with torch.cuda.stream(service.producer_stream) if args.live_release_standby_weights else nullcontext():
+            transaction = launch_reshard_plan(
+                wave_plan,
+                src_bundle,
+                dst_bundle,
+                service,
+                group=reshard_group,
+                synchronize_group=False,
+                synchronize_device=False,
+                release_cache=False,
+            )
         # All ranks must enqueue migration P2P before any rank enters active
         # model collectives on another communicator. Keep this ordering barrier
         # on Gloo so it cannot serialize the NCCL migration stream.
@@ -1294,6 +1307,8 @@ def run_live_benchmark() -> None:
         args.live_pressure_rank_phases, world_size
     )
     args.live_pressure_ranks_tuple = args.live_pressure_rank_phases_tuple[0]
+    if args.live_release_standby_weights:
+        validate_release_mode(args)
     src_tp = args.tensor_model_parallel_size
     dst_tp = args.live_dst_tp
     if src_tp != 2 or dst_tp != 4:
@@ -1395,6 +1410,8 @@ def run_live_benchmark() -> None:
         + 1
         + args.live_switches * (args.live_max_waves * args.live_max_overlap_steps + 2)
     )
+    if args.live_release_standby_weights:
+        worst_case_tokens += args.live_switches * args.live_max_overlap_steps
     if worst_case_tokens >= args.max_position_embeddings:
         raise ValueError("max-position-embeddings is too small for the requested live run")
 
@@ -1742,6 +1759,31 @@ def run_live_benchmark() -> None:
             decision_hysteresis_pct=args.live_guard_hysteresis_pct,
         )
 
+    if args.live_release_standby_weights:
+        kv_tensors = {
+            2: tuple(p for _, p in src_kv.named_parameters()),
+            4: tuple(p for _, p in dst_kv.named_parameters()),
+        }
+        protected_kv = kv_tensors[2] + kv_tensors[4]
+        weights = {
+            2: StandbyWeights(src_model, protected_tensors=(
+                tuple(dst_model.parameters()) + tuple(dst_model.buffers()) + protected_kv
+            )),
+            4: StandbyWeights(dst_model, protected_tensors=(
+                tuple(src_model.parameters()) + tuple(src_model.buffers()) + protected_kv
+            )),
+        }
+        standby_kv_bytes = {tp: storage_bytes(tensors) for tp, tensors in kv_tensors.items()}
+        preparation_stream = torch.cuda.Stream()
+        for copy_service in services.values():
+            copy_service.producer_stream = preparation_stream
+        local_residency = {
+            "rank": rank,
+            "initial_release": release_standby(weights[4], services.values()),
+            "initial_standby_kv_bytes": standby_kv_bytes[4],
+            "switches": [],
+        }
+
     active_tp = 2
     expansion_index = 0
     guard_phase_key = (initial_active_experts, initial_pressure_ranks)
@@ -1969,7 +2011,15 @@ def run_live_benchmark() -> None:
             adaptive_decision_s = 0.0
         flying_shared_state = args.live_method_variant == "flying-serving-proxy"
         kv_only_migration = args.live_method_variant == "llumnix-proxy"
-        if not flying_shared_state:
+        if args.live_release_standby_weights:
+            prepare_start = time.perf_counter()
+            before_allocate = cuda_memory()
+            weights[next_tp].allocate_and_poison(preparation_stream)
+            with torch.cuda.stream(preparation_stream):
+                _poison_kv(target_context, snapshot_end)
+            preparation_submit_s = time.perf_counter() - prepare_start
+            after_allocate = cuda_memory()
+        elif not flying_shared_state:
             _poison_kv(target_context, snapshot_end)
         base_plan = restrict_plan_sequence(
             full_plan,
@@ -2014,6 +2064,21 @@ def run_live_benchmark() -> None:
             hybrid_fast_path_reason=hybrid_decision,
         )
 
+        if args.live_release_standby_weights:
+            check_start = time.perf_counter()
+            with torch.cuda.stream(preparation_stream):
+                weight_valid = weights[next_tp].finite_flag()
+                weight_checked = torch.cuda.Event()
+                weight_checked.record()
+            check_tpot_ms = []
+            for _ in range(args.live_max_overlap_steps):
+                if _all_ready(weight_checked.query(), control_group):
+                    break
+                _, step_ms = _decode(source_model, source_context, args, token_value=token_counter)
+                token_counter += 1
+                check_tpot_ms.append(_all_max(step_ms, control_group))
+            weight_check_overlap_s = time.perf_counter() - check_start
+
         delta_end = source_context.sequence_len_offset
         delta_plan = restrict_plan_sequence(
             full_plan,
@@ -2038,18 +2103,25 @@ def run_live_benchmark() -> None:
                     for task in delta_tasks[delta_start : delta_start + delta_chunk_size]
                 ]
                 delta_chunk_plan = filter_plan_by_task_ids(delta_plan, delta_ids)
-                delta_transaction = launch_reshard_plan(
-                    delta_chunk_plan,
-                    source_bundle,
-                    target_bundle,
-                    service,
-                    group=reshard_group,
-                    synchronize_group=False,
-                    synchronize_device=False,
-                    release_cache=False,
-                )
+                with torch.cuda.stream(service.producer_stream) if args.live_release_standby_weights else nullcontext():
+                    delta_transaction = launch_reshard_plan(
+                        delta_chunk_plan,
+                        source_bundle,
+                        target_bundle,
+                        service,
+                        group=reshard_group,
+                        synchronize_group=False,
+                        synchronize_device=False,
+                        release_cache=False,
+                    )
                 delta_transaction.wait().commit()
             torch.cuda.current_stream().synchronize()
+        if args.live_release_standby_weights:
+            check_wait_start = time.perf_counter()
+            weight_checked.synchronize()
+            if not _all_ready(bool(weight_valid.item()), control_group):
+                raise AssertionError("target weights contain NaN/Inf after full migration; cutover rejected")
+            weight_check_wait_s = time.perf_counter() - check_wait_start
         target_context.sequence_len_offset = delta_end
         target_context.enable_decode_mode()
         delta_s = _all_max(time.perf_counter() - cutover_start, control_group)
@@ -2122,6 +2194,26 @@ def run_live_benchmark() -> None:
         )
         if direction == "2->4":
             expansion_index += 1
+        if args.live_release_standby_weights:
+            inactive_tp = 4 if active_tp == 2 else 2
+            release_start = time.perf_counter()
+            release_record = release_standby(weights[inactive_tp], services.values())
+            local_residency["switches"].append({
+                "index": switch_index,
+                "target_tp": next_tp,
+                "inactive_tp": inactive_tp,
+                "standby_kv_bytes": standby_kv_bytes[inactive_tp],
+                "before_allocate": before_allocate,
+                "after_allocate": after_allocate,
+                "preparation_submit_s": preparation_submit_s,
+                "weight_check_overlap_s": weight_check_overlap_s,
+                "weight_check_overlap_steps": len(check_tpot_ms),
+                "weight_check_tpot_ms": check_tpot_ms,
+                "weight_check_exposed_wait_s": weight_check_wait_s,
+                "all_weights_finite": True,
+                "release": release_record,
+                "release_s": time.perf_counter() - release_start,
+            })
         switch_wall_s = _all_max(time.perf_counter() - switch_start, control_group)
         record = {
             "index": switch_index,
@@ -2321,6 +2413,10 @@ def run_live_benchmark() -> None:
     }
     if args.live_kv_request_identity:
         result["kv_request_domains"] = kv_request_domains
+    if args.live_release_standby_weights:
+        residency_by_rank = [None] * world_size
+        dist.all_gather_object(residency_by_rank, local_residency, group=control_group)
+        result["standby_weight_storage"] = {"cpu_weight_copies": False, "ranks": residency_by_rank}
     _write_results(args, result)
     if rank == 0:
         print(json.dumps(result, indent=2))

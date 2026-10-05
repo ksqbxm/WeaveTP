@@ -199,6 +199,9 @@ else
 fi
 
 LIVE_FEATURE_ARGS=()
+if [[ "${RELEASE_STANDBY_WEIGHTS:-0}" == "1" ]]; then
+    LIVE_FEATURE_ARGS+=(--live-release-standby-weights)
+fi
 if [[ "${KV_REQUEST_IDENTITY:-0}" == "1" ]]; then
     LIVE_FEATURE_ARGS+=(--live-kv-request-identity)
 fi
@@ -249,6 +252,12 @@ if [[ "$REPEAT_FORWARD" == "1" ]]; then
     LIVE_FEATURE_ARGS+=(--live-repeat-forward)
 fi
 
+ENTRYPOINT=examples/rl/benchmark_live_moe_tp.py
+if [[ "${WEIGHT_STORAGE_AUDIT:-0}" == "1" ]]; then
+    # Separate memory acceptance process; its timings are not performance data.
+    ENTRYPOINT=tools/resharding/correctness/gpu_weight_storage.py
+fi
+
 CUDA_VISIBLE_DEVICES="$CUDA_VISIBLE_DEVICES" \
 NCCL_DEBUG=${NCCL_DEBUG:-WARN} \
 TORCH_NCCL_ASYNC_ERROR_HANDLING=1 \
@@ -256,7 +265,7 @@ CUDA_DEVICE_MAX_CONNECTIONS=8 \
 "$PYTHON" -m torch.distributed.run \
     "${DIST_ARGS[@]}" \
     --nproc_per_node="$NPROC_PER_NODE" \
-    examples/rl/benchmark_live_moe_tp.py \
+    "$ENTRYPOINT" \
     --tensor-model-parallel-size 2 \
     --pipeline-model-parallel-size 1 \
     --expert-model-parallel-size "$EXPERT_PARALLEL_SIZE" \

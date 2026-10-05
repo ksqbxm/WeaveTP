@@ -1,0 +1,65 @@
+[
+  {
+    "path": "tools/resharding/run_live_moe_tp_benchmark.sh",
+    "kind": "bash -n",
+    "exit_code": 0,
+    "stderr": ""
+  },
+  {
+    "path": "tools/resharding/run_deepseek_v2_lite_live_benchmark.sh",
+    "kind": "bash -n",
+    "exit_code": 0,
+    "stderr": ""
+  },
+  {
+    "path": "tools/resharding/run_standby_weight_acceptance.sh",
+    "kind": "bash -n",
+    "exit_code": 0,
+    "stderr": ""
+  },
+  {
+    "path": "examples/rl/benchmark_live_moe_tp.py",
+    "kind": "ast.parse",
+    "passed": true
+  },
+  {
+    "path": "megatron/core/resharding/copy_services/nccl_copy_service.py",
+    "kind": "ast.parse",
+    "passed": true
+  },
+  {
+    "path": "tools/resharding/standby_weights.py",
+    "kind": "ast.parse",
+    "passed": true
+  },
+  {
+    "path": "tools/resharding/correctness/gpu_weight_storage.py",
+    "kind": "ast.parse",
+    "passed": true
+  },
+  {
+    "path": "tools/resharding/correctness/gpu_weight_ordering.py",
+    "kind": "ast.parse",
+    "passed": true
+  },
+  {
+    "path": "tests/unit_tests/resharding/test_standby_weights.py",
+    "kind": "ast.parse",
+    "passed": true
+  },
+  {
+    "path": "tests/unit_tests/resharding/test_live_defaults.py",
+    "kind": "ast.parse",
+    "passed": true
+  },
+  {
+    "path": "tests/unit_tests/resharding/test_live_storage_lifecycle.py",
+    "kind": "ast.parse",
+    "passed": true
+  },
+  {
+    "path": "tests/unit_tests/resharding/test_weight_acceptance.py",
+    "kind": "ast.parse",
+    "passed": true
+  }
+]

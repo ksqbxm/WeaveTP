@@ -24,7 +24,8 @@ def function(tree, name):
 
 
 def load(tree, names):
-    nodes = [copy.deepcopy(function(tree, n)) for n in names]
+    nodes = ast.parse("from __future__ import annotations").body
+    nodes += [copy.deepcopy(function(tree, n)) for n in names]
     namespace = dict(torch=torch, GPTModel=torch.nn.Module, StaticInferenceContext=object)
     exec(compile(ast.Module(body=nodes, type_ignores=[]), LIVE_PATH, "exec"), namespace)
     return namespace
@@ -58,6 +59,13 @@ def test_identity_parser_defaults_off():
     load(CURRENT, ["add_live_args"])["add_live_args"](parser)
     assert not parser.parse_args([]).live_kv_request_identity
     assert parser.parse_args(["--live-kv-request-identity"]).live_kv_request_identity
+
+
+def test_storage_parser_defaults_off():
+    parser = argparse.ArgumentParser()
+    load(CURRENT, ["add_live_args"])["add_live_args"](parser)
+    assert not parser.parse_args([]).live_release_standby_weights
+    assert parser.parse_args(["--live-release-standby-weights"]).live_release_standby_weights
 
 
 def test_disabled_wrapper_keeps_main_names_views_and_metadata():

@@ -162,6 +162,8 @@ class NCCLCopyService(CopyService):
         self._unpack_stream = torch.cuda.Stream(priority=_least_stream_priority())
         self._launch_callback = None
         self._inflight: Optional[NCCLCopyHandle] = None
+        # Opt-in live storage preparation. None preserves the original launch path.
+        self.producer_stream = None
         self.pack_target_bytes = max(int(pack_target_bytes), 0)
         self.pack_max_item_bytes = max(int(pack_max_item_bytes), 0)
         if self.pack_target_bytes and not self.pack_max_item_bytes:
@@ -677,6 +679,16 @@ class NCCLCopyService(CopyService):
     def launch(self) -> CopyHandle:
         if self._inflight is not None:
             raise RuntimeError("NCCLCopyService already has an in-flight copy batch")
+
+        if self.producer_stream is not None:
+            if torch.cuda.current_stream() != self.producer_stream:
+                raise RuntimeError("live migration must submit on its preparation stream")
+            # Includes target poison AND contiguous source slices prepared by
+            # launch_reshard_plan, even when packing is disabled or all ops local.
+            ready = torch.cuda.Event()
+            ready.record(self.producer_stream)
+            self._copy_stream.wait_event(ready)
+            self._comm_stream.wait_event(ready)
 
         total_ops = len(self.send_ops) + len(self.recv_ops)
         if self.rank == 0:
