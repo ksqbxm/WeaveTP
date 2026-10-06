@@ -2097,13 +2097,15 @@ def run_live_benchmark() -> None:
             delta_chunk_size = directional_max_wave_tasks[direction] or max(
                 len(delta_tasks), 1
             )
-            for delta_start in range(0, len(delta_tasks), delta_chunk_size):
-                delta_ids = [
-                    task.task_id
-                    for task in delta_tasks[delta_start : delta_start + delta_chunk_size]
-                ]
-                delta_chunk_plan = filter_plan_by_task_ids(delta_plan, delta_ids)
-                with torch.cuda.stream(service.producer_stream) if args.live_release_standby_weights else nullcontext():
+            # Keep receive allocation and deferred writeback on the same stream:
+            # the next chunk may immediately reuse a freed receive buffer.
+            with torch.cuda.stream(service.producer_stream) if args.live_release_standby_weights else nullcontext():
+                for delta_start in range(0, len(delta_tasks), delta_chunk_size):
+                    delta_ids = [
+                        task.task_id
+                        for task in delta_tasks[delta_start : delta_start + delta_chunk_size]
+                    ]
+                    delta_chunk_plan = filter_plan_by_task_ids(delta_plan, delta_ids)
                     delta_transaction = launch_reshard_plan(
                         delta_chunk_plan,
                         source_bundle,
@@ -2114,8 +2116,8 @@ def run_live_benchmark() -> None:
                         synchronize_device=False,
                         release_cache=False,
                     )
-                delta_transaction.wait().commit()
-            torch.cuda.current_stream().synchronize()
+                    delta_transaction.wait().commit()
+                torch.cuda.current_stream().synchronize()
         if args.live_release_standby_weights:
             check_wait_start = time.perf_counter()
             weight_checked.synchronize()
