@@ -1,0 +1,26 @@
+[
+  {
+    "script": "run_default_recheck.sh",
+    "simulated_failure": false,
+    "intercepted_launches": 6,
+    "exit_code": 0,
+    "passed": true,
+    "gpu_processes_started": 0
+  },
+  {
+    "script": "run_default_recheck.sh",
+    "simulated_failure": true,
+    "intercepted_launches": 6,
+    "exit_code": 1,
+    "passed": true,
+    "gpu_processes_started": 0
+  },
+  {
+    "script": "rerun_expandable_deepseek.sh",
+    "simulated_failure": false,
+    "intercepted_launches": 1,
+    "exit_code": 0,
+    "passed": true,
+    "gpu_processes_started": 0
+  }
+]

@@ -1,0 +1,31 @@
+{
+  "command": [
+    "C:\\Users\\ksqbx\\miniforge3\\python.exe",
+    "-B",
+    "-m",
+    "pytest",
+    "-q",
+    "-o",
+    "addopts=",
+    "-p",
+    "no:cacheprovider",
+    "--confcutdir=tests/unit_tests/resharding",
+    "--tb=short",
+    "--junitxml=E:\\课题组\\WeaveTP_代码与实验资料_20260920\\documents\\standby_weight_storage_20261005\\evidence\\review_20261006\\cpu_tests.xml",
+    "tests/unit_tests/resharding/test_standby_weights.py",
+    "tests/unit_tests/resharding/test_live_storage_lifecycle.py",
+    "tests/unit_tests/resharding/test_live_defaults.py",
+    "tests/unit_tests/resharding/test_weight_acceptance.py",
+    "tests/unit_tests/resharding/test_live_resharding.py",
+    "tests/unit_tests/resharding/test_execution_controls.py",
+    "tests/unit_tests/resharding/test_nccl_packing.py",
+    "tests/unit_tests/resharding/test_planner.py",
+    "tests/unit_tests/resharding/test_weavetp_observations.py",
+    "tests/unit_tests/resharding/test_refit_bandwidth_policy.py",
+    "tools/resharding/correctness/test_correctness.py",
+    "tests/unit_tests/resharding/test_delta_stream_lifetime.py",
+    "tests/unit_tests/resharding/test_weight_ordering.py"
+  ],
+  "cwd": "E:\\课题组\\WeaveTP_代码与实验资料_20260920\\code\\current",
+  "exit_code": 0
+}

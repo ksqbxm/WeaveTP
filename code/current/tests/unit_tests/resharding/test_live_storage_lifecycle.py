@@ -26,7 +26,8 @@ from tools.resharding.standby_weights import (
 )
 
 
-def run_coordinator(tree, *, release=False, identity=False, repeat=False, fault=False, check_polls=1, capacity=128):
+def run_coordinator(tree, *, release=False, identity=False, repeat=False, fault=False, check_polls=1,
+                    peer_check_polls=0, peer_weight_valid=True, capacity=128):
     names = ["run_live_benchmark", "add_live_args", "StaticKVCacheModule", "LiveStateBundle",
              "_run_async_waves", "_parse_rank_phases", "_pressure_ranks_for_switch",
              "_active_experts_for_switch", "_set_active_experts", "_poison_kv", "_percentile",
@@ -121,6 +122,8 @@ def run_coordinator(tree, *, release=False, identity=False, repeat=False, fault=
         def invalidate_persistent_pack_cache(self):
             pass
 
+    peer_vote = [None]
+
     class Event:
         def __init__(self, **_):
             self.polls = 0
@@ -128,9 +131,15 @@ def run_coordinator(tree, *, release=False, identity=False, repeat=False, fault=
             pass
         def query(self):
             self.polls += 1
+            peer_vote[0] = self.polls > peer_check_polls
             return self.polls > check_polls
         def synchronize(self):
-            pass
+            peer_vote[0] = peer_weight_valid
+
+    def all_ready(value, _group):
+        peer = peer_vote[0]
+        peer_vote[0] = None
+        return value if peer is None else value and peer
 
     def tasks(plan, bundle, **_kw):
         params = dict(bundle.named_parameters())
@@ -162,7 +171,7 @@ def run_coordinator(tree, *, release=False, identity=False, repeat=False, fault=
         StaticInferenceContext=context, _prefill=prefill, _decode=decode, _remove_hooks=lambda *_: None,
         _load_bandwidth_matrix=lambda *_: {(0, 0): 100}, BandwidthAwareRefitPolicy=BandwidthAwareRefitPolicy,
         build_centralized_reshard_plan=plan, NCCLCopyService=Service,
-        _all_max=lambda value, _: value, _all_min=lambda value, _: value, _all_ready=lambda value, _: value,
+        _all_max=lambda value, _: value, _all_min=lambda value, _: value, _all_ready=all_ready,
         _collect_active_collective_links=lambda *_a, **_kw: set(), collect_transfer_tasks=tasks,
         launch_reshard_plan=launch_reshard_plan, _hybrid_fast_path_decision=lambda *_a, **_kw: {"enabled": False, "reason": "disabled"},
         _configure_request_domains=request_domains, StandbyWeights=StandbyWeights,
@@ -207,6 +216,21 @@ def test_pending_weight_check_stops_decode_at_cap_and_includes_all_kv_delta():
     for row, memory in zip(result["switches"], result["standby_weight_storage"]["ranks"][0]["switches"]):
         assert memory["weight_check_overlap_steps"] == 2
         assert row["delta_tokens"] == row["base"]["overlap_steps"] + 2
+
+
+@pytest.mark.parametrize("local_polls,peer_polls,steps", [(0, 0, 0), (0, 1, 1), (1, 0, 1), (0, 100, 2), (100, 0, 2)])
+def test_weight_check_uses_global_readiness_and_preserves_decode_delta(local_polls, peer_polls, steps):
+    result, _, releases = run_coordinator(defaults.CURRENT, release=True,
+                                         check_polls=local_polls, peer_check_polls=peer_polls)
+    assert len(releases) == 5
+    for row, memory in zip(result["switches"], result["standby_weight_storage"]["ranks"][0]["switches"]):
+        assert memory["weight_check_overlap_steps"] == steps
+        assert row["delta_tokens"] == row["base"]["overlap_steps"] + steps
+
+
+def test_remote_invalid_weight_rejects_cutover_even_when_local_weights_are_valid():
+    with pytest.raises(AssertionError, match="cutover rejected"):
+        run_coordinator(defaults.CURRENT, release=True, check_polls=0, peer_weight_valid=False)
 
 
 def test_capacity_includes_additional_check_decode_only_when_enabled():

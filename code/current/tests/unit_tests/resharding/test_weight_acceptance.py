@@ -35,6 +35,7 @@ def test_acceptance_matrix_is_dry_run_only_and_isolates_allocators(mode, count):
             assert values["KV_REQUEST_IDENTITY"] == "0"
             assert values["RELEASE_STANDBY_WEIGHTS"] == str(int(output.endswith("_on")))
             assert values["WEIGHT_STORAGE_AUDIT"] == str(int(mode == "memory"))
+            assert values["WEIGHT_CHECK_AUDIT"] == "0"
             assert values["ACTIVE_EXPERT_PHASES"] == values["PRESSURE_RANK_PHASES"] == ""
             assert values["NNODES"] == "1" and values["NPROC_PER_NODE"] == "8"
     assert len(set(outputs)) == count
@@ -105,3 +106,65 @@ def test_memory_receipt_preserves_failure_and_checks_actual_expandable_backend(t
     receipt = json.loads((tmp_path / "reuse_rank0_0.json").read_text(encoding="utf-8"))
     assert receipt["passed"] == passed
     assert receipt["release"]["weight_allocated_freed_bytes"] == freed
+
+
+@pytest.mark.parametrize("steps,delta,passed", [(1, 2, True), (2, 3, True), (0, 1, False), (3, 4, False), (1, 1, False)])
+def test_pending_check_probe_preserves_result_and_rejects_missing_coverage(tmp_path, steps, delta, passed):
+    import json
+
+    path = ROOT / "tools/resharding/correctness/gpu_weight_check.py"
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    fn = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "main")
+
+    class Weights:
+        def finite_flag(self):
+            return "finite result"
+
+    args = SimpleNamespace(live_json_output=str(tmp_path / "result.json"), live_max_overlap_steps=2)
+    result = {"switches": [{"delta_tokens": delta, "base": {"overlap_steps": 1}}],
+              "standby_weight_storage": {"ranks": [{"switches": [{"weight_check_overlap_steps": steps}]}]}}
+    rank = [0]
+    saved = Mock()
+    live = SimpleNamespace(_write_results=saved)
+    def run():
+        for rank[0] in (0, 1):
+            assert Weights().finite_flag() == "finite result"
+        rank[0] = 0
+        live._write_results(args, result)
+    live.main = run
+    ns = dict(torch=torch, dist=SimpleNamespace(get_rank=lambda: rank[0]), live=live,
+              StandbyWeights=Weights, patch=patch, Path=Path, json=json)
+    exec(compile(ast.Module(body=[fn], type_ignores=[]), str(path), "exec"), ns)
+    with patch("torch.cuda._sleep") as delay:
+        if passed:
+            ns["main"]()
+        else:
+            with pytest.raises(AssertionError, match="pending weight check acceptance failed"):
+                ns["main"]()
+    delay.assert_called_once_with(1_000_000_000)
+    saved.assert_called_once_with(args, result)
+    assert live._write_results is saved  # Probe hooks cannot leak to another run.
+    assert json.loads((tmp_path / "weight_check_probe.json").read_text())["passed"] == passed
+
+
+@pytest.mark.parametrize("check,memory,release,preset,expected", [
+    (0, 0, 0, "synthetic", "examples/rl/benchmark_live_moe_tp.py"),
+    (1, 0, 1, "synthetic", "tools/resharding/correctness/gpu_weight_check.py"),
+    (0, 1, 1, "synthetic", "tools/resharding/correctness/gpu_weight_storage.py"),
+    (1, 1, 1, "synthetic", None), (1, 0, 0, "synthetic", None),
+    (1, 0, 1, "deepseek-v2-lite", None),
+])
+def test_probe_entrypoints_and_invalid_combinations(tmp_path, check, memory, release, preset, expected):
+    # /usr/bin/echo acts as the interpreter, so no torch/GPU process is started.
+    result = subprocess.run([BASH, str(ROOT / "tools/resharding/run_live_moe_tp_benchmark.sh")],
+                            cwd=ROOT, text=True, encoding="utf-8", capture_output=True, env={
+                                **os.environ, "PYTHON": "/usr/bin/echo", "OUT_DIR": tmp_path.as_posix(),
+                                "WEIGHT_CHECK_AUDIT": str(check), "WEIGHT_STORAGE_AUDIT": str(memory),
+                                "RELEASE_STANDBY_WEIGHTS": str(release), "MODEL_PRESET": preset,
+                                "LOAD_CHECKPOINT": "/unused/checkpoint", "MSYS_NO_PATHCONV": "1",
+                            })
+    if expected is None:
+        assert result.returncode == 2 and "Weight check audit requires" in result.stderr
+    else:
+        assert result.returncode == 0, result.stderr
+        assert expected in shlex.split(result.stdout)

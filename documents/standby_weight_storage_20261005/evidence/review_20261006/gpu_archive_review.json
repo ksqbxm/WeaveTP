@@ -1,0 +1,96 @@
+{
+  "source_commit": "9f084a5974885d43e51f856825d75a2e137125f6",
+  "runtime": [
+    "2.11.0+cu128",
+    "12.8",
+    "(2, 28, 9)"
+  ],
+  "cases": {
+    "benchmark": {
+      "default_deepseek_off": 0,
+      "default_deepseek_on": 0,
+      "default_synthetic_off": 0,
+      "default_synthetic_on": 0,
+      "expandable_deepseek_off": 0,
+      "expandable_deepseek_on": 1,
+      "expandable_synthetic_off": 0,
+      "expandable_synthetic_on": 0
+    },
+    "memory": {
+      "default_deepseek_on": 0,
+      "default_synthetic_on": 0,
+      "expandable_deepseek_on": 0,
+      "expandable_synthetic_on": 0
+    },
+    "ordering": {
+      "default_ordering": 1,
+      "expandable_ordering": 1
+    }
+  },
+  "memory": {
+    "default_deepseek_on": {
+      "receipts": 40,
+      "passed": 40,
+      "reserved_growth_bytes": [
+        0
+      ],
+      "expandable_observed": [
+        false
+      ]
+    },
+    "default_synthetic_on": {
+      "receipts": 40,
+      "passed": 40,
+      "reserved_growth_bytes": [
+        0
+      ],
+      "expandable_observed": [
+        false
+      ]
+    },
+    "expandable_deepseek_on": {
+      "receipts": 40,
+      "passed": 40,
+      "reserved_growth_bytes": [
+        0
+      ],
+      "expandable_observed": [
+        true
+      ]
+    },
+    "expandable_synthetic_on": {
+      "receipts": 40,
+      "passed": 40,
+      "reserved_growth_bytes": [
+        0
+      ],
+      "expandable_observed": [
+        true
+      ]
+    }
+  },
+  "deepseek_rank0_standby_kv_bytes": {
+    "initial_tp4": 70778880,
+    "switches": [
+      {
+        "inactive_tp": 2,
+        "bytes": 141557760
+      },
+      {
+        "inactive_tp": 4,
+        "bytes": 70778880
+      },
+      {
+        "inactive_tp": 2,
+        "bytes": 141557760
+      },
+      {
+        "inactive_tp": 4,
+        "bytes": 70778880
+      }
+    ]
+  },
+  "finite_check_decode_steps_in_successful_results": [
+    0
+  ]
+}

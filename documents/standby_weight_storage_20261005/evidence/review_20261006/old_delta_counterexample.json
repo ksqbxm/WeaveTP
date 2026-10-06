@@ -1,0 +1,8 @@
+{
+  "code": "import ast, subprocess, sys, pytest\nsys.path.insert(0, \"tests/unit_tests/resharding\")\nimport test_live_defaults as defaults\ndefaults.CURRENT = ast.parse(subprocess.check_output([\"git\", \"show\", \"9f084a5974885d43e51f856825d75a2e137125f6:\" + defaults.LIVE_PATH], text=True, encoding=\"utf-8\"))\nsys.exit(pytest.main([\"-q\", \"-o\", \"addopts=\", \"-p\", \"no:cacheprovider\", \"--confcutdir=tests/unit_tests/resharding\", \"--tb=short\", \"tests/unit_tests/resharding/test_delta_stream_lifetime.py\"]))\n",
+  "baseline": "9f084a5974885d43e51f856825d75a2e137125f6",
+  "exit_code": 1,
+  "expected_exit_code": 1,
+  "scope": "CPU stream/allocator model using frozen coordinator delta loop and real transactions",
+  "log_normalization": "Trailing whitespace removed; output text and failure details otherwise unchanged."
+}

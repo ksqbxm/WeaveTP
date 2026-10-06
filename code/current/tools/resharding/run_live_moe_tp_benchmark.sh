@@ -253,6 +253,13 @@ if [[ "$REPEAT_FORWARD" == "1" ]]; then
 fi
 
 ENTRYPOINT=examples/rl/benchmark_live_moe_tp.py
+if [[ "${WEIGHT_CHECK_AUDIT:-0}" == "1" ]]; then
+    if [[ "$MODEL_PRESET" != synthetic || "$RELEASE_STANDBY_WEIGHTS" != 1 || "${WEIGHT_STORAGE_AUDIT:-0}" == 1 ]]; then
+        echo "Weight check audit requires synthetic, release enabled, and memory audit disabled" >&2
+        exit 2
+    fi
+    ENTRYPOINT=tools/resharding/correctness/gpu_weight_check.py
+fi
 if [[ "${WEIGHT_STORAGE_AUDIT:-0}" == "1" ]]; then
     # Separate memory acceptance process; its timings are not performance data.
     ENTRYPOINT=tools/resharding/correctness/gpu_weight_storage.py
