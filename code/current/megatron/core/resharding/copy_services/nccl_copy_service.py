@@ -182,7 +182,8 @@ class NCCLCopyService(CopyService):
             )
             self._participation_recv = torch.empty_like(self._participation_send)
         self._pack_task_ids: frozenset[int] | None = None
-        self._cacheable_pack_task_ids: frozenset[int] | None = None
+        self._cacheable_pack_task_ids: frozenset[int] = frozenset()
+        self._uncacheable_send_task_ids: frozenset[int] = frozenset()
         self._send_pack_cache: dict[tuple, torch.Tensor] = {}
         self._recv_pack_cache: dict[tuple, torch.Tensor] = {}
         self.last_launch_stats: dict[str, object] = {}
@@ -207,7 +208,7 @@ class NCCLCopyService(CopyService):
     def set_launch_callback(self, callback) -> None:
         self._launch_callback = callback
 
-    def configure_plan(self, plan) -> None:
+    def configure_plan(self, plan, *, uncacheable_send_task_ids) -> None:
         """Select task IDs eligible for packing in the next launch."""
         plan_ops = list(plan.send_ops) + list(plan.recv_ops)
         self._cacheable_pack_task_ids = frozenset(
@@ -215,6 +216,9 @@ class NCCLCopyService(CopyService):
             for op in plan_ops
             if op.task_id is not None and not op.param_name.startswith("kv::")
         )
+        # Temporary send storage may be reused for different slices. Excluding
+        # snapshots must NOT change the peer-agreed weight/KV bucket boundaries.
+        self._uncacheable_send_task_ids = frozenset(uncacheable_send_task_ids)
         if not self.pack_rerouted_only:
             self._pack_task_ids = None
             return
@@ -292,7 +296,7 @@ class NCCLCopyService(CopyService):
             current = []
             current_bytes = 0
             current_cacheable = None
-            cacheable_task_ids = getattr(self, "_cacheable_pack_task_ids", None)
+            cacheable_task_ids = self._cacheable_pack_task_ids
 
             def flush_current():
                 nonlocal current, current_bytes, current_cacheable
@@ -304,9 +308,7 @@ class NCCLCopyService(CopyService):
 
             for _index, op in packable_ops:
                 num_bytes = self._op_num_bytes(op)
-                cacheable = (
-                    cacheable_task_ids is None or op.task_id in cacheable_task_ids
-                )
+                cacheable = op.task_id in cacheable_task_ids
                 if current and (
                     current_bytes + num_bytes > self.pack_target_bytes
                     or current_cacheable != cacheable
@@ -421,12 +423,12 @@ class NCCLCopyService(CopyService):
                 packed_sends.append(group[0])
                 continue
             total_bytes = sum(self._op_num_bytes(op) for op in group)
-            key = cache_key(group, "dest_rank")
-            cacheable_task_ids = getattr(self, "_cacheable_pack_task_ids", None)
-            cacheable = cacheable_task_ids is None or all(
-                op.task_id in cacheable_task_ids for op in group
+            cacheable = all(
+                op.task_id in self._cacheable_pack_task_ids
+                and op.task_id not in self._uncacheable_send_task_ids for op in group
             )
             use_send_cache = persistent and cacheable
+            key = cache_key(group, "dest_rank") if use_send_cache else None
             buffer = send_cache.get(key) if use_send_cache else None
             if buffer is None:
                 buffer = torch.empty(

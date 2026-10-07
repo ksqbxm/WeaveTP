@@ -169,11 +169,8 @@ def launch_reshard_plan(
             f"recvs={missing_recvs}. No operations were submitted."
         )
 
-    configure_plan = getattr(service, "configure_plan", None)
-    if configure_plan is not None:
-        configure_plan(plan)
-
     sendable_cache: dict[str, torch.Tensor] = {}
+    uncacheable_send_task_ids = set()
 
     def get_sendable(param_name: str, param: torch.nn.Parameter) -> torch.Tensor:
         if param_name not in sendable_cache:
@@ -182,6 +179,7 @@ def launch_reshard_plan(
 
     for op in plan.send_ops:
         if transform is not None and transform.should_transform(op.param_name):
+            uncacheable_send_task_ids.add(op.task_id)
             src_param = src_params.get(op.param_name)
             if src_param is not None:
                 tensors = transform.prepare_send(op.param_name, op.my_slice, src_param)
@@ -192,12 +190,19 @@ def launch_reshard_plan(
         src_param = src_params.get(op.param_name)
         if src_param is None:
             continue
-        src_view = get_sendable(op.param_name, src_param)[op.my_slice]
+        sendable = get_sendable(op.param_name, src_param)
+        src_view = sendable[op.my_slice]
+        if _is_mxfp8_tensor(src_param) or sendable.untyped_storage() is not src_param.untyped_storage():
+            uncacheable_send_task_ids.add(op.task_id)
         if not src_view.is_contiguous():
+            uncacheable_send_task_ids.add(op.task_id)
             src_view = src_view.contiguous()
         service.submit_send(src_view, op.peer_rank, task_id=op.task_id)
 
     sendable_cache.clear()
+    configure_plan = getattr(service, "configure_plan", None)
+    if configure_plan is not None:
+        configure_plan(plan, uncacheable_send_task_ids=uncacheable_send_task_ids)
     recv_writebacks: list = []
     pending_quantized: dict[int, tuple[torch.nn.Parameter, torch.Tensor, list]] = {}
 

@@ -1,8 +1,14 @@
 # Copyright (c) 2026, NVIDIA CORPORATION. All rights reserved.
 from __future__ import annotations
 
+from unittest.mock import Mock
+
+import pytest
 import torch
 
+from megatron.core.resharding import async_execution
+from megatron.core.resharding.async_execution import launch_reshard_plan
+from megatron.core.resharding.copy_services.base import CompletedCopyHandle
 from megatron.core.resharding.copy_services.nccl_copy_service import (
     NCCLCopyHandle,
     NCCLCopyService,
@@ -14,6 +20,89 @@ from megatron.core.resharding.copy_services.nccl_copy_service import (
 from megatron.core.resharding.utils import ReshardPlan, TransferOp
 
 
+def test_temporary_send_address_reuse_does_not_reuse_payload(monkeypatch):
+    service = _packing_service(target_bytes=128, max_item_bytes=64)
+    service.persistent_pack_buffers = True
+    service.send_ops, service.recv_ops = [], []
+    model = torch.nn.Module()
+    for name in ("a", "b"):
+        model.register_parameter(name, torch.nn.Parameter(torch.arange(16.).reshape(2, 8)))
+    buffers = [torch.empty(2, 4), torch.empty(2, 4)]
+    submitted = []
+    calls = 0
+
+    def pooled_contiguous(tensor):
+        nonlocal calls
+        buffer = buffers[calls % 2]
+        calls += 1
+        buffer.copy_(tensor)
+        return buffer
+
+    def launch():
+        packed, _, _, stats = service._pack_remote_ops(service.send_ops, [])
+        submitted.append((packed[0].tensor.clone(), stats))
+        service.send_ops.clear()
+        return CompletedCopyHandle()
+
+    monkeypatch.setattr(torch.Tensor, "contiguous", pooled_contiguous)
+    monkeypatch.setattr(service, "launch", launch)
+    for start in (0, 4):
+        section = (slice(None), slice(start, start + 4))
+        plan = ReshardPlan(
+            send_ops=[TransferOp(name, 1, True, section, section, i)
+                      for i, name in enumerate(("a", "b"))], recv_ops=[])
+        launch_reshard_plan(plan, model, None, service).wait().commit()
+    expected = torch.cat([p[:, 4:].reshape(-1) for p in model.parameters()]).view(torch.uint8)
+    assert torch.equal(submitted[1][0], expected)
+    assert submitted[1][1]["send_pack_cache_hits"] == 0
+
+
+@pytest.mark.parametrize("kind", ["stable", "strided", "dequantized", "mxfp8", "transformed"])
+def test_launcher_classifies_send_storage_before_configuring_service(monkeypatch, kind):
+    model = torch.nn.Linear(4, 4, bias=False)
+    service = Mock()
+    service.last_launch_stats = {}
+    full = (slice(None), slice(None))
+    index = (slice(None), slice(0, 2)) if kind == "strided" else full
+    plan = ReshardPlan([TransferOp("weight", 1, True, index, index, 7)], [])
+    if kind in {"dequantized", "mxfp8"}:
+        wire = model.weight.detach().clone()
+        monkeypatch.setattr(async_execution, "_ensure_sendable", lambda p: wire)
+    if kind == "mxfp8":
+        monkeypatch.setattr(async_execution, "_is_mxfp8_tensor", lambda _: True)
+        monkeypatch.setattr(model.weight, "untyped_storage", Mock(side_effect=AssertionError("wrapper has no storage")))
+    transform = None
+    if kind == "transformed":
+        transform = Mock()
+        transform.should_transform.return_value = True
+        transform.prepare_send.return_value = [model.weight.detach().clone()]
+    launch_reshard_plan(plan, model, None, service, transform=transform)
+    service.configure_plan.assert_called_once_with(plan, uncacheable_send_task_ids=set() if kind == "stable" else {7})
+    assert [call[0] for call in service.method_calls] == ["submit_send", "configure_plan", "launch"]
+
+
+def test_temporary_eligibility_does_not_change_peer_bucket_geometry():
+    full = (slice(None),)
+    sends = [TransferOp(name, 1, True, full, full, tid)
+             for tid, name in enumerate(("weight.a", "weight.b", "kv::k", "kv::v"))]
+    recvs = [TransferOp(op.param_name, 0, False, full, full, op.task_id) for op in sends]
+    sender = _packing_service(target_bytes=32, max_item_bytes=8)
+    receiver = _packing_service(target_bytes=32, max_item_bytes=8)
+    sender.persistent_pack_buffers = receiver.persistent_pack_buffers = True
+    sender.configure_plan(ReshardPlan(sends, []), uncacheable_send_task_ids={1})
+    receiver.configure_plan(ReshardPlan([], recvs), uncacheable_send_task_ids=set())
+    send_ops = [SendOp(op.task_id, torch.zeros(4, dtype=torch.uint8), 1) for op in sends]
+    recv_ops = [RecvOp(op.task_id, torch.zeros(4, dtype=torch.uint8), 0) for op in recvs]
+    send_groups = sender._partition_pack_groups(send_ops, "dest_rank")
+    recv_groups = receiver._partition_pack_groups(recv_ops, "src_rank")
+    assert [[op.task_id for op in group] for group in send_groups] == [[0, 1], [2, 3]]
+    assert [[op.task_id for op in group] for group in recv_groups] == [[0, 1], [2, 3]]
+    for _ in range(2):
+        packed, _, _, stats = sender._pack_remote_ops(send_ops, [])
+        assert len(packed) == 2 and stats["send_pack_cache_hits"] == 0
+        assert not sender._send_pack_cache
+
+
 def _packing_service(*, target_bytes: int, max_item_bytes: int) -> NCCLCopyService:
     service = object.__new__(NCCLCopyService)
     service.pack_target_bytes = target_bytes
@@ -21,7 +110,8 @@ def _packing_service(*, target_bytes: int, max_item_bytes: int) -> NCCLCopyServi
     service.persistent_pack_buffers = False
     service.pack_rerouted_only = False
     service._pack_task_ids = None
-    service._cacheable_pack_task_ids = None
+    service._cacheable_pack_task_ids = frozenset()
+    service._uncacheable_send_task_ids = frozenset()
     service._send_pack_cache = {}
     service._recv_pack_cache = {}
     service._inflight = None
@@ -177,6 +267,10 @@ def test_remote_packing_only_coalesces_rerouted_tasks():
 def test_persistent_send_bucket_is_reused_after_warmup():
     service = _packing_service(target_bytes=16, max_item_bytes=8)
     service.persistent_pack_buffers = True
+    full = (slice(None),)
+    service.configure_plan(ReshardPlan([
+        TransferOp(name, 2, True, full, full, tid) for tid, name in ((1, "a"), (2, "b"))
+    ], []), uncacheable_send_task_ids=set())
     sends = [
         SendOp(task_id=1, tensor=torch.tensor([1, 2], dtype=torch.uint8), dest_rank=2),
         SendOp(task_id=2, tensor=torch.tensor([3, 4], dtype=torch.uint8), dest_rank=2),
@@ -207,7 +301,7 @@ def test_persistent_send_bucket_never_caches_mutable_kv_tasks():
         recv_ops=[],
         rerouted_task_ids=frozenset({1, 2}),
     )
-    service.configure_plan(plan)
+    service.configure_plan(plan, uncacheable_send_task_ids=set())
     sends = [
         SendOp(task_id=1, tensor=torch.tensor([1, 2], dtype=torch.uint8), dest_rank=2),
         SendOp(task_id=2, tensor=torch.tensor([3, 4], dtype=torch.uint8), dest_rank=2),
