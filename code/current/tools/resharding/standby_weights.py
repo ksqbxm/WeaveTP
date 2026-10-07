@@ -8,6 +8,7 @@ any use of these weights. Views keep their shape while their storage is empty.
 from contextlib import nullcontext
 
 import torch
+import torch.distributed as dist
 
 
 def validate_release_mode(args):
@@ -33,6 +34,7 @@ def _chunks(tensor, limit=1 << 20):
 
 class StandbyWeights:
     def __init__(self, model, *, protected_tensors):
+        self.named_parameters = tuple(model.named_parameters())
         self.parameters = tuple(model.parameters())
         protected = {t.untyped_storage() for t in protected_tensors}
         self.groups = {}
@@ -91,6 +93,41 @@ class StandbyWeights:
             for chunk in _chunks(parameter):
                 valid.logical_and_(torch.isfinite(chunk).all())
         return valid
+
+    @torch.no_grad()
+    def bitwise_checksums(self):
+        """Two int64 sums over raw bits; scratch is bounded to one chunk.
+
+        Positions follow deterministic _chunks traversal within each parameter.
+        Integer overflow is modulo 2**64. These checksums are not collision-free.
+        """
+        self._check_storage(True)
+        integer_dtype = {torch.bfloat16: torch.int16, torch.float16: torch.int16,
+                         torch.float32: torch.int32}
+        checksums = {}
+        for name, parameter in self.named_parameters:
+            total = torch.zeros(2, dtype=torch.int64, device=parameter.device)
+            offset = 1
+            for chunk in _chunks(parameter):
+                bits = chunk.contiguous().view(integer_dtype[parameter.dtype]).reshape(-1).to(torch.int64)
+                positions = torch.arange(offset, offset + bits.numel(), device=bits.device, dtype=torch.int64)
+                total[0].add_(bits.sum())
+                total[1].add_((bits * positions).sum())
+                offset += bits.numel()
+            checksums[name] = total
+        return checksums
+
+
+def audit_weight_checksums(weights, reference, control_group):
+    """All ranks reject corruption before cutover or source storage release."""
+    actual = weights.bitwise_checksums()
+    mismatches = {name: {"expected": reference[name].tolist(), "actual": value.tolist()}
+                  for name, value in actual.items() if not torch.equal(value, reference[name])}
+    outcomes = [None] * dist.get_world_size(group=control_group)
+    dist.all_gather_object(outcomes, mismatches, group=control_group)
+    failures = {rank: mismatch for rank, mismatch in enumerate(outcomes) if mismatch}
+    if failures:
+        raise AssertionError(f"weight bitwise audit failed; cutover rejected: {failures}")
 
 
 def cuda_memory():

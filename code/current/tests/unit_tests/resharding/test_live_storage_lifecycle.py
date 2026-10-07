@@ -20,13 +20,14 @@ from megatron.core.resharding.refit import BandwidthAwareRefitPolicy
 from megatron.core.resharding.utils import ReshardPlan, TransferOp
 from tools.resharding.standby_weights import (
     StandbyWeights,
+    audit_weight_checksums,
     release_standby,
     storage_bytes,
     validate_release_mode,
 )
 
 
-def run_coordinator(tree, *, release=False, identity=False, repeat=False, fault=False, check_polls=1,
+def run_coordinator(tree, *, release=False, bitwise=False, identity=False, repeat=False, fault=False, check_polls=1,
                     peer_check_polls=0, peer_weight_valid=True, capacity=128):
     names = ["run_live_benchmark", "add_live_args", "StaticKVCacheModule", "LiveStateBundle",
              "_run_async_waves", "_parse_rank_phases", "_pressure_ranks_for_switch",
@@ -37,6 +38,7 @@ def run_coordinator(tree, *, release=False, identity=False, repeat=False, fault=
     ns["add_live_args"](parser)
     args = parser.parse_args([])
     vars(args).update(live_release_standby_weights=release, live_kv_request_identity=identity,
+                      live_weight_bitwise_audit=bitwise,
                       tensor_model_parallel_size=2, expert_tensor_parallel_size=2,
                       expert_model_parallel_size=1, num_experts=4, micro_batch_size=1,
                       use_tp_pp_dp_mapping=False, seed=7, max_position_embeddings=capacity,
@@ -159,7 +161,7 @@ def run_coordinator(tree, *, release=False, identity=False, repeat=False, fault=
         ns[name] = getattr(live, name)
     clock = itertools.count()
     ns.update(get_args=lambda: args, dist=SimpleNamespace(
-        get_rank=lambda: 0, get_world_size=lambda: 4, new_group=lambda **_: groups,
+        get_rank=lambda: 0, get_world_size=lambda **_: 4, new_group=lambda **_: groups,
         barrier=lambda **_: None, broadcast_object_list=lambda *_a, **_kw: None,
         all_gather_object=lambda out, value, **_: out.__setitem__(slice(None), [value] * len(out))),
         time=SimpleNamespace(perf_counter=lambda: next(clock) / 1000), statistics=__import__("statistics"),
@@ -176,11 +178,13 @@ def run_coordinator(tree, *, release=False, identity=False, repeat=False, fault=
         launch_reshard_plan=launch_reshard_plan, _hybrid_fast_path_decision=lambda *_a, **_kw: {"enabled": False, "reason": "disabled"},
         _configure_request_domains=request_domains, StandbyWeights=StandbyWeights,
         validate_release_mode=validate_release_mode, storage_bytes=storage_bytes,
+        audit_weight_checksums=audit_weight_checksums,
         release_standby=release_hook, cuda_memory=lambda: {"allocated": 0, "reserved": 0},
         _write_results=lambda _, result: written.append(result), json=SimpleNamespace(dumps=lambda *_a, **_kw: ""))
     with patch("torch.cuda.Stream", return_value=Mock()), patch("torch.cuda.Event", Event), \
             patch("torch.cuda.stream", return_value=nullcontext()), patch("torch.cuda.current_stream", return_value=Mock()), \
-            patch("tools.resharding.standby_weights.cuda_memory", return_value={"allocated": 0, "reserved": 0}):
+            patch("tools.resharding.standby_weights.cuda_memory", return_value={"allocated": 0, "reserved": 0}), \
+            patch("tools.resharding.standby_weights.dist", ns["dist"]):
         ns["run_live_benchmark"]()
     return written[0], models, releases
 
@@ -206,9 +210,10 @@ def test_actual_coordinator_releases_after_validation_and_migrates_check_delta(i
         assert memory["inactive_tp"] == (4 if repeat or row["direction"] == "4->2" else 2)
 
 
-def test_actual_coordinator_rejects_missing_weight_before_target_decode():
+@pytest.mark.parametrize("bitwise", [False, True])
+def test_actual_coordinator_rejects_missing_weight_before_target_decode(bitwise):
     with pytest.raises(AssertionError, match="cutover rejected"):
-        run_coordinator(defaults.CURRENT, release=True, fault=True)
+        run_coordinator(defaults.CURRENT, release=True, fault=True, bitwise=bitwise)
 
 
 def test_pending_weight_check_stops_decode_at_cap_and_includes_all_kv_delta():
@@ -246,3 +251,17 @@ def test_identity_can_be_enabled_without_storage_release():
     assert "kv_request_domains" in result
     assert "standby_weight_storage" not in result
     assert releases == []
+
+
+def test_bitwise_audit_requires_release():
+    with pytest.raises(ValueError, match="audit requires"):
+        run_coordinator(defaults.CURRENT, bitwise=True)
+
+
+@pytest.mark.parametrize("bitwise", [False, True])
+def test_audit_four_switches_and_disabled_field_absence(bitwise):
+    result, _, releases = run_coordinator(defaults.CURRENT, release=True, bitwise=bitwise)
+    assert len(releases) == 5
+    for row in result["standby_weight_storage"]["ranks"][0]["switches"]:
+        assert row["weight_check_enqueue_s"] >= 0
+        assert ("weight_bitwise_audit_s" in row) == bitwise

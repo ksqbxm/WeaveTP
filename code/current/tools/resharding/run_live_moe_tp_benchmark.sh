@@ -199,6 +199,13 @@ else
 fi
 
 LIVE_FEATURE_ARGS=()
+if [[ "${WEIGHT_BITWISE_AUDIT:-0}" == "1" ]]; then
+    if [[ "${RELEASE_STANDBY_WEIGHTS:-0}" != 1 ]]; then
+        echo "Weight bitwise audit requires standby weight release" >&2
+        exit 2
+    fi
+    LIVE_FEATURE_ARGS+=(--live-weight-bitwise-audit)
+fi
 if [[ "${RELEASE_STANDBY_WEIGHTS:-0}" == "1" ]]; then
     LIVE_FEATURE_ARGS+=(--live-release-standby-weights)
 fi

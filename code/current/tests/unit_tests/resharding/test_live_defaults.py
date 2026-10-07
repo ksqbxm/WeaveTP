@@ -68,6 +68,13 @@ def test_storage_parser_defaults_off():
     assert parser.parse_args(["--live-release-standby-weights"]).live_release_standby_weights
 
 
+def test_bitwise_parser_defaults_off():
+    parser = argparse.ArgumentParser()
+    load(CURRENT, ["add_live_args"])["add_live_args"](parser)
+    assert not parser.parse_args([]).live_weight_bitwise_audit
+    assert parser.parse_args(["--live-weight-bitwise-audit"]).live_weight_bitwise_audit
+
+
 def test_disabled_wrapper_keeps_main_names_views_and_metadata():
     context = SimpleNamespace(key_value_memory_dict={1: (torch.randn(3, 1, 2, 4), torch.randn(3, 1, 2, 4))})
     before = load(BASE, ["StaticKVCacheModule"])["StaticKVCacheModule"](context, None)

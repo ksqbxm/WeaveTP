@@ -65,6 +65,7 @@ from megatron.training.initialize import initialize_megatron
 from tools.resharding import weavetp_observations as observations
 from tools.resharding.standby_weights import (
     StandbyWeights,
+    audit_weight_checksums,
     cuda_memory,
     release_standby,
     storage_bytes,
@@ -192,6 +193,8 @@ class LiveStateBundle(torch.nn.Module):
 
 def add_live_args(parser):
     group = parser.add_argument_group(title="live MoE TP benchmark")
+    group.add_argument("--live-weight-bitwise-audit", action="store_true",
+                       help="Audit migrated raw weight bits against startup GPU checksums (requires release).")
     group.add_argument(
         "--live-release-standby-weights",
         action="store_true",
@@ -1309,6 +1312,8 @@ def run_live_benchmark() -> None:
     args.live_pressure_ranks_tuple = args.live_pressure_rank_phases_tuple[0]
     if args.live_release_standby_weights:
         validate_release_mode(args)
+    if args.live_weight_bitwise_audit and not args.live_release_standby_weights:
+        raise ValueError("weight bitwise audit requires standby weight release")
     src_tp = args.tensor_model_parallel_size
     dst_tp = args.live_dst_tp
     if src_tp != 2 or dst_tp != 4:
@@ -1777,6 +1782,9 @@ def run_live_benchmark() -> None:
         preparation_stream = torch.cuda.Stream()
         for copy_service in services.values():
             copy_service.producer_stream = preparation_stream
+        if args.live_weight_bitwise_audit:
+            weight_references = {tp: storage.bitwise_checksums() for tp, storage in weights.items()}
+            torch.cuda.current_stream().synchronize()
         local_residency = {
             "rank": rank,
             "initial_release": release_standby(weights[4], services.values()),
@@ -2067,7 +2075,9 @@ def run_live_benchmark() -> None:
         if args.live_release_standby_weights:
             check_start = time.perf_counter()
             with torch.cuda.stream(preparation_stream):
+                enqueue_start = time.perf_counter()
                 weight_valid = weights[next_tp].finite_flag()
+                weight_check_enqueue_s = time.perf_counter() - enqueue_start
                 weight_checked = torch.cuda.Event()
                 weight_checked.record()
             check_tpot_ms = []
@@ -2121,9 +2131,14 @@ def run_live_benchmark() -> None:
         if args.live_release_standby_weights:
             check_wait_start = time.perf_counter()
             weight_checked.synchronize()
-            if not _all_ready(bool(weight_valid.item()), control_group):
-                raise AssertionError("target weights contain NaN/Inf after full migration; cutover rejected")
+            all_weights_finite = _all_ready(bool(weight_valid.item()), control_group)
             weight_check_wait_s = time.perf_counter() - check_wait_start
+            if args.live_weight_bitwise_audit:
+                audit_start = time.perf_counter()
+                audit_weight_checksums(weights[next_tp], weight_references[next_tp], control_group)
+                weight_bitwise_audit_s = time.perf_counter() - audit_start
+            if not all_weights_finite:
+                raise AssertionError("target weights contain NaN/Inf after full migration; cutover rejected")
         target_context.sequence_len_offset = delta_end
         target_context.enable_decode_mode()
         delta_s = _all_max(time.perf_counter() - cutover_start, control_group)
@@ -2208,6 +2223,7 @@ def run_live_benchmark() -> None:
                 "before_allocate": before_allocate,
                 "after_allocate": after_allocate,
                 "preparation_submit_s": preparation_submit_s,
+                "weight_check_enqueue_s": weight_check_enqueue_s,
                 "weight_check_overlap_s": weight_check_overlap_s,
                 "weight_check_overlap_steps": len(check_tpot_ms),
                 "weight_check_tpot_ms": check_tpot_ms,
@@ -2216,6 +2232,8 @@ def run_live_benchmark() -> None:
                 "release": release_record,
                 "release_s": time.perf_counter() - release_start,
             })
+            if args.live_weight_bitwise_audit:
+                local_residency["switches"][-1]["weight_bitwise_audit_s"] = weight_bitwise_audit_s
         switch_wall_s = _all_max(time.perf_counter() - switch_start, control_group)
         record = {
             "index": switch_index,
