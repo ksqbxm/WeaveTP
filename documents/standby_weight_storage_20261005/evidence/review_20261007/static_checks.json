@@ -1,0 +1,105 @@
+{
+  "python_compile": [
+    "code/current/examples/rl/benchmark_live_moe_tp.py",
+    "code/current/megatron/core/resharding/async_execution.py",
+    "code/current/megatron/core/resharding/copy_services/nccl_copy_service.py",
+    "code/current/tests/unit_tests/resharding/test_live_defaults.py",
+    "code/current/tests/unit_tests/resharding/test_live_storage_lifecycle.py",
+    "code/current/tests/unit_tests/resharding/test_nccl_packing.py",
+    "code/current/tests/unit_tests/resharding/test_weight_acceptance.py",
+    "code/current/tests/unit_tests/resharding/test_weight_ordering.py",
+    "code/current/tools/resharding/correctness/gpu_weight_check.py",
+    "code/current/tools/resharding/correctness/gpu_weight_ordering.py",
+    "code/current/tools/resharding/standby_weights.py",
+    "code/current/tests/unit_tests/resharding/test_weight_bitwise.py",
+    "code/current/tests/unit_tests/resharding/test_weight_fix2.py",
+    "documents/standby_weight_storage_20261005/run_default_fix2.py",
+    "documents/standby_weight_storage_20261005/evidence/review_20261007/reproduce_old.py"
+  ],
+  "checks": [
+    {
+      "command": [
+        "C:/Users/ksqbx/AppData/Local/Temp/weavetp-storage-tools/bin/uv.exe",
+        "run",
+        "--no-project",
+        "--python",
+        "C:\\Users\\ksqbx\\miniforge3\\python.exe",
+        "--no-python-downloads",
+        "python",
+        "-m",
+        "isort",
+        "--check-only",
+        "code/current/examples/rl/benchmark_live_moe_tp.py",
+        "code/current/megatron/core/resharding/async_execution.py",
+        "code/current/megatron/core/resharding/copy_services/nccl_copy_service.py",
+        "code/current/tests/unit_tests/resharding/test_live_defaults.py",
+        "code/current/tests/unit_tests/resharding/test_live_storage_lifecycle.py",
+        "code/current/tests/unit_tests/resharding/test_nccl_packing.py",
+        "code/current/tests/unit_tests/resharding/test_weight_acceptance.py",
+        "code/current/tests/unit_tests/resharding/test_weight_ordering.py",
+        "code/current/tools/resharding/correctness/gpu_weight_check.py",
+        "code/current/tools/resharding/correctness/gpu_weight_ordering.py",
+        "code/current/tools/resharding/standby_weights.py",
+        "code/current/tests/unit_tests/resharding/test_weight_bitwise.py",
+        "code/current/tests/unit_tests/resharding/test_weight_fix2.py",
+        "documents/standby_weight_storage_20261005/run_default_fix2.py",
+        "documents/standby_weight_storage_20261005/evidence/review_20261007/reproduce_old.py"
+      ],
+      "exit_code": 0,
+      "output": "WARN `--no-project` was provided, but no project was found\n"
+    },
+    {
+      "command": [
+        "C:/Program Files/Git/bin/bash.exe",
+        "-n",
+        "code/current/tools/resharding/run_live_moe_tp_benchmark.sh"
+      ],
+      "exit_code": 0,
+      "output": ""
+    },
+    {
+      "command": [
+        "C:/Program Files/Git/bin/bash.exe",
+        "-n",
+        "code/current/tools/resharding/run_standby_weight_acceptance.sh"
+      ],
+      "exit_code": 0,
+      "output": ""
+    },
+    {
+      "command": [
+        "C:/Program Files/Git/bin/bash.exe",
+        "-n",
+        "documents/standby_weight_storage_20261005/run_default_fix2.sh"
+      ],
+      "exit_code": 0,
+      "output": ""
+    },
+    {
+      "command": [
+        "git",
+        "diff",
+        "--check"
+      ],
+      "exit_code": 0,
+      "output": "warning: in the working copy of 'documents/standby_weight_storage_20261005/report.md', LF will be replaced by CRLF the next time Git touches it\n"
+    }
+  ],
+  "source_sha256": {
+    "code/current/examples/rl/benchmark_live_moe_tp.py": "b9dc10bdbac292e33e42c1deb607276e5ea3adbadad9f40b965f9ea5d5d90a6d",
+    "code/current/megatron/core/resharding/async_execution.py": "9b0b8cf26be63b502f43f620ca77e449675363e54c449345c4f38b8bc559f60a",
+    "code/current/megatron/core/resharding/copy_services/nccl_copy_service.py": "b03f20a66e5bb9a681f710e14a5525d4b0fb9d82e8068b4be69947adb4732aca",
+    "code/current/tests/unit_tests/resharding/test_live_defaults.py": "184e2637174a50b2c102b3808b15329ea9f1787320f2e02a268ed46ae433b44b",
+    "code/current/tests/unit_tests/resharding/test_live_storage_lifecycle.py": "997ca6668c1709e356486f8e99445de5b618424e49c42406eca3c36df0e51c2c",
+    "code/current/tests/unit_tests/resharding/test_nccl_packing.py": "17c9d97255b1622c9da3e67fe8ac755372665578515eab68f281b9d86d155bbb",
+    "code/current/tests/unit_tests/resharding/test_weight_acceptance.py": "d5ce1d3254dab50ea60185a867440f6f679335960ceeb303302ddeaefd3b0d0a",
+    "code/current/tests/unit_tests/resharding/test_weight_ordering.py": "b9899ce1928c8a4a87f30818138730133e08858b6572225d242e1afe9decef27",
+    "code/current/tools/resharding/correctness/gpu_weight_check.py": "af7ab38222dbb8d878652d7d8f6432cae723a43cee6d122349c7c8c667cd8378",
+    "code/current/tools/resharding/correctness/gpu_weight_ordering.py": "12fb37f34defe9d337c4f49a431d6352b3c31f31af8527444c88b304940d9096",
+    "code/current/tools/resharding/standby_weights.py": "eb9c1a5bff5c15f14ca403e0f95f1bb0abe9503742c88d6db544c87e42b5a711",
+    "code/current/tests/unit_tests/resharding/test_weight_bitwise.py": "f494d97082e47a3e90351ed27096fe29ed955f37761274e39914b5ee29cceaaf",
+    "code/current/tests/unit_tests/resharding/test_weight_fix2.py": "be197355b00e4cc3717fe507c0ac32dc2b4ec44b3621732f2c6a6c5bcdc12382",
+    "documents/standby_weight_storage_20261005/run_default_fix2.py": "195ab54e458a0382e737c33df00031470f0b4eafe74de19a8816ac46aa5e904f",
+    "documents/standby_weight_storage_20261005/evidence/review_20261007/reproduce_old.py": "f8f56540aa61f49acaf32683078349d1702d931fd5553094b1be078ff62edb63"
+  }
+}

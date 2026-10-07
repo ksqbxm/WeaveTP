@@ -1,0 +1,35 @@
+{
+  "note": "Only UTF-8 BOM, line endings and trailing whitespace normalized for git diff --check; failure content retained.",
+  "logs": [
+    {
+      "file": "cpu_tests.log",
+      "raw_sha256": "65d74dd3647d1205117306d12d282780fac23d9ed902978b59505c6c57dd93e2",
+      "normalized_sha256": "a7d73c36c4d6e302985edd8b229d5532a0884ab3218ef905a50efb78bb9e4918"
+    },
+    {
+      "file": "first_tests.log",
+      "raw_sha256": "08766dc3c4d6b2fb110f4707bfcab52bb299c7be828058df94898df26ab8722b",
+      "normalized_sha256": "ce1a9bf08c565e37aa4b5a1a75a00cd0a1d7790d921d6d22ad6d919929620d87"
+    },
+    {
+      "file": "old_cache_failure.log",
+      "raw_sha256": "a8b876b54096d0c5ea14d5f6789e453e6e72debcabfec91a33c0b2904cb0bbfd",
+      "normalized_sha256": "177305e52213be8f3b84807dafd80007f66e466724731f66707823bb933c0853"
+    },
+    {
+      "file": "old_probe_failure.log",
+      "raw_sha256": "33d6ab20a73c74b609ae5e8724c9a8977d6ea4a0c90fa42180423699c73babde",
+      "normalized_sha256": "73261b83831f606b520914fb5fec52a582b90690439626a4132ba639c4edb9a1"
+    },
+    {
+      "file": "second_tests.log",
+      "raw_sha256": "1ad7f35d6f43b6979f1a08d0650ac901ef897e4f5fe36824fb536e93f50fd9cf",
+      "normalized_sha256": "5a0241cb1bdbe4c3bed8944444feb56c11de282dc70b052295b0c3a0423890d3"
+    },
+    {
+      "file": "diagnostic_tests.log",
+      "raw_sha256": "8d38d4f01b434b9da11ddf8cbe3891f096f1443892a6ccb11005ede53442acbd",
+      "normalized_sha256": "648f8fba546be4426de38bf85c9b54aa9515f60700af2445de12fdf038b06abe"
+    }
+  ]
+}

@@ -18,6 +18,19 @@ from tools.resharding.correctness.gpu_weight_ordering import completions_during_
 ROOT = Path(__file__).resolve().parents[3]
 
 
+@pytest.mark.parametrize("nan", [False, True])
+def test_failure_diagnostic_distinguishes_stale_half_and_nan(nan):
+    expected = torch.arange(8.)
+    target = expected.repeat(2, 1)
+    target[:, 4:] = float("nan") if nan else expected[:4]
+    diagnostic = probe.mismatch_diagnostic(target, expected)
+    assert diagnostic["mismatch_count"] == 8
+    assert diagnostic["first_mismatch_index"] == [0, 4]
+    assert diagnostic["has_nan"] == nan
+    assert diagnostic["mismatches_equal_other_half"] == (not nan)
+    json.dumps(diagnostic, allow_nan=False)
+
+
 @pytest.mark.parametrize("transfer,foreground,expected", [
     ([(10, 20)], [(11, 12)], 1),
     ([(10, 20)], [(5, 12)], 1),
@@ -127,7 +140,8 @@ def test_ordering_probe_executes_chunks_and_checks_data_with_cpu_transport(tmp_p
 
 
 @pytest.mark.parametrize("failed_rank", [-1, 0, 1])
-def test_all_ranks_agree_before_next_batch_and_save_failures(tmp_path, failed_rank):
+@pytest.mark.parametrize("check_kind", ["ordering", "bitwise"])
+def test_all_ranks_agree_before_next_batch_and_save_failures(tmp_path, failed_rank, check_kind):
     # These workers use the actual completion function and actual Gloo. A failed
     # rank must prevent BOTH workers from submitting their simulated next batch.
     script = '''
@@ -137,6 +151,7 @@ from pathlib import Path
 import torch
 import torch.distributed as dist
 from tools.resharding.correctness.gpu_weight_ordering import complete_case
+from tools.resharding.standby_weights import StandbyWeights, audit_weight_checksums
 rank, failed = map(int, sys.argv[1:3])
 output = Path(sys.argv[3])
 dist.init_process_group("gloo", init_method=sys.argv[4], rank=rank, world_size=2,
@@ -150,6 +165,17 @@ try:
     exec(compile(ast.Module(body=[fn], type_ignores=[]), "readiness", "exec"), ns)
     votes = [ns["_all_ready"](value, None) for value in (rank == 0, rank == 1, True, rank != failed)]
     (output / f"votes{rank}.json").write_text(json.dumps(votes))
+    if sys.argv[5] == "bitwise":
+        model = torch.nn.Linear(2, 2, bias=False)
+        weights = StandbyWeights(model, protected_tensors=())
+        reference = weights.bitwise_checksums()
+        if rank == failed:
+            model.weight.data.fill_(float("nan"))
+        try:
+            audit_weight_checksums(weights, reference, dist.group.WORLD)
+        except AssertionError as error:
+            (output / f"audit{rank}.txt").write_text(str(error))
+            raise
     complete_case({"checks": {"exact": rank != failed, "finite": True}}, [], output)
     (output / f"next_batch{rank}").write_text("submitted")
 finally:
@@ -163,7 +189,7 @@ finally:
             log = (tmp_path / f"worker{rank}.log").open("w", encoding="utf-8")
             logs.append(log)
             processes.append(subprocess.Popen(
-                [sys.executable, "-B", "-c", script, str(rank), str(failed_rank), str(tmp_path), rendezvous],
+                [sys.executable, "-B", "-c", script, str(rank), str(failed_rank), str(tmp_path), rendezvous, check_kind],
                 cwd=ROOT, stdout=log, stderr=subprocess.STDOUT,
                 env={**os.environ, "PYTHONIOENCODING": "utf-8", "OMP_NUM_THREADS": "1"},
             ))
@@ -179,6 +205,10 @@ finally:
     assert all((code == 0) == (failed_rank == -1) for code in codes), diagnostics
     for rank in range(2):
         assert (tmp_path / f"next_batch{rank}").exists() == (failed_rank == -1), diagnostics
+        if check_kind == "bitwise" and failed_rank != -1:
+            error = (tmp_path / f"audit{rank}.txt").read_text()
+            assert f"{failed_rank}:" in error and "weight" in error and "expected" in error and "actual" in error
+            continue
         receipt = json.loads((tmp_path / f"ordering_rank{rank}.json").read_text())
         assert receipt["passed"] == (failed_rank == -1)
         assert receipt["cases"][0]["failures"] == ([] if failed_rank == -1 else [{"rank": failed_rank, "failed_checks": ["exact"]}])

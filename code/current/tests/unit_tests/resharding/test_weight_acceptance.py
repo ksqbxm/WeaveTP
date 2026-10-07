@@ -5,6 +5,7 @@ import os
 import shlex
 import shutil
 import subprocess
+import time
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
@@ -17,7 +18,7 @@ SCRIPT = ROOT / "tools/resharding/run_standby_weight_acceptance.sh"
 BASH = "C:/Program Files/Git/bin/bash.exe" if os.name == "nt" else shutil.which("bash")
 
 
-@pytest.mark.parametrize("mode,count", [("benchmark", 8), ("memory", 4), ("ordering", 2)])
+@pytest.mark.parametrize("mode,count", [("benchmark", 4), ("memory", 2), ("ordering", 1)])
 def test_acceptance_matrix_is_dry_run_only_and_isolates_allocators(mode, count):
     env = {**os.environ, "PYTHON": "/existing/python"}
     result = subprocess.run([BASH, str(SCRIPT), mode, "/data/standby-dry-run", "--dry-run"],
@@ -117,34 +118,48 @@ def test_pending_check_probe_preserves_result_and_rejects_missing_coverage(tmp_p
     fn = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "main")
 
     class Weights:
+        parameters = [torch.zeros(2, 2)]
         def finite_flag(self):
+            events.append("finite")
             return "finite result"
 
     args = SimpleNamespace(live_json_output=str(tmp_path / "result.json"), live_max_overlap_steps=2)
     result = {"switches": [{"delta_tokens": delta, "base": {"overlap_steps": 1}}],
               "standby_weight_storage": {"ranks": [{"switches": [{"weight_check_overlap_steps": steps}]}]}}
-    rank = [0]
+    rank = [1]
+    events = []
     saved = Mock()
     live = SimpleNamespace(_write_results=saved)
     def run():
-        for rank[0] in (0, 1):
-            assert Weights().finite_flag() == "finite result"
+        assert Weights().finite_flag() == "finite result"
         rank[0] = 0
         live._write_results(args, result)
     live.main = run
-    ns = dict(torch=torch, dist=SimpleNamespace(get_rank=lambda: rank[0]), live=live,
-              StandbyWeights=Weights, patch=patch, Path=Path, json=json)
+    ns = dict(torch=torch, dist=SimpleNamespace(get_rank=lambda: rank[0], get_world_size=lambda: 1,
+              new_group=lambda **_: "gloo", destroy_process_group=lambda _: None,
+              all_gather_object=lambda out, value, **_: out.__setitem__(0, value)), live=live,
+              StandbyWeights=Weights, patch=patch, Path=Path, json=json, time=time,
+              _chunks=lambda p: [p])
     exec(compile(ast.Module(body=[fn], type_ignores=[]), str(path), "exec"), ns)
-    with patch("torch.cuda._sleep") as delay:
+    event = SimpleNamespace(record=lambda: events.append("record"), query=lambda: events.append("query") or False)
+    with patch("torch.cuda._sleep", side_effect=lambda _: events.append("delay")) as delay, \
+            patch("torch.cuda.Event", return_value=event):
         if passed:
             ns["main"]()
         else:
             with pytest.raises(AssertionError, match="pending weight check acceptance failed"):
                 ns["main"]()
     delay.assert_called_once_with(1_000_000_000)
+    assert events == ["finite", "delay", "record", "query"]
     saved.assert_called_once_with(args, result)
     assert live._write_results is saved  # Probe hooks cannot leak to another run.
-    assert json.loads((tmp_path / "weight_check_probe.json").read_text())["passed"] == passed
+    receipt = json.loads((tmp_path / "weight_check_probe.json").read_text())
+    assert receipt["passed"] == passed
+    measurement = receipt["ranks"][0]["switches"][0]
+    assert measurement["finite_flag_enqueue_s"] >= 0
+    assert measurement["chunk_count"] == 1 and measurement["estimated_kernel_count"] == 4
+    assert measurement["ready_immediately_after_enqueue"] is False
+    assert measurement["overlap_steps"] == steps
 
 
 @pytest.mark.parametrize("check,memory,release,preset,expected", [
@@ -168,3 +183,19 @@ def test_probe_entrypoints_and_invalid_combinations(tmp_path, check, memory, rel
     else:
         assert result.returncode == 0, result.stderr
         assert expected in shlex.split(result.stdout)
+
+
+@pytest.mark.parametrize("audit,release", [(0, 0), (0, 1), (1, 0), (1, 1)])
+def test_bitwise_environment_maps_to_opt_in_cli(tmp_path, audit, release):
+    result = subprocess.run([BASH, str(ROOT / "tools/resharding/run_live_moe_tp_benchmark.sh")],
+                            cwd=ROOT, text=True, encoding="utf-8", capture_output=True, env={
+                                **os.environ, "PYTHON": "/usr/bin/echo", "OUT_DIR": tmp_path.as_posix(),
+                                "WEIGHT_CHECK_AUDIT": "0", "WEIGHT_STORAGE_AUDIT": "0",
+                                "WEIGHT_BITWISE_AUDIT": str(audit), "RELEASE_STANDBY_WEIGHTS": str(release),
+                                "MODEL_PRESET": "synthetic", "MSYS_NO_PATHCONV": "1",
+                            })
+    if audit and not release:
+        assert result.returncode == 2 and "bitwise audit requires" in result.stderr
+    else:
+        assert result.returncode == 0, result.stderr
+        assert ("--live-weight-bitwise-audit" in shlex.split(result.stdout)) == bool(audit)

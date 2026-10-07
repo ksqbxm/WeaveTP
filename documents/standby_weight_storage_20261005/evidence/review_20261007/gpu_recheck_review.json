@@ -1,0 +1,279 @@
+{
+  "commit": "e6ba55b3b09663773488a37f2edc3d34b0dc17ad",
+  "ordering": [
+    {
+      "file": "documents\\standby_weight_storage_20261005\\gpu_results_recheck\\standby_fix_20261006T115406Z_3218941\\default_ordering\\ordering_rank0.json",
+      "sha256": "e27e391eb4f4fbe9f7e7264058f89febf4543384b923facca55bfe37a78e67be",
+      "passed_cases": 6,
+      "failures": [
+        {
+          "scope": "ordering",
+          "packed": true,
+          "cycle": 0,
+          "checks": {
+            "exact_local": true,
+            "exact_remote": false,
+            "exact_strided": false,
+            "finite": true,
+            "poison_before_copy": true
+          },
+          "poison_ms": 34.09507369995117,
+          "stages_ms": {
+            "local": [
+              [
+                34.10611343383789,
+                34.111358642578125
+              ],
+              [
+                34.9073600769043,
+                34.929344177246094
+              ]
+            ],
+            "pack": [
+              [
+                34.105377197265625,
+                34.11100769042969
+              ],
+              [
+                34.94700622558594,
+                35.001182556152344
+              ]
+            ],
+            "nccl": [
+              [
+                34.113887786865234,
+                34.35878372192383
+              ],
+              [
+                35.0365104675293,
+                35.14547348022461
+              ]
+            ],
+            "unpack": [
+              [
+                34.36134338378906,
+                34.364959716796875
+              ],
+              [
+                35.172576904296875,
+                35.21104049682617
+              ]
+            ]
+          },
+          "foreground_ms": [],
+          "foreground_completions_during_nccl": 0,
+          "receive_storage_reused": true,
+          "failures": [
+            {
+              "rank": 0,
+              "failed_checks": [
+                "exact_remote",
+                "exact_strided"
+              ]
+            },
+            {
+              "rank": 1,
+              "failed_checks": [
+                "exact_remote",
+                "exact_strided"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "file": "documents\\standby_weight_storage_20261005\\gpu_results_recheck\\standby_fix_20261006T115406Z_3218941\\default_ordering\\ordering_rank1.json",
+      "sha256": "2ea783dc5c70690d6650d97936fee09b5e6f8788f88b97c6ea94964ed368e756",
+      "passed_cases": 6,
+      "failures": [
+        {
+          "scope": "ordering",
+          "packed": true,
+          "cycle": 0,
+          "checks": {
+            "exact_local": true,
+            "exact_remote": false,
+            "exact_strided": false,
+            "finite": true,
+            "poison_before_copy": true
+          },
+          "poison_ms": 34.33299255371094,
+          "stages_ms": {
+            "local": [
+              [
+                34.3441276550293,
+                34.349281311035156
+              ],
+              [
+                34.91337585449219,
+                34.93600082397461
+              ]
+            ],
+            "pack": [
+              [
+                34.343265533447266,
+                34.34892654418945
+              ],
+              [
+                34.953857421875,
+                35.00688171386719
+              ]
+            ],
+            "nccl": [
+              [
+                34.35171127319336,
+                34.359169006347656
+              ],
+              [
+                35.04316711425781,
+                35.1473274230957
+              ]
+            ],
+            "unpack": [
+              [
+                34.3616943359375,
+                34.36531066894531
+              ],
+              [
+                35.17545700073242,
+                35.21353530883789
+              ]
+            ]
+          },
+          "foreground_ms": [],
+          "foreground_completions_during_nccl": 0,
+          "receive_storage_reused": true,
+          "failures": [
+            {
+              "rank": 0,
+              "failed_checks": [
+                "exact_remote",
+                "exact_strided"
+              ]
+            },
+            {
+              "rank": 1,
+              "failed_checks": [
+                "exact_remote",
+                "exact_strided"
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "benchmark": [
+    {
+      "case": "default_synthetic_off",
+      "exit_code": 0,
+      "switches": 4,
+      "pack_target_bytes": 0,
+      "persistent_pack_buffers": false
+    },
+    {
+      "case": "default_synthetic_on",
+      "exit_code": 0,
+      "switches": 4,
+      "pack_target_bytes": 0,
+      "persistent_pack_buffers": false
+    },
+    {
+      "case": "default_deepseek_off",
+      "exit_code": 0,
+      "switches": 4,
+      "pack_target_bytes": 0,
+      "persistent_pack_buffers": false
+    },
+    {
+      "case": "default_deepseek_on",
+      "exit_code": 0,
+      "switches": 4,
+      "pack_target_bytes": 0,
+      "persistent_pack_buffers": false
+    }
+  ],
+  "pending_probe": {
+    "passed": false,
+    "checks": {
+      "pending_decode_observed": false,
+      "delta_includes_check_decode": true
+    },
+    "scope": "delayed finite check; NOT a performance run"
+  },
+  "pending_steps": [
+    {
+      "rank": 0,
+      "steps": [
+        0,
+        1,
+        1,
+        1
+      ]
+    },
+    {
+      "rank": 1,
+      "steps": [
+        0,
+        1,
+        1,
+        1
+      ]
+    },
+    {
+      "rank": 2,
+      "steps": [
+        0,
+        1,
+        1,
+        1
+      ]
+    },
+    {
+      "rank": 3,
+      "steps": [
+        0,
+        1,
+        1,
+        1
+      ]
+    },
+    {
+      "rank": 4,
+      "steps": [
+        0,
+        1,
+        1,
+        1
+      ]
+    },
+    {
+      "rank": 5,
+      "steps": [
+        0,
+        1,
+        1,
+        1
+      ]
+    },
+    {
+      "rank": 6,
+      "steps": [
+        0,
+        1,
+        1,
+        1
+      ]
+    },
+    {
+      "rank": 7,
+      "steps": [
+        0,
+        1,
+        1,
+        1
+      ]
+    }
+  ]
+}

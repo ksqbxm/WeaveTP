@@ -2,6 +2,7 @@
 
 import json
 import sys
+import time
 from pathlib import Path
 from unittest.mock import patch
 
@@ -11,21 +12,42 @@ import torch
 import torch.distributed as dist
 
 from examples.rl import benchmark_live_moe_tp as live
-from tools.resharding.standby_weights import StandbyWeights
+from tools.resharding.standby_weights import StandbyWeights, _chunks
 
 
 def main():
     finite_flag = StandbyWeights.finite_flag
     write_results = live._write_results
+    measurements = []
 
     def delayed_check(weights):
+        chunks = sum(1 for p in weights.parameters for _ in _chunks(p))
+        start = time.perf_counter()
+        valid = finite_flag(weights)
+        enqueue_s = time.perf_counter() - start
         if dist.get_rank() == 1:
             torch.cuda._sleep(1_000_000_000)
-        return finite_flag(weights)
+        completed = torch.cuda.Event()
+        completed.record()
+        # This query precedes the coordinator's first Gloo readiness vote.
+        ready = completed.query()
+        # Count ones + isfinite/all/and per chunk; backend decomposition may
+        # launch additional kernels. This is an estimate, not a CUDA trace.
+        measurements.append({"finite_flag_enqueue_s": enqueue_s, "chunk_count": chunks,
+                             "estimated_kernel_count": 1 + 3 * chunks,
+                             "ready_immediately_after_enqueue": ready})
+        return valid
 
     def checked_results(args, result):
         write_results(args, result)
         rows = result["standby_weight_storage"]["ranks"]
+        for measurement, row in zip(measurements, rows[dist.get_rank()]["switches"]):
+            measurement["overlap_steps"] = row["weight_check_overlap_steps"]
+        # All migration work is finished; gather diagnostic metadata over Gloo.
+        group = dist.new_group(backend="gloo")
+        ranks = [None] * dist.get_world_size()
+        dist.all_gather_object(ranks, {"rank": dist.get_rank(), "switches": measurements}, group=group)
+        dist.destroy_process_group(group)
         checks = {
             "pending_decode_observed": all(0 < row["weight_check_overlap_steps"] <= args.live_max_overlap_steps
                                           for rank in rows for row in rank["switches"]),
@@ -38,7 +60,7 @@ def main():
         # this decision is collective and occurs after the final migration.
         if dist.get_rank() == 0:
             path = Path(args.live_json_output).with_name("weight_check_probe.json")
-            path.write_text(json.dumps({"passed": all(checks.values()), "checks": checks,
+            path.write_text(json.dumps({"passed": all(checks.values()), "checks": checks, "ranks": ranks,
                                        "scope": "delayed finite check; NOT a performance run"}, indent=2) + "\n",
                             encoding="utf-8")
         if not all(checks.values()):

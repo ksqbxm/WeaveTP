@@ -1,0 +1,49 @@
+FFFFF                                                                    [100%]
+================================== FAILURES ===================================
+_ test_pending_check_probe_preserves_result_and_rejects_missing_coverage[1-2-True] _
+tests\unit_tests\resharding\test_weight_acceptance.py:153: in test_pending_check_probe_preserves_result_and_rejects_missing_coverage
+    assert events == ["finite", "delay", "record", "query"]
+E   AssertionError: assert ['delay', 'finite'] == ['finite', 'd...ord', 'query']
+E
+E     At index 0 diff: 'delay' != 'finite'
+E     Right contains 2 more items, first extra item: 'record'
+E     Use -v to get more diff
+_ test_pending_check_probe_preserves_result_and_rejects_missing_coverage[2-3-True] _
+tests\unit_tests\resharding\test_weight_acceptance.py:153: in test_pending_check_probe_preserves_result_and_rejects_missing_coverage
+    assert events == ["finite", "delay", "record", "query"]
+E   AssertionError: assert ['delay', 'finite'] == ['finite', 'd...ord', 'query']
+E
+E     At index 0 diff: 'delay' != 'finite'
+E     Right contains 2 more items, first extra item: 'record'
+E     Use -v to get more diff
+_ test_pending_check_probe_preserves_result_and_rejects_missing_coverage[0-1-False] _
+tests\unit_tests\resharding\test_weight_acceptance.py:153: in test_pending_check_probe_preserves_result_and_rejects_missing_coverage
+    assert events == ["finite", "delay", "record", "query"]
+E   AssertionError: assert ['delay', 'finite'] == ['finite', 'd...ord', 'query']
+E
+E     At index 0 diff: 'delay' != 'finite'
+E     Right contains 2 more items, first extra item: 'record'
+E     Use -v to get more diff
+_ test_pending_check_probe_preserves_result_and_rejects_missing_coverage[3-4-False] _
+tests\unit_tests\resharding\test_weight_acceptance.py:153: in test_pending_check_probe_preserves_result_and_rejects_missing_coverage
+    assert events == ["finite", "delay", "record", "query"]
+E   AssertionError: assert ['delay', 'finite'] == ['finite', 'd...ord', 'query']
+E
+E     At index 0 diff: 'delay' != 'finite'
+E     Right contains 2 more items, first extra item: 'record'
+E     Use -v to get more diff
+_ test_pending_check_probe_preserves_result_and_rejects_missing_coverage[1-1-False] _
+tests\unit_tests\resharding\test_weight_acceptance.py:153: in test_pending_check_probe_preserves_result_and_rejects_missing_coverage
+    assert events == ["finite", "delay", "record", "query"]
+E   AssertionError: assert ['delay', 'finite'] == ['finite', 'd...ord', 'query']
+E
+E     At index 0 diff: 'delay' != 'finite'
+E     Right contains 2 more items, first extra item: 'record'
+E     Use -v to get more diff
+=========================== short test summary info ===========================
+FAILED tests/unit_tests/resharding/test_weight_acceptance.py::test_pending_check_probe_preserves_result_and_rejects_missing_coverage[1-2-True]
+FAILED tests/unit_tests/resharding/test_weight_acceptance.py::test_pending_check_probe_preserves_result_and_rejects_missing_coverage[2-3-True]
+FAILED tests/unit_tests/resharding/test_weight_acceptance.py::test_pending_check_probe_preserves_result_and_rejects_missing_coverage[0-1-False]
+FAILED tests/unit_tests/resharding/test_weight_acceptance.py::test_pending_check_probe_preserves_result_and_rejects_missing_coverage[3-4-False]
+FAILED tests/unit_tests/resharding/test_weight_acceptance.py::test_pending_check_probe_preserves_result_and_rejects_missing_coverage[1-1-False]
+5 failed in 3.55s

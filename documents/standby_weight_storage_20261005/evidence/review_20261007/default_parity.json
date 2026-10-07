@@ -1,0 +1,10 @@
+{
+  "baseline": "f7d555998b45756998465924d733fd70e553d6b4",
+  "result_equal": true,
+  "default_release_calls": 0,
+  "main_result_sha256": "9359fbff7887cd7a72b6562a166df5934da1483a7932c0c9fbdefa374722a2c4",
+  "current_result_sha256": "9359fbff7887cd7a72b6562a166df5934da1483a7932c0c9fbdefa374722a2c4",
+  "previous_fixture_equal": true,
+  "scope": "actual coordinator with CPU model/transport and fixed clock; not GPU timing evidence",
+  "serialization": "json.dumps(result, sort_keys=True, indent=2), without trailing newline"
+}

@@ -1,0 +1,20 @@
+{
+  "baseline": "e6ba55b3b09663773488a37f2edc3d34b0dc17ad",
+  "cwd": "E:\\课题组\\WeaveTP_代码与实验资料_20260920\\code\\current",
+  "cases": [
+    {
+      "argument": "cache",
+      "expected_exit": 1,
+      "observed_exit": 1,
+      "expected_failures": 1,
+      "log": "old_cache_failure.log"
+    },
+    {
+      "argument": "probe",
+      "expected_exit": 1,
+      "observed_exit": 1,
+      "expected_failures": 5,
+      "log": "old_probe_failure.log"
+    }
+  ]
+}

@@ -61,6 +61,17 @@ def make_plan(rank, start, end):
     return ReshardPlan(sends, recvs)
 
 
+def mismatch_diagnostic(parameter, expected):
+    different = parameter != expected
+    first = different.nonzero()[0].tolist()
+    other_half = expected.roll(expected.shape[-1] // 2, dims=-1).expand_as(parameter)
+    return {"mismatch_count": int(different.sum().item()), "first_mismatch_index": first,
+            "has_nan": bool(parameter.isnan().any().item()),
+            "mismatches_equal_other_half": bool((parameter[different] == other_half[different]).all().item()),
+            "first_actual": str(parameter[tuple(first)].item()),
+            "first_expected": str(expected.expand_as(parameter)[tuple(first)].item())}
+
+
 def run_probe(group, producer, packed, scope, records, output):
     rank = dist.get_rank()
     width = 16 if scope == "ordering" else 4096  # 64 MiB per overlap tensor.
@@ -148,11 +159,16 @@ def run_probe(group, producer, packed, scope, records, output):
             checks["foreground_completion_during_nccl"] = completions > 0
         elif cycle == 2:
             checks["receive_storage_reuse_exercised"] = reuse_observed
-        complete_case({"scope": scope, "packed": packed, "cycle": cycle, "checks": checks,
+        record = {"scope": scope, "packed": packed, "cycle": cycle, "checks": checks,
                        "poison_ms": poison_ms, "stages_ms": stages, "foreground_ms": foreground_ms,
                        "foreground_completions_during_nccl": completions,
-                       "receive_storage_reused": reused},
-                      records, output)
+                       "receive_storage_reused": reused}
+        if not all(checks.values()):
+            record["mismatches"] = {
+                name: mismatch_diagnostic(parameter, columns + (rank if name == "local" else 1 - rank) * 4 + index + 1)
+                for index, (name, parameter) in enumerate(target.entries.items()) if not checks[f"exact_{name}"]
+            }
+        complete_case(record, records, output)
 
 
 def main():
