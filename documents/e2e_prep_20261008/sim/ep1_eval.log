@@ -1,0 +1,8 @@
+EP2 基准                 EP=2 L= 600 | 容量 TP2 123万 TP4 149万 两套 98万 预算 15.9GB | W 1.62h 7柱 12.4h | fixed_tp2:1.072 fixed_tp4:1.097 llumnix:1.250 flying_view:1.143 anchortp:1.009 restart:1.056 weavetp_ideal:1.017
+EP1 默认                 EP=1 L= 600 | 容量 TP2 82万 TP4 128万 两套 36万 预算 5.2GB | W 1.83h 7柱 16.6h | fixed_tp2:1.192 fixed_tp4:1.052 llumnix:2.459 flying_view:1.266 anchortp:1.041 restart:1.042 weavetp_ideal:0.999
+EP2 基准                 EP=2 L=1200 | 容量 TP2 123万 TP4 149万 两套 98万 预算 15.9GB | W 2.75h 7柱 21.0h | fixed_tp2:1.067 fixed_tp4:1.058 llumnix:1.327 flying_view:1.139 anchortp:1.005 restart:1.031 weavetp_ideal:1.007
+EP1 默认                 EP=1 L=1200 | 容量 TP2 82万 TP4 128万 两套 36万 预算 5.2GB | W 3.09h 7柱 29.4h | fixed_tp2:1.286 fixed_tp4:1.031 llumnix:2.791 flying_view:1.381 anchortp:1.007 restart:1.023 weavetp_ideal:0.998
+EP1 TP4 不变慢 f4=1.0     EP=1 L= 600 | 容量 TP2 82万 TP4 128万 两套 36万 预算 5.2GB | W 1.74h 7柱 15.9h | fixed_tp2:1.260 fixed_tp4:1.041 llumnix:2.493 flying_view:1.273 anchortp:1.038 restart:1.042 weavetp_ideal:1.016
+EP1 TP4 更慢 f4=1.15     EP=1 L= 600 | 容量 TP2 82万 TP4 128万 两套 36万 预算 5.2GB | W 1.93h 7柱 17.3h | fixed_tp2:1.132 fixed_tp4:1.063 llumnix:2.429 flying_view:1.260 anchortp:1.044 restart:1.041 weavetp_ideal:0.984
+EP1 接收缓冲 3GB           EP=1 L= 600 | 容量 TP2 82万 TP4 128万 两套 36万 预算 4.2GB | W 1.85h 7柱 16.6h | fixed_tp2:1.182 fixed_tp4:1.044 llumnix:2.431 flying_view:1.275 anchortp:1.017 restart:1.036 weavetp_ideal:0.991
+EP1 切换 x3              EP=1 L= 600 | 容量 TP2 82万 TP4 128万 两套 36万 预算 5.2GB | W 1.84h 7柱 16.5h | fixed_tp2:1.189 fixed_tp4:1.050 llumnix:2.393 flying_view:1.275 anchortp:1.018 restart:1.039 weavetp_ideal:0.998
