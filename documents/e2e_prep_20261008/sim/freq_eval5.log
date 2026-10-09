@@ -1,0 +1,36 @@
+输出 1024-3072 N=4 S=2000 L=500 现设计    | 切换  8 W 1.20 h 周期 18.0 min 7柱  8.8 h | fixed_tp2:0.995 fixed_tp4:0.985 llumnix:1.197 flying_view:1.048 anchortp:1.036 restart:1.091
+输出 1024-3072 N=4 S=2000 L=500 复用本卡头  | 切换  8 W 1.16 h 周期 17.4 min 7柱  8.7 h | fixed_tp2:1.029 fixed_tp4:1.019 llumnix:1.234 flying_view:1.067 anchortp:1.072 restart:1.099
+输出 1024-3072 N=4 S=2000 L=500 staged KV | 切换  8 W 1.15 h 周期 17.2 min 7柱  8.8 h | fixed_tp2:1.043 fixed_tp4:1.033 llumnix:1.322 flying_view:1.081 anchortp:1.105 restart:1.115
+输出 1024-3072 N=4 S=2000 L=600 现设计    | 切换  8 W 1.38 h 周期 20.7 min 7柱 10.4 h | fixed_tp2:0.988 fixed_tp4:0.965 llumnix:1.403 flying_view:1.087 anchortp:1.041 restart:1.090
+输出 1024-3072 N=4 S=2000 L=600 复用本卡头  | 切换  8 W 1.31 h 周期 19.7 min 7柱 10.2 h | fixed_tp2:1.037 fixed_tp4:1.012 llumnix:1.351 flying_view:1.134 anchortp:1.092 restart:1.139
+输出 1024-3072 N=4 S=2000 L=600 staged KV | 切换  8 W 1.29 h 周期 19.3 min 7柱 10.0 h | fixed_tp2:1.056 fixed_tp4:1.031 llumnix:1.340 flying_view:1.108 anchortp:1.112 restart:1.112
+输出 1024-3072 N=4 S=3000 L=500 现设计    | 切换  8 W 1.34 h 周期 20.1 min 7柱  9.7 h | fixed_tp2:0.973 fixed_tp4:1.007 llumnix:1.167 flying_view:1.012 anchortp:1.030 restart:1.079
+输出 1024-3072 N=4 S=3000 L=500 复用本卡头  | 切换  8 W 1.31 h 周期 19.6 min 7柱  9.8 h | fixed_tp2:0.996 fixed_tp4:1.031 llumnix:1.230 flying_view:1.038 anchortp:1.054 restart:1.105
+输出 1024-3072 N=4 S=3000 L=500 staged KV | 切换  8 W 1.29 h 周期 19.4 min 7柱  9.8 h | fixed_tp2:1.010 fixed_tp4:1.045 llumnix:1.278 flying_view:1.045 anchortp:1.079 restart:1.102
+输出 1024-3072 N=4 S=3000 L=600 现设计    | 切换  8 W 1.46 h 周期 21.9 min 7柱 11.0 h | fixed_tp2:1.012 fixed_tp4:1.021 llumnix:1.235 flying_view:1.104 anchortp:1.028 restart:1.132
+输出 1024-3072 N=4 S=3000 L=600 复用本卡头  | 切换  8 W 1.42 h 周期 21.4 min 7柱 11.0 h | fixed_tp2:1.035 fixed_tp4:1.044 llumnix:1.282 flying_view:1.141 anchortp:1.039 restart:1.161
+输出 1024-3072 N=4 S=3000 L=600 staged KV | 切换  8 W 1.43 h 周期 21.4 min 7柱 10.8 h | fixed_tp2:1.034 fixed_tp4:1.043 llumnix:1.305 flying_view:1.080 anchortp:1.038 restart:1.096
+输出 2048-4096 N=4 S=2000 L=400 现设计    | 切换  8 W 1.69 h 周期 25.4 min 7柱 12.6 h | fixed_tp2:0.987 fixed_tp4:0.950 llumnix:1.313 flying_view:1.085 anchortp:1.034 restart:1.055
+输出 2048-4096 N=4 S=2000 L=400 复用本卡头  | 切换  8 W 1.63 h 周期 24.5 min 7柱 12.5 h | fixed_tp2:1.022 fixed_tp4:0.984 llumnix:1.360 flying_view:1.126 anchortp:1.071 restart:1.092
+输出 2048-4096 N=4 S=2000 L=400 staged KV | 切换  8 W 1.56 h 周期 23.5 min 7柱 12.2 h | fixed_tp2:1.067 fixed_tp4:1.027 llumnix:1.373 flying_view:1.131 anchortp:1.118 restart:1.089
+输出 2048-4096 N=4 S=2000 L=500 现设计    | 切换  8 W 1.90 h 周期 28.5 min 7柱 14.6 h | fixed_tp2:1.039 fixed_tp4:1.007 llumnix:1.376 flying_view:1.135 anchortp:1.029 restart:1.091
+输出 2048-4096 N=4 S=2000 L=500 复用本卡头  | 切换  8 W 1.87 h 周期 28.0 min 7柱 14.5 h | fixed_tp2:1.060 fixed_tp4:1.028 llumnix:1.379 flying_view:1.164 anchortp:1.049 restart:1.109
+输出 2048-4096 N=4 S=2000 L=500 staged KV | 切换  8 W 1.88 h 周期 28.1 min 7柱 14.5 h | fixed_tp2:1.055 fixed_tp4:1.022 llumnix:1.381 flying_view:1.133 anchortp:1.044 restart:1.077
+输出 2048-4096 N=4 S=3000 L=400 现设计    | 切换  8 W 1.75 h 周期 26.2 min 7柱 13.2 h | fixed_tp2:1.018 fixed_tp4:1.001 llumnix:1.298 flying_view:1.125 anchortp:1.029 restart:1.098
+输出 2048-4096 N=4 S=3000 L=400 复用本卡头  | 切换  8 W 1.71 h 周期 25.7 min 7柱 13.2 h | fixed_tp2:1.040 fixed_tp4:1.022 llumnix:1.373 flying_view:1.138 anchortp:1.044 restart:1.117
+输出 2048-4096 N=4 S=3000 L=400 staged KV | 切换  8 W 1.69 h 周期 25.3 min 7柱 13.0 h | fixed_tp2:1.056 fixed_tp4:1.038 llumnix:1.353 flying_view:1.115 anchortp:1.061 restart:1.087
+输出 2048-4096 N=4 S=3000 L=500 现设计    | 切换  8 W 1.98 h 周期 29.7 min 7柱 15.4 h | fixed_tp2:1.054 fixed_tp4:1.039 llumnix:1.397 flying_view:1.151 anchortp:1.022 restart:1.103
+输出 2048-4096 N=4 S=3000 L=500 复用本卡头  | 切换  8 W 1.95 h 周期 29.3 min 7柱 15.3 h | fixed_tp2:1.069 fixed_tp4:1.053 llumnix:1.397 flying_view:1.173 anchortp:1.033 restart:1.116
+输出 2048-4096 N=4 S=3000 L=500 staged KV | 切换  8 W 1.97 h 周期 29.6 min 7柱 15.1 h | fixed_tp2:1.057 fixed_tp4:1.042 llumnix:1.344 flying_view:1.136 anchortp:1.022 restart:1.070
+输出 2048-4096 N=6 S=2000 L=400 现设计    | 切换 12 W 2.45 h 周期 24.5 min 7柱 18.3 h | fixed_tp2:0.992 fixed_tp4:0.942 llumnix:1.332 flying_view:1.085 anchortp:1.032 restart:1.060
+输出 2048-4096 N=6 S=2000 L=400 复用本卡头  | 切换 12 W 2.36 h 周期 23.6 min 7柱 18.0 h | fixed_tp2:1.031 fixed_tp4:0.979 llumnix:1.337 flying_view:1.125 anchortp:1.069 restart:1.100
+输出 2048-4096 N=6 S=2000 L=400 staged KV | 切换 12 W 2.29 h 周期 22.9 min 7柱 17.7 h | fixed_tp2:1.065 fixed_tp4:1.011 llumnix:1.353 flying_view:1.125 anchortp:1.104 restart:1.097
+输出 2048-4096 N=6 S=2000 L=500 现设计    | 切换 12 W 2.73 h 周期 27.3 min 7柱 21.1 h | fixed_tp2:1.049 fixed_tp4:0.995 llumnix:1.406 flying_view:1.147 anchortp:1.032 restart:1.087
+输出 2048-4096 N=6 S=2000 L=500 复用本卡头  | 切换 12 W 2.67 h 周期 26.7 min 7柱 20.9 h | fixed_tp2:1.075 fixed_tp4:1.020 llumnix:1.413 flying_view:1.176 anchortp:1.053 restart:1.112
+输出 2048-4096 N=6 S=2000 L=500 staged KV | 切换 12 W 2.68 h 周期 26.8 min 7柱 20.8 h | fixed_tp2:1.070 fixed_tp4:1.014 llumnix:1.393 flying_view:1.146 anchortp:1.047 restart:1.079
+输出 2048-4096 N=6 S=3000 L=400 现设计    | 切换 12 W 2.57 h 周期 25.7 min 7柱 19.4 h | fixed_tp2:0.995 fixed_tp4:0.964 llumnix:1.371 flying_view:1.097 anchortp:1.028 restart:1.090
+输出 2048-4096 N=6 S=3000 L=400 复用本卡头  | 切换 12 W 2.49 h 周期 24.9 min 7柱 19.3 h | fixed_tp2:1.024 fixed_tp4:0.993 llumnix:1.435 flying_view:1.131 anchortp:1.048 restart:1.122
+输出 2048-4096 N=6 S=3000 L=400 staged KV | 切换 12 W 2.44 h 周期 24.4 min 7柱 18.8 h | fixed_tp2:1.044 fixed_tp4:1.012 llumnix:1.359 flying_view:1.098 anchortp:1.068 restart:1.093
+输出 2048-4096 N=6 S=3000 L=500 现设计    | 切换 12 W 2.85 h 周期 28.5 min 7柱 22.0 h | fixed_tp2:1.058 fixed_tp4:1.030 llumnix:1.366 flying_view:1.143 anchortp:1.023 restart:1.106
+输出 2048-4096 N=6 S=3000 L=500 复用本卡头  | 切换 12 W 2.80 h 周期 28.0 min 7柱 22.1 h | fixed_tp2:1.077 fixed_tp4:1.049 llumnix:1.428 flying_view:1.178 anchortp:1.040 restart:1.122
+输出 2048-4096 N=6 S=3000 L=500 staged KV | 切换 12 W 2.84 h 周期 28.4 min 7柱 21.8 h | fixed_tp2:1.060 fixed_tp4:1.032 llumnix:1.365 flying_view:1.125 anchortp:1.024 restart:1.075

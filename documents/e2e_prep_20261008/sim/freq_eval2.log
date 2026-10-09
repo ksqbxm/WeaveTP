@@ -1,0 +1,10 @@
+s1k_1.1 840 输出 1k–3k: 43 2k–4k: 75
+limo 760 输出 1k–3k: 127 2k–4k: 198
+longwriter_6k 2939 输出 1k–3k: 512 2k–4k: 1064
+sky_t1_17k 2931 输出 1k–3k: 1297 2k–4k: 966
+openr1_math 2912 输出 1k–3k: 787 2k–4k: 870
+输出 1024-3072 池 2766 N=4 S= 1000 L= 600 | 切换  8 次（合格 4/4）WeaveTP 1.27 h，每周期  19.1 min，7 柱   9.4 h | fixed_tp2:0.979 fixed_tp4:0.923 llumnix:1.326 flying_view:1.070 anchortp:1.042 anchortp_20s:1.038 restart:1.054
+1024 3072 8 1000 400 样本不足：长段需要 3200/2766，短段需要 9000/82828
+1024 3072 8 500 400 样本不足：长段需要 3200/2766，短段需要 4500/82828
+输出 2048-4096 池 3173 N=4 S= 1000 L= 500 | 切换  8 次（合格 4/4）WeaveTP 1.80 h，每周期  27.0 min，7 柱  13.6 h | fixed_tp2:1.038 fixed_tp4:0.978 llumnix:1.351 flying_view:1.122 anchortp:1.028 anchortp_20s:1.011 restart:1.069
+输出 2048-4096 池 3173 N=8 S= 1000 L= 300 | 切换 14 次（合格 7/8）WeaveTP 2.36 h，每周期  20.2 min，7 柱  17.3 h | fixed_tp2:0.968 fixed_tp4:0.913 llumnix:1.245 flying_view:1.056 anchortp:1.106 anchortp_20s:1.085 restart:1.060

@@ -1,0 +1,8 @@
+B4x1 输出 0-99999 N=1 S=4000 L=600 | 切换  2 WeaveTP 1.62 h 每周期  97.4 min | fixed_tp2:1.072 fixed_tp4:1.097 llumnix:1.250 flying_view:1.143 anchortp:1.009 anchortp_20s:1.001 restart:1.056
+B4x1 输出 2048-4096 N=4 S=1000 L=500 | 切换  8 WeaveTP 1.80 h 每周期  27.0 min | fixed_tp2:1.038 fixed_tp4:0.978 llumnix:1.351 flying_view:1.122 anchortp:1.028 anchortp_20s:1.011 restart:1.069
+B4x1 输出 2048-4096 N=8 S=1000 L=300 | 切换 14 WeaveTP 2.36 h 每周期  20.2 min | fixed_tp2:0.968 fixed_tp4:0.913 llumnix:1.245 flying_view:1.056 anchortp:1.106 anchortp_20s:1.085 restart:1.060
+B4x1 输出 1024-3072 N=4 S=1000 L=600 | 切换  8 WeaveTP 1.27 h 每周期  19.1 min | fixed_tp2:0.979 fixed_tp4:0.923 llumnix:1.326 flying_view:1.070 anchortp:1.042 anchortp_20s:1.038 restart:1.054
+B4x2 输出 0-99999 N=1 S=4000 L=600 | 切换  2 WeaveTP 1.62 h 每周期  97.4 min | fixed_tp2:1.072 fixed_tp4:1.059 llumnix:1.250 flying_view:1.141 anchortp:1.009 anchortp_20s:1.001 restart:1.054
+B4x2 输出 2048-4096 N=4 S=1000 L=500 | 切换  8 WeaveTP 1.80 h 每周期  26.9 min | fixed_tp2:1.039 fixed_tp4:0.979 llumnix:1.355 flying_view:1.112 anchortp:1.031 anchortp_20s:1.012 restart:1.069
+B4x2 输出 2048-4096 N=8 S=1000 L=300 | 切换 14 WeaveTP 2.36 h 每周期  20.2 min | fixed_tp2:0.968 fixed_tp4:0.908 llumnix:1.249 flying_view:1.056 anchortp:1.106 anchortp_20s:1.085 restart:1.060
+B4x2 输出 1024-3072 N=4 S=1000 L=600 | 切换  8 WeaveTP 1.28 h 每周期  19.1 min | fixed_tp2:0.976 fixed_tp4:0.913 llumnix:1.226 flying_view:1.054 anchortp:1.039 anchortp_20s:1.016 restart:1.042

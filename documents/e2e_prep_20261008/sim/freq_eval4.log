@@ -1,0 +1,16 @@
+输出 0-99999 N=1 L=600 现设计 源+目标               | 切换  2 WeaveTP 1.62 h 每周期  97.4 min | fixed_tp2:1.072 fixed_tp4:1.097 llumnix:1.250 flying_view:1.143 anchortp:1.009 restart:1.056
+输出 0-99999 N=1 L=600 目标复用本卡头 1.5x           | 切换  2 WeaveTP 1.63 h 每周期  97.7 min | fixed_tp2:1.069 fixed_tp4:1.094 llumnix:1.244 flying_view:1.134 anchortp:1.006 restart:1.048
+输出 0-99999 N=1 L=600 staged KV max(源,目标)    | 切换  2 WeaveTP 1.65 h 每周期  98.8 min | fixed_tp2:1.057 fixed_tp4:1.081 llumnix:1.231 flying_view:1.106 anchortp:0.995 restart:1.021
+输出 0-99999 N=1 L=600 无峰值约束                  | 切换  2 WeaveTP 1.65 h 每周期  99.0 min | fixed_tp2:1.054 fixed_tp4:1.079 llumnix:1.228 flying_view:1.104 anchortp:0.992 restart:1.018
+输出 2048-4096 N=4 L=500 现设计 源+目标               | 切换  8 WeaveTP 1.80 h 每周期  27.0 min | fixed_tp2:1.038 fixed_tp4:0.978 llumnix:1.351 flying_view:1.122 anchortp:1.028 restart:1.069
+输出 2048-4096 N=4 L=500 目标复用本卡头 1.5x           | 切换  8 WeaveTP 1.75 h 每周期  26.3 min | fixed_tp2:1.065 fixed_tp4:1.004 llumnix:1.399 flying_view:1.157 anchortp:1.054 restart:1.094
+输出 2048-4096 N=4 L=500 staged KV max(源,目标)    | 切换  8 WeaveTP 1.74 h 每周期  26.1 min | fixed_tp2:1.074 fixed_tp4:1.012 llumnix:1.402 flying_view:1.156 anchortp:1.063 restart:1.080
+输出 2048-4096 N=4 L=500 无峰值约束                  | 切换  8 WeaveTP 1.75 h 每周期  26.2 min | fixed_tp2:1.069 fixed_tp4:1.007 llumnix:1.397 flying_view:1.162 anchortp:1.058 restart:1.076
+输出 2048-4096 N=8 L=300 现设计 源+目标               | 切换 14 WeaveTP 2.36 h 每周期  20.2 min | fixed_tp2:0.968 fixed_tp4:0.913 llumnix:1.245 flying_view:1.056 anchortp:1.106 restart:1.060
+输出 2048-4096 N=8 L=300 目标复用本卡头 1.5x           | 切换 14 WeaveTP 2.23 h 每周期  19.1 min | fixed_tp2:1.025 fixed_tp4:0.966 llumnix:1.289 flying_view:1.111 anchortp:1.191 restart:1.107
+输出 2048-4096 N=8 L=300 staged KV max(源,目标)    | 切换 14 WeaveTP 2.15 h 每周期  18.5 min | fixed_tp2:1.061 fixed_tp4:1.000 llumnix:1.305 flying_view:1.113 anchortp:1.158 restart:1.109
+输出 2048-4096 N=8 L=300 无峰值约束                  | 切换 14 WeaveTP 2.17 h 每周期  18.6 min | fixed_tp2:1.051 fixed_tp4:0.990 llumnix:1.310 flying_view:1.117 anchortp:1.168 restart:1.103
+输出 1024-3072 N=4 L=600 现设计 源+目标               | 切换  8 WeaveTP 1.27 h 每周期  19.1 min | fixed_tp2:0.979 fixed_tp4:0.923 llumnix:1.326 flying_view:1.070 anchortp:1.042 restart:1.054
+输出 1024-3072 N=4 L=600 目标复用本卡头 1.5x           | 切换  8 WeaveTP 1.21 h 每周期  18.2 min | fixed_tp2:1.025 fixed_tp4:0.967 llumnix:1.426 flying_view:1.111 anchortp:1.087 restart:1.099
+输出 1024-3072 N=4 L=600 staged KV max(源,目标)    | 切换  8 WeaveTP 1.16 h 每周期  17.4 min | fixed_tp2:1.070 fixed_tp4:1.009 llumnix:1.362 flying_view:1.123 anchortp:1.134 restart:1.112
+输出 1024-3072 N=4 L=600 无峰值约束                  | 切换  8 WeaveTP 1.17 h 每周期  17.5 min | fixed_tp2:1.067 fixed_tp4:1.006 llumnix:1.371 flying_view:1.123 anchortp:1.131 restart:1.111

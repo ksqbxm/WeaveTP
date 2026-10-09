@@ -1,0 +1,36 @@
+sky 1k-3k N=4 S=2000 L=300 种子 7 现设计            | 切换  6 周期 16.4 min 7柱  5.9 h | fixed_tp2:0.950 fixed_tp4:1.029 llumnix:1.117 flying_view:1.005 anchortp:1.055 restart:1.082
+sky 1k-3k N=4 S=2000 L=300 种子 7 复用：仅 WeaveTP   | 切换  6 周期 15.4 min 7柱  5.9 h | fixed_tp2:1.013 fixed_tp4:1.097 llumnix:1.190 flying_view:1.071 anchortp:1.122 restart:1.152
+sky 1k-3k N=4 S=2000 L=300 种子 7 复用：所有搬 KV 的方法  | 切换  6 周期 15.4 min 7柱  5.8 h | fixed_tp2:1.013 fixed_tp4:1.097 llumnix:1.204 flying_view:1.071 anchortp:1.045 restart:1.152
+sky 1k-3k N=4 S=2000 L=300 种子11 现设计            | 切换  6 周期 16.6 min 7柱  6.0 h | fixed_tp2:0.950 fixed_tp4:1.029 llumnix:1.109 flying_view:1.006 anchortp:1.045 restart:1.082
+sky 1k-3k N=4 S=2000 L=300 种子11 复用：仅 WeaveTP   | 切换  6 周期 15.3 min 7柱  5.9 h | fixed_tp2:1.030 fixed_tp4:1.116 llumnix:1.206 flying_view:1.080 anchortp:1.126 restart:1.167
+sky 1k-3k N=4 S=2000 L=300 种子11 复用：所有搬 KV 的方法  | 切换  6 周期 15.3 min 7柱  5.8 h | fixed_tp2:1.030 fixed_tp4:1.116 llumnix:1.203 flying_view:1.080 anchortp:1.048 restart:1.167
+sky 1k-3k N=4 S=2000 L=300 种子13 现设计            | 切换  6 周期 16.4 min 7柱  5.9 h | fixed_tp2:0.939 fixed_tp4:1.025 llumnix:1.102 flying_view:1.000 anchortp:1.070 restart:1.083
+sky 1k-3k N=4 S=2000 L=300 种子13 复用：仅 WeaveTP   | 切换  6 周期 15.1 min 7柱  5.9 h | fixed_tp2:1.022 fixed_tp4:1.115 llumnix:1.215 flying_view:1.090 anchortp:1.152 restart:1.164
+sky 1k-3k N=4 S=2000 L=300 种子13 复用：所有搬 KV 的方法  | 切换  6 周期 15.1 min 7柱  5.8 h | fixed_tp2:1.022 fixed_tp4:1.115 llumnix:1.210 flying_view:1.090 anchortp:1.045 restart:1.164
+全部 1k-3k N=4 S=2000 L=600 种子 7 现设计            | 切换  8 周期 20.7 min 7柱 10.4 h | fixed_tp2:0.988 fixed_tp4:0.965 llumnix:1.403 flying_view:1.087 anchortp:1.041 restart:1.090
+全部 1k-3k N=4 S=2000 L=600 种子 7 复用：仅 WeaveTP   | 切换  8 周期 19.7 min 7柱 10.2 h | fixed_tp2:1.037 fixed_tp4:1.012 llumnix:1.351 flying_view:1.134 anchortp:1.092 restart:1.139
+全部 1k-3k N=4 S=2000 L=600 种子 7 复用：所有搬 KV 的方法  | 切换  8 周期 19.7 min 7柱 10.1 h | fixed_tp2:1.037 fixed_tp4:1.012 llumnix:1.351 flying_view:1.134 anchortp:1.040 restart:1.139
+全部 1k-3k N=4 S=2000 L=600 种子11 现设计            | 切换  8 周期 21.0 min 7柱 10.2 h | fixed_tp2:0.978 fixed_tp4:0.956 llumnix:1.202 flying_view:1.065 anchortp:1.034 restart:1.070
+全部 1k-3k N=4 S=2000 L=600 种子11 复用：仅 WeaveTP   | 切换  8 周期 20.1 min 7柱 10.2 h | fixed_tp2:1.021 fixed_tp4:0.999 llumnix:1.270 flying_view:1.115 anchortp:1.070 restart:1.123
+全部 1k-3k N=4 S=2000 L=600 种子11 复用：所有搬 KV 的方法  | 切换  8 周期 20.1 min 7柱 10.2 h | fixed_tp2:1.021 fixed_tp4:0.999 llumnix:1.285 flying_view:1.115 anchortp:1.040 restart:1.123
+全部 1k-3k N=4 S=2000 L=600 种子13 现设计            | 切换  8 周期 20.7 min 7柱 10.2 h | fixed_tp2:0.988 fixed_tp4:0.964 llumnix:1.216 flying_view:1.079 anchortp:1.041 restart:1.100
+全部 1k-3k N=4 S=2000 L=600 种子13 复用：仅 WeaveTP   | 切换  8 周期 20.1 min 7柱 10.3 h | fixed_tp2:1.013 fixed_tp4:0.989 llumnix:1.359 flying_view:1.111 anchortp:1.063 restart:1.128
+全部 1k-3k N=4 S=2000 L=600 种子13 复用：所有搬 KV 的方法  | 切换  8 周期 20.1 min 7柱 10.2 h | fixed_tp2:1.013 fixed_tp4:0.989 llumnix:1.357 flying_view:1.111 anchortp:1.032 restart:1.128
+全部 2k-4k N=4 S=2000 L=400 种子 7 现设计            | 切换  8 周期 25.4 min 7柱 12.6 h | fixed_tp2:0.987 fixed_tp4:0.950 llumnix:1.313 flying_view:1.085 anchortp:1.034 restart:1.055
+全部 2k-4k N=4 S=2000 L=400 种子 7 复用：仅 WeaveTP   | 切换  8 周期 24.5 min 7柱 12.5 h | fixed_tp2:1.022 fixed_tp4:0.984 llumnix:1.360 flying_view:1.126 anchortp:1.071 restart:1.092
+全部 2k-4k N=4 S=2000 L=400 种子 7 复用：所有搬 KV 的方法  | 切换  8 周期 24.5 min 7柱 12.4 h | fixed_tp2:1.022 fixed_tp4:0.984 llumnix:1.362 flying_view:1.126 anchortp:1.034 restart:1.092
+全部 2k-4k N=4 S=2000 L=400 种子11 现设计            | 切换  8 周期 25.5 min 7柱 12.5 h | fixed_tp2:0.978 fixed_tp4:0.944 llumnix:1.262 flying_view:1.074 anchortp:1.034 restart:1.046
+全部 2k-4k N=4 S=2000 L=400 种子11 复用：仅 WeaveTP   | 切换  8 周期 24.5 min 7柱 12.3 h | fixed_tp2:1.016 fixed_tp4:0.981 llumnix:1.280 flying_view:1.105 anchortp:1.073 restart:1.081
+全部 2k-4k N=4 S=2000 L=400 种子11 复用：所有搬 KV 的方法  | 切换  8 周期 24.5 min 7柱 12.3 h | fixed_tp2:1.016 fixed_tp4:0.981 llumnix:1.281 flying_view:1.105 anchortp:1.035 restart:1.081
+全部 2k-4k N=4 S=2000 L=400 种子13 现设计            | 切换  8 周期 25.9 min 7柱 12.7 h | fixed_tp2:0.972 fixed_tp4:0.935 llumnix:1.299 flying_view:1.067 anchortp:1.032 restart:1.046
+全部 2k-4k N=4 S=2000 L=400 种子13 复用：仅 WeaveTP   | 切换  8 周期 24.7 min 7柱 12.5 h | fixed_tp2:1.021 fixed_tp4:0.982 llumnix:1.302 flying_view:1.115 anchortp:1.072 restart:1.095
+全部 2k-4k N=4 S=2000 L=400 种子13 复用：所有搬 KV 的方法  | 切换  8 周期 24.7 min 7柱 12.4 h | fixed_tp2:1.021 fixed_tp4:0.982 llumnix:1.307 flying_view:1.115 anchortp:1.038 restart:1.095
+全部 2k-4k N=6 S=2000 L=400 种子 7 现设计            | 切换 12 周期 24.5 min 7柱 18.3 h | fixed_tp2:0.992 fixed_tp4:0.942 llumnix:1.332 flying_view:1.085 anchortp:1.032 restart:1.060
+全部 2k-4k N=6 S=2000 L=400 种子 7 复用：仅 WeaveTP   | 切换 12 周期 23.6 min 7柱 18.0 h | fixed_tp2:1.031 fixed_tp4:0.979 llumnix:1.337 flying_view:1.125 anchortp:1.069 restart:1.100
+全部 2k-4k N=6 S=2000 L=400 种子 7 复用：所有搬 KV 的方法  | 切换 12 周期 23.6 min 7柱 18.0 h | fixed_tp2:1.031 fixed_tp4:0.979 llumnix:1.344 flying_view:1.125 anchortp:1.031 restart:1.100
+全部 2k-4k N=6 S=2000 L=400 种子11 现设计            | 切换 12 周期 24.5 min 7柱 18.2 h | fixed_tp2:0.981 fixed_tp4:0.931 llumnix:1.310 flying_view:1.076 anchortp:1.033 restart:1.074
+全部 2k-4k N=6 S=2000 L=400 种子11 复用：仅 WeaveTP   | 切换 12 周期 23.9 min 7柱 18.0 h | fixed_tp2:1.006 fixed_tp4:0.955 llumnix:1.312 flying_view:1.101 anchortp:1.062 restart:1.099
+全部 2k-4k N=6 S=2000 L=400 种子11 复用：所有搬 KV 的方法  | 切换 12 周期 23.9 min 7柱 17.9 h | fixed_tp2:1.006 fixed_tp4:0.955 llumnix:1.312 flying_view:1.101 anchortp:1.030 restart:1.099
+全部 2k-4k N=6 S=2000 L=400 种子13 现设计            | 切换 12 周期 24.7 min 7柱 18.3 h | fixed_tp2:0.976 fixed_tp4:0.926 llumnix:1.342 flying_view:1.074 anchortp:1.030 restart:1.069
+全部 2k-4k N=6 S=2000 L=400 种子13 复用：仅 WeaveTP   | 切换 12 周期 23.8 min 7柱 18.1 h | fixed_tp2:1.016 fixed_tp4:0.964 llumnix:1.336 flying_view:1.112 anchortp:1.072 restart:1.104
+全部 2k-4k N=6 S=2000 L=400 种子13 复用：所有搬 KV 的方法  | 切换 12 周期 23.8 min 7柱 18.0 h | fixed_tp2:1.016 fixed_tp4:0.964 llumnix:1.341 flying_view:1.112 anchortp:1.033 restart:1.104

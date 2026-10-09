@@ -36,6 +36,7 @@ P_CAP = 4096          # 每副本每步最多 prefill 的 token 数（激活显�
 REPREFILL_RATE = {2: 6000.0, 4: 4400.0}   # 重启时分块重新 prefill 的速度（估算）
 
 
+B4_SCALE = 1          # TP4 副本的 B_max 相对 TP2 的倍数（1 = 每副本相同；2 = 每卡并发相同）
 WORLD = 16            # 总卡数；8 卡时用 set_world(8)
 
 
@@ -280,14 +281,22 @@ class Sim:
                 ua = a.used(self.s) + a.n * growth
                 ub = b.used(self.s) + b.n * growth
                 src, dst = max(ua, ub) * HW["kv2"], (ua + ub) * HW["kv4"]
-                if (max(src, dst) if self.m.get("kv_cutover") else src + dst) > bud:
+                if self.m.get("kv_reuse"):      # 目标 KV 复用本卡已有的那一半头，只为对端副本的 token 新分配
+                    peak = max(ua * HW["kv2"] + ub * HW["kv4"], ub * HW["kv2"] + ua * HW["kv4"])
+                else:
+                    peak = max(src, dst) if self.m.get("kv_cutover") else src + dst
+                if peak > bud:
                     return False
             return True
         for kid_pair, src in zip(self._split_preview(), self.reps):
             us = src.used(self.s) + src.n * growth
             uk = max(k.used(self.s) + k.n * growth for k in kid_pair)
             src, dst = us * HW["kv4"], uk * HW["kv2"]
-            if (max(src, dst) if self.m.get("kv_cutover") else src + dst) > bud:
+            if self.m.get("kv_reuse"):          # 子副本请求的本卡那 1/4 头已在本卡，只新收另外 1/4
+                peak = src + uk * HW["kv4"]
+            else:
+                peak = max(src, dst) if self.m.get("kv_cutover") else src + dst
+            if peak > bud:
                 return False
         return True
 
@@ -317,7 +326,7 @@ class Sim:
         fit = int(0.95 * 2 * self.cap(2))                    # 缩容后两个子副本都放得下
         if not self.m.get("peak"):
             return fit
-        k = 1 if self.m.get("kv_cutover") else 2
+        k = 1 if self.m.get("kv_cutover") else (1.5 if self.m.get("kv_reuse") else 2)
         return min(fit, int(0.95 * switch_budget() / (k * HW["kv4"])) - self.b_max * g)
 
     def shrink_fits(self):
@@ -426,7 +435,7 @@ class Sim:
             best = None
             kv_short = False
             for idx, r in enumerate(self.reps):
-                if r.n >= self.b_max:
+                if r.n >= self.b_max * (B4_SCALE if self.tp == 4 else 1):
                     continue
                 if r.resv() + need > cap:
                     kv_short = True

@@ -1,0 +1,11 @@
+长段池 {'sky_full': (2931, 3321, 119), 'sky_out<2k': (794, 1468, 65), 'gov_in4k': (2740, 735, 4096), 'gov_in8k': (2740, 735, 8192)} (条数, 输出中位, 输入中位)
+sky_full   N=1 S= 4000 L= 600 | 切换  2 次（计划 2，合格长段 1/1）WeaveTP 1.62 h，每周期  97.4 min，7 柱  12.4 h | fixed_tp2:1.072 fixed_tp4:1.097 llumnix:1.250 flying_view:1.143 anchortp:1.009 anchortp_20s:1.001 restart:1.056
+sky_full   N=4 S= 1000 L= 300 | 切换  8 次（计划 8，合格长段 4/4）WeaveTP 3.44 h，每周期  51.6 min，7 柱  24.2 h | fixed_tp2:0.926 fixed_tp4:0.893 llumnix:1.185 flying_view:1.002 anchortp:1.046 anchortp_20s:1.023 restart:0.984
+sky_out<2k 4 1000 400 样本不足：长段需要 1600/794，短段需要 5000/82828
+sky_out<2k 8 1000 300 样本不足：长段需要 2400/794，短段需要 9000/82828
+gov_in4k   N=4 S= 1000 L= 400 | 切换  8 次（计划 8，合格长段 4/4）WeaveTP 0.86 h，每周期  12.9 min，7 柱   6.4 h | fixed_tp2:0.904 fixed_tp4:0.983 llumnix:1.233 flying_view:1.100 anchortp:1.051 anchortp_20s:1.021 restart:1.159
+gov_in4k   N=8 S= 1000 L= 250 | 切换 16 次（计划 16，合格长段 8/8）WeaveTP 1.02 h，每周期   7.7 min，7 柱   8.2 h | fixed_tp2:0.999 fixed_tp4:1.090 llumnix:1.296 flying_view:1.199 anchortp:1.095 anchortp_20s:1.044 restart:1.399
+gov_in4k   N=8 S=  500 L= 250 | 切换 16 次（计划 16，合格长段 8/8）WeaveTP 0.94 h，每周期   7.0 min，7 柱   7.5 h | fixed_tp2:0.973 fixed_tp4:1.067 llumnix:1.288 flying_view:1.190 anchortp:1.109 anchortp_20s:1.050 restart:1.419
+gov_in8k   N=4 S= 1000 L= 300 | 切换  8 次（计划 8，合格长段 4/4）WeaveTP 1.01 h，每周期  15.1 min，7 柱   7.4 h | fixed_tp2:0.875 fixed_tp4:0.975 llumnix:1.230 flying_view:1.093 anchortp:1.059 anchortp_20s:1.039 restart:1.145
+gov_in8k   N=8 S= 1000 L= 200 | 切换 16 次（计划 16，合格长段 8/8）WeaveTP 1.27 h，每周期   9.5 min，7 柱  10.0 h | fixed_tp2:0.948 fixed_tp4:1.075 llumnix:1.321 flying_view:1.189 anchortp:1.078 anchortp_20s:1.036 restart:1.303
+gov_in8k   N=8 S=  500 L= 200 | 切换 14 次（计划 14，合格长段 8/8）WeaveTP 1.16 h，每周期  10.0 min，7 柱   9.1 h | fixed_tp2:0.916 fixed_tp4:1.046 llumnix:1.330 flying_view:1.149 anchortp:1.058 anchortp_20s:1.029 restart:1.288
