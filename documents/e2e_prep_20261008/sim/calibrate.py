@@ -49,8 +49,12 @@ def main():
     calib, report = {}, []
     dec = {2: [], 4: []}; pre = {2: [], 4: []}
     for f in a.microbench:
-        for line in open(f):
-            r = json.loads(line)
+        rows = [json.loads(l) for l in open(f) if l.strip()]
+        setup = next((r for r in rows if r.get("kind") == "setup"), {})
+        if setup.get("ep", 2) != 2:
+            report.append(f"跳过 {f}：EP={setup.get('ep')}（只用 EP=2）")
+            continue
+        for r in rows:
             if r.get("kind") == "decode" and "step_ms_median" in r and r["B"] >= a.min_batch:
                 dec[r["tp"]].append(r)
             if r.get("kind") == "prefill" and "time_s" in r:

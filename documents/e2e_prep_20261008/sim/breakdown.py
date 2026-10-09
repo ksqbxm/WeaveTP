@@ -1,8 +1,8 @@
 """模拟器核查：每个方法的墙钟分解、token 产出、KV 占用率、显存预算；检查固定布局没有被加上切换类成本。
 用法：python breakdown.py  （输出 breakdown.log 同内容）"""
-import sys; sys.path.insert(0, '.')
+import os, sys; sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import e2e_sim as E
-D = '/tmp/claude-0/-home-user-WeaveTP/37dfa7bc-e9fa-5a64-bc42-6012d0eeb203/scratchpad/data_in/profile/'
+D = os.environ.get('SIM_PROFILE_DIR', '/tmp/claude-0/-home-user-WeaveTP/37dfa7bc-e9fa-5a64-bc42-6012d0eeb203/scratchpad/data_in/profile').rstrip('/') + '/'
 import os
 if os.environ.get('SIM_CALIB'):
     c = E.apply_calib(os.environ['SIM_CALIB'])
