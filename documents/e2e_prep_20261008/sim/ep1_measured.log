@@ -1,0 +1,6 @@
+EP2 实测（单步 300ms 档）                 L=600 | 预算 15.9GB | W 1.62h 7柱 12.4h | fixed_tp2:1.072 fixed_tp4:1.097 llumnix:1.250 flying_view:1.143 anchortp:1.009 restart:1.056
+EP1 实测，切换余量 2.7GB（常驻实测）            L=600 | 预算 2.7GB | W 2.49h 7柱 22.4h | fixed_tp2:1.177 fixed_tp4:1.015 llumnix:2.525 flying_view:1.261 anchortp:1.010 restart:1.007
+EP1 实测，切换余量 0.7GB（释放+审计实测）         L=600 | 预算 0.7GB | W 2.71h 7柱 23.1h | fixed_tp2:1.084 fixed_tp4:0.934 llumnix:2.397 flying_view:1.164 anchortp:1.016 restart:0.926
+EP2 实测（单步 300ms 档）                 L=1200 | 预算 15.9GB | W 2.75h 7柱 21.0h | fixed_tp2:1.067 fixed_tp4:1.058 llumnix:1.327 flying_view:1.139 anchortp:1.005 restart:1.031
+EP1 实测，切换余量 2.7GB（常驻实测）            L=1200 | 预算 2.7GB | W 4.28h 7柱 40.1h | fixed_tp2:1.242 fixed_tp4:0.971 llumnix:2.831 flying_view:1.330 anchortp:1.008 restart:0.967
+EP1 实测，切换余量 0.7GB（释放+审计实测）         L=1200 | 预算 0.7GB | W 4.34h 7柱 40.5h | fixed_tp2:1.225 fixed_tp4:0.958 llumnix:2.877 flying_view:1.313 anchortp:1.008 restart:0.954
