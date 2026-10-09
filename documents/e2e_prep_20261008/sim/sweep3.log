@@ -1,0 +1,16 @@
+sky_t1_1 out=(1000, 3000)  N=1 S= 3000 L= 600 B=192 | W  0.51h sw=2 7bars=  3.9h | fixed_tp2:0.876 fixed_tp4:1.182 llumnix:1.260 flying_view:1.058 flying_both:1.143 anchortp:1.013 restart:1.110 weavetp_cutkv:0.919
+sky_t1_1 out=(1000, 3000)  N=2 S= 3000 L= 600 B=192 | W  0.79h sw=4 7bars=  5.9h | fixed_tp2:0.926 fixed_tp4:1.132 llumnix:1.226 flying_view:1.068 flying_both:1.196 anchortp:1.024 restart:1.126 weavetp_cutkv:0.915
+skip sky_t1_17k (1000, 3000) 4 2000 400 样本不足：长段需要 1600/1267，短段需要 10000/82828
+skip sky_t1_17k (1000, 3000) 2 2000 1000 样本不足：长段需要 2000/1267，短段需要 6000/82828
+sky_t1_1 out=(2000, 4000)  N=1 S= 3000 L= 600 B=192 | W  0.70h sw=2 7bars=  5.4h | fixed_tp2:1.039 fixed_tp4:1.182 llumnix:1.223 flying_view:1.107 flying_both:1.245 anchortp:1.012 restart:1.078 weavetp_cutkv:1.021
+skip sky_t1_17k (2000, 4000) 2 3000 600 样本不足：长段需要 1200/944，短段需要 9000/82828
+skip sky_t1_17k (2000, 4000) 4 2000 400 样本不足：长段需要 1600/944，短段需要 10000/82828
+skip sky_t1_17k (2000, 4000) 2 2000 1000 样本不足：长段需要 2000/944，短段需要 6000/82828
+openr1_m out=(1000, 3000)  N=1 S= 3000 L= 600 B=192 | W  0.53h sw=2 7bars=  3.9h | fixed_tp2:0.948 fixed_tp4:1.203 llumnix:1.091 flying_view:1.032 flying_both:1.116 anchortp:1.013 restart:1.090 weavetp_cutkv:0.968
+skip openr1_math (1000, 3000) 2 3000 600 样本不足：长段需要 1200/756，短段需要 9000/82828
+skip openr1_math (1000, 3000) 4 2000 400 样本不足：长段需要 1600/756，短段需要 10000/82828
+skip openr1_math (1000, 3000) 2 2000 1000 样本不足：长段需要 2000/756，短段需要 6000/82828
+openr1_m out=(2000, 4000)  N=1 S= 3000 L= 600 B=192 | W  0.70h sw=2 7bars=  5.3h | fixed_tp2:1.040 fixed_tp4:1.184 llumnix:1.203 flying_view:1.101 flying_both:1.203 anchortp:1.012 restart:1.078 weavetp_cutkv:1.022
+skip openr1_math (2000, 4000) 2 3000 600 样本不足：长段需要 1200/863，短段需要 9000/82828
+skip openr1_math (2000, 4000) 4 2000 400 样本不足：长段需要 1600/863，短段需要 10000/82828
+skip openr1_math (2000, 4000) 2 2000 1000 样本不足：长段需要 2000/863，短段需要 6000/82828
