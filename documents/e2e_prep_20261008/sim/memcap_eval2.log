@@ -1,0 +1,16 @@
+L= 600 每卡 34.19 GB 复用 0 | KV TP2 123 万 TP4 149 万 Llumnix(两套) 98 万 | 预算 15.9 GB | W 1.62 h 7柱 12.4 h | fixed_tp2:1.072 fixed_tp4:1.097 llumnix:1.250 flying_view:1.143 anchortp:1.009 restart:1.056
+L= 600 每卡 34.19 GB 复用 1 | KV TP2 123 万 TP4 149 万 Llumnix(两套) 98 万 | 预算 15.9 GB | W 1.63 h 7柱 12.4 h | fixed_tp2:1.069 fixed_tp4:1.094 llumnix:1.252 flying_view:1.134 anchortp:1.007 restart:1.048
+L= 600 每卡 28.00 GB 复用 0 | KV TP2 87 万 TP4 113 万 Llumnix(两套) 62 万 | 预算  9.7 GB | W 1.92 h 7柱 15.1 h | fixed_tp2:1.103 fixed_tp4:1.059 llumnix:1.478 flying_view:1.177 anchortp:1.003 restart:1.036
+L= 600 每卡 28.00 GB 复用 1 | KV TP2 87 万 TP4 113 万 Llumnix(两套) 62 万 | 预算  9.7 GB | W 1.91 h 7柱 15.0 h | fixed_tp2:1.104 fixed_tp4:1.060 llumnix:1.480 flying_view:1.177 anchortp:1.000 restart:1.035
+L= 600 每卡 24.00 GB 复用 0 | KV TP2 64 万 TP4 90 万 Llumnix(两套) 39 万 | 预算  5.7 GB | W 2.25 h 7柱 18.8 h | fixed_tp2:1.179 fixed_tp4:1.021 llumnix:1.859 flying_view:1.265 anchortp:1.003 restart:1.015
+L= 600 每卡 24.00 GB 复用 1 | KV TP2 64 万 TP4 90 万 Llumnix(两套) 39 万 | 预算  5.7 GB | W 2.20 h 7柱 18.6 h | fixed_tp2:1.204 fixed_tp4:1.042 llumnix:1.869 flying_view:1.283 anchortp:1.010 restart:1.030
+L= 600 每卡 22.00 GB 复用 0 | KV TP2 52 万 TP4 78 万 Llumnix(两套) 27 万 | 预算  3.7 GB | W 2.55 h 7柱 22.1 h | fixed_tp2:1.217 fixed_tp4:0.974 llumnix:2.201 flying_view:1.285 anchortp:1.015 restart:0.984
+L= 600 每卡 22.00 GB 复用 1 | KV TP2 52 万 TP4 78 万 Llumnix(两套) 27 万 | 预算  3.7 GB | W 2.46 h 7柱 21.9 h | fixed_tp2:1.264 fixed_tp4:1.012 llumnix:2.291 flying_view:1.332 anchortp:0.997 restart:1.018
+L=1200 每卡 34.19 GB 复用 0 | KV TP2 123 万 TP4 149 万 Llumnix(两套) 98 万 | 预算 15.9 GB | W 2.75 h 7柱 21.0 h | fixed_tp2:1.067 fixed_tp4:1.058 llumnix:1.327 flying_view:1.139 anchortp:1.005 restart:1.031
+L=1200 每卡 34.19 GB 复用 1 | KV TP2 123 万 TP4 149 万 Llumnix(两套) 98 万 | 预算 15.9 GB | W 2.75 h 7柱 21.0 h | fixed_tp2:1.067 fixed_tp4:1.058 llumnix:1.337 flying_view:1.130 anchortp:1.003 restart:1.028
+L=1200 每卡 28.00 GB 复用 0 | KV TP2 87 万 TP4 113 万 Llumnix(两套) 62 万 | 预算  9.7 GB | W 3.33 h 7柱 26.7 h | fixed_tp2:1.141 fixed_tp4:1.037 llumnix:1.589 flying_view:1.224 anchortp:1.003 restart:1.022
+L=1200 每卡 28.00 GB 复用 1 | KV TP2 87 万 TP4 113 万 Llumnix(两套) 62 万 | 预算  9.7 GB | W 3.33 h 7柱 26.7 h | fixed_tp2:1.141 fixed_tp4:1.037 llumnix:1.590 flying_view:1.221 anchortp:1.004 restart:1.020
+L=1200 每卡 24.00 GB 复用 0 | KV TP2 64 万 TP4 90 万 Llumnix(两套) 39 万 | 预算  5.7 GB | W 3.98 h 7柱 34.3 h | fixed_tp2:1.227 fixed_tp4:1.023 llumnix:2.027 flying_view:1.312 anchortp:1.003 restart:1.019
+L=1200 每卡 24.00 GB 复用 1 | KV TP2 64 万 TP4 90 万 Llumnix(两套) 39 万 | 预算  5.7 GB | W 3.99 h 7柱 34.2 h | fixed_tp2:1.225 fixed_tp4:1.021 llumnix:2.019 flying_view:1.307 anchortp:1.000 restart:1.016
+L=1200 每卡 22.00 GB 复用 0 | KV TP2 52 万 TP4 78 万 Llumnix(两套) 27 万 | 预算  3.7 GB | W 4.48 h 7柱 41.2 h | fixed_tp2:1.302 fixed_tp4:1.001 llumnix:2.498 flying_view:1.390 anchortp:1.002 restart:1.007
+L=1200 每卡 22.00 GB 复用 1 | KV TP2 52 万 TP4 78 万 Llumnix(两套) 27 万 | 预算  3.7 GB | W 4.45 h 7柱 41.1 h | fixed_tp2:1.312 fixed_tp4:1.008 llumnix:2.506 flying_view:1.397 anchortp:1.005 restart:1.012
