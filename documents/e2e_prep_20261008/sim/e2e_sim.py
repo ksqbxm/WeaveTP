@@ -36,6 +36,20 @@ P_CAP = 4096          # 每副本每步最多 prefill 的 token 数（激活显�
 REPREFILL_RATE = {2: 6000.0, 4: 4400.0}   # 重启时分块重新 prefill 的速度（估算）
 
 
+WORLD = 16            # 总卡数；8 卡时用 set_world(8)
+
+
+def set_world(n: int):
+    """切换到单机 8 卡：切换时长用 8 卡实测（WeaveTP 4.39/12.29 s、波数 6/22；AnchorTP 历史 20.26 s、波数 12/22）。"""
+    global WORLD
+    WORLD = n
+    if n == 8:
+        HW["recv"] = 1.1e9
+        for m in ("weavetp", "weavetp_ideal", "weavetp_cutkv"):
+            METHODS[m]["sw"] = {"2->4": (4.39, 6), "4->2": (12.29, 22)}
+        METHODS["anchortp"]["sw"] = {"2->4": (20.26, 12), "4->2": (20.26, 22)}
+
+
 def t_dec(b: int, tp: int) -> float:
     if b <= 0:
         return 0.0
@@ -74,7 +88,12 @@ METHODS = {
     "weavetp":        dict(mem="single", peak=True,  kv_move=True,  sw={"2->4": (5.4, 6), "4->2": (15.4, 22)}),
     "weavetp_ideal":  dict(mem="single", peak=False, kv_move=True,  sw={"2->4": (5.4, 6), "4->2": (15.4, 22)}, own_plan=True),
     "weavetp_cutkv":  dict(mem="single", peak=True,  kv_move=True,  kv_cutover=True, sw={"2->4": (5.4, 6), "4->2": (15.4, 22)}, own_plan=True),
-    "anchortp":       dict(mem="single", peak=True,  kv_move=True,  sw={"2->4": (20.26, 0), "4->2": (20.26, 0)}),
+    # AnchorTP 代理（L2 修正）：原复现只关掉误开的带宽感知改道；residual 调度、每波 2048 任务、每波解码 1 步。
+    # 16 卡墙钟按 8 卡历史 20.26 s 乘 16/8 卡默认计划的比例约 1.8 估为 36 s；期间解码步数取默认计划在 2048 上限下的波数（16 卡约 24 / 44）。
+    "anchortp":       dict(mem="single", peak=True,  kv_move=True,  sw={"2->4": (36.0, 24), "4->2": (36.0, 44)}),
+    "anchortp_20s":   dict(mem="single", peak=True,  kv_move=True,  sw={"2->4": (20.26, 12), "4->2": (20.26, 22)}),
+    "anchortp_60s":   dict(mem="single", peak=True,  kv_move=True,  sw={"2->4": (60.0, 24), "4->2": (60.0, 44)}),
+    "anchortp_old":   dict(mem="single", peak=True,  kv_move=True,  sw={"2->4": (20.26, 0), "4->2": (20.26, 0)}),
     "anchortp_fast":  dict(mem="single", peak=True,  kv_move=True,  sw={"2->4": (4.0, 0), "4->2": (8.0, 0)}),
     "llumnix":        dict(mem="both",   peak=True,  kv_move=True,  sw={"2->4": (1.34, 1), "4->2": (1.34, 1)}),
     "llumnix_static": dict(mem="both",   static=2),
@@ -223,7 +242,7 @@ class Sim:
         self.b_max = b_max
         self.queue = [Req(q.rid, q.inp, q.out, q.kind, q.seg) for q in reqs]
         self.tp = self.m.get("static", 2)
-        self.reps = [Replica() for _ in range(8 if self.tp == 2 else 4)]
+        self.reps = [Replica() for _ in range(WORLD // self.tp)]
         self.ptr = 0
         self.s = 0
         self.T = 0.0

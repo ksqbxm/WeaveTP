@@ -1,0 +1,6 @@
+sky_t1 N=1 S=4000 L=400 out=None          seed=7 | W 1.45h sw=2 6柱=  9.3h 7柱= 10.9h | fixed_tp2:1.031 llumnix:1.218 flying_view:1.083 anchortp:1.008 restart:1.067 fixed_tp4:1.117
+sky_t1 N=1 S=4000 L=600 out=None          seed=7 | W 1.62h sw=2 6柱= 10.6h 7柱= 12.4h | fixed_tp2:1.072 llumnix:1.250 flying_view:1.143 anchortp:1.009 restart:1.056 fixed_tp4:1.097
+sky_t1 N=1 S=4000 L=900 out=None          seed=7 | W 2.29h sw=2 6柱= 15.0h 7柱= 17.4h | fixed_tp2:1.073 llumnix:1.288 flying_view:1.141 anchortp:1.003 restart:1.037 fixed_tp4:1.073
+sky_t1 N=1 S=4000 L=1200 out=None          seed=7 | W 2.75h sw=2 6柱= 18.1h 7柱= 21.0h | fixed_tp2:1.067 llumnix:1.327 flying_view:1.139 anchortp:1.005 restart:1.031 fixed_tp4:1.058
+sky_t1 N=1 S=4000 L=400 out=None          seed=11 | W 1.50h sw=2 6柱=  9.2h 7柱= 10.9h | fixed_tp2:0.981 llumnix:1.038 flying_view:1.050 anchortp:1.008 restart:1.064 fixed_tp4:1.111
+sky_t1 N=1 S=4000 L=1200 out=None          seed=11 | W 2.70h sw=2 6柱= 17.9h 7柱= 20.7h | fixed_tp2:1.085 llumnix:1.359 flying_view:1.165 anchortp:0.999 restart:1.030 fixed_tp4:1.056

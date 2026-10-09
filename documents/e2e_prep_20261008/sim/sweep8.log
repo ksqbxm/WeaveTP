@@ -1,0 +1,3 @@
+sky_t1 N=1 S=2000 L=300 out=None          seed=7 | W 2.10h sw=2 6柱= 13.5h 7柱= 15.8h | fixed_tp2:1.051 llumnix:1.230 flying_view:1.100 anchortp:1.003 restart:1.038 fixed_tp4:1.079
+sky_t1 N=1 S=2000 L=450 out=None          seed=7 | W 2.50h sw=2 6柱= 16.5h 7柱= 19.1h | fixed_tp2:1.087 llumnix:1.328 flying_view:1.151 anchortp:1.004 restart:1.026 fixed_tp4:1.059
+sky_t1 N=1 S=2000 L=600 out=None          seed=7 | W 2.96h sw=2 6柱= 19.4h 7柱= 22.5h | fixed_tp2:1.072 llumnix:1.331 flying_view:1.136 anchortp:1.001 restart:1.019 fixed_tp4:1.042
