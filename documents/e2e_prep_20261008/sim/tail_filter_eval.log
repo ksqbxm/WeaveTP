@@ -1,0 +1,46 @@
+34.19GB 不过滤（≤16k）   (池2931，输出中位/最大 3321/16149) N=1 S=4000 L=600 throttle   | W  97.4m 限流 22.9m 排空  1.4m 切换2次 | fixed_tp2:1.072 fixed_tp4:1.097 llumnix:1.209 flying_view:1.072 anchortp:1.009 restart:1.036
+34.19GB 不过滤（≤16k）   (池2931，输出中位/最大 3321/16149) N=1 S=4000 L=600 after_long | W 102.9m 限流  0.0m 排空  1.4m 切换1次 | fixed_tp2:1.015 fixed_tp4:1.038 llumnix:1.144 flying_view:1.015 anchortp:1.006 restart:1.011
+34.19GB 不过滤（≤16k）   (池2931，输出中位/最大 3321/16149) N=2 S=3000 L=500 throttle   | W 152.0m 限流 54.4m 排空  4.4m 切换4次 | fixed_tp2:1.018 fixed_tp4:1.014 llumnix:1.187 flying_view:1.018 anchortp:1.012 restart:0.999
+34.19GB 不过滤（≤16k）   (池2931，输出中位/最大 3321/16149) N=2 S=3000 L=500 after_long | W 148.9m 限流  0.0m 排空  0.0m 切换2次 | fixed_tp2:1.039 fixed_tp4:1.036 llumnix:1.213 flying_view:1.039 anchortp:1.003 restart:1.010
+34.19GB 输出 ≤ 8k     (池2696，输出中位/最大 3079/8176) N=1 S=4000 L=600 throttle   | W  70.6m 限流 18.0m 排空  1.4m 切换2次 | fixed_tp2:1.082 fixed_tp4:1.120 llumnix:1.245 flying_view:1.082 anchortp:1.010 restart:1.047
+34.19GB 输出 ≤ 8k     (池2696，输出中位/最大 3079/8176) N=1 S=4000 L=600 after_long | W  75.1m 限流  0.0m 排空  1.4m 切换1次 | fixed_tp2:1.017 fixed_tp4:1.052 llumnix:1.170 flying_view:1.017 anchortp:1.006 restart:1.016
+34.19GB 输出 ≤ 8k     (池2696，输出中位/最大 3079/8176) N=2 S=3000 L=500 throttle   | W 112.9m 限流 44.4m 排空  2.4m 切换4次 | fixed_tp2:1.019 fixed_tp4:1.007 llumnix:1.202 flying_view:1.019 anchortp:0.998 restart:0.997
+34.19GB 输出 ≤ 8k     (池2696，输出中位/最大 3079/8176) N=2 S=3000 L=500 after_long | W 109.6m 限流 10.2m 排空  0.0m 切换2次 | fixed_tp2:1.049 fixed_tp4:1.036 llumnix:1.238 flying_view:1.049 anchortp:1.002 restart:1.007
+34.19GB 输出 ≤ 6k     (池2328，输出中位/最大 2694/6140) N=1 S=4000 L=600 throttle   | W  53.7m 限流 15.8m 排空  1.4m 切换2次 | fixed_tp2:1.084 fixed_tp4:1.148 llumnix:1.249 flying_view:1.084 anchortp:1.008 restart:1.062
+34.19GB 输出 ≤ 6k     (池2328，输出中位/最大 2694/6140) N=1 S=4000 L=600 after_long | W  57.8m 限流  0.0m 排空  1.4m 切换1次 | fixed_tp2:1.007 fixed_tp4:1.066 llumnix:1.160 flying_view:1.007 anchortp:1.004 restart:1.021
+34.19GB 输出 ≤ 6k     (池2328，输出中位/最大 2694/6140) N=2 S=3000 L=500 throttle   | W  79.0m 限流 34.8m 排空  3.1m 切换4次 | fixed_tp2:1.050 fixed_tp4:1.051 llumnix:1.231 flying_view:1.050 anchortp:1.015 restart:1.042
+34.19GB 输出 ≤ 6k     (池2328，输出中位/最大 2694/6140) N=2 S=3000 L=500 after_long | W  79.1m 限流  8.2m 排空  0.0m 切换2次 | fixed_tp2:1.048 fixed_tp4:1.049 llumnix:1.229 flying_view:1.048 anchortp:1.010 restart:1.012
+34.19GB 输出 ≤ 4k     (池1760，输出中位/最大 2186/4095) N=1 S=4000 L=600 throttle   | W  34.6m 限流 15.1m 排空  1.4m 切换2次 | fixed_tp2:1.089 fixed_tp4:1.136 llumnix:1.239 flying_view:1.089 anchortp:1.019 restart:1.014
+34.19GB 输出 ≤ 4k     (池1760，输出中位/最大 2186/4095) N=1 S=4000 L=600 after_long | W  35.3m 限流  0.0m 排空  1.4m 切换1次 | fixed_tp2:1.068 fixed_tp4:1.114 llumnix:1.215 flying_view:1.068 anchortp:1.009 restart:1.042
+34.19GB 输出 ≤ 4k     (池1760，输出中位/最大 2186/4095) N=2 S=3000 L=500 throttle   | W  54.0m 限流 33.1m 排空  2.6m 切换4次 | fixed_tp2:0.968 fixed_tp4:1.033 llumnix:1.131 flying_view:0.968 anchortp:1.006 restart:1.015
+34.19GB 输出 ≤ 4k     (池1760，输出中位/最大 2186/4095) N=2 S=3000 L=500 after_long | W  52.0m 限流  5.7m 排空  0.0m 切换2次 | fixed_tp2:1.006 fixed_tp4:1.074 llumnix:1.175 flying_view:1.006 anchortp:1.007 restart:1.030
+34.19GB 输出 2k–6k    (池1534，输出中位/最大 3552/6140) N=1 S=4000 L=600 throttle   | W  62.9m 限流 13.4m 排空  1.4m 切换2次 | fixed_tp2:1.082 fixed_tp4:1.123 llumnix:1.271 flying_view:1.082 anchortp:1.011 restart:1.051
+34.19GB 输出 2k–6k    (池1534，输出中位/最大 3552/6140) N=1 S=4000 L=600 after_long | W  66.7m 限流  0.0m 排空  1.4m 切换1次 | fixed_tp2:1.020 fixed_tp4:1.058 llumnix:1.197 flying_view:1.020 anchortp:1.010 restart:1.024
+34.19GB 输出 2k–6k    (池1534，输出中位/最大 3552/6140) N=2 S=3000 L=500 throttle   | W  94.8m 限流 27.7m 排空  2.5m 切换4次 | fixed_tp2:1.046 fixed_tp4:1.030 llumnix:1.229 flying_view:1.046 anchortp:1.011 restart:1.029
+34.19GB 输出 2k–6k    (池1534，输出中位/最大 3552/6140) N=2 S=3000 L=500 after_long | W 101.6m 限流 15.1m 排空  0.0m 切换2次 | fixed_tp2:0.975 fixed_tp4:0.961 llumnix:1.147 flying_view:0.975 anchortp:0.999 restart:0.940
+34.19GB 输出 3k–5k    (池 726，输出中位/最大 3972/5115) N=1 S=4000 L=600 throttle   | W  63.3m 限流 20.2m 排空  1.4m 切换2次 | fixed_tp2:1.116 fixed_tp4:1.073 llumnix:1.261 flying_view:1.116 anchortp:1.013 restart:1.016
+34.19GB 输出 3k–5k    (池 726，输出中位/最大 3972/5115) N=1 S=4000 L=600 after_long | W  64.1m 限流  0.0m 排空  1.4m 切换1次 | fixed_tp2:1.101 fixed_tp4:1.059 llumnix:1.244 flying_view:1.101 anchortp:1.006 restart:1.018
+34.19GB 输出 3k–5k     N=2: 样本不足 726
+24.00GB 不过滤（≤16k）   (池2931，输出中位/最大 3321/16149) N=1 S=4000 L=600 throttle   | W 134.9m 限流 42.1m 排空  2.1m 切换2次 | fixed_tp2:1.179 fixed_tp4:1.021 llumnix:1.771 flying_view:1.238 anchortp:1.003 restart:0.991
+24.00GB 不过滤（≤16k）   (池2931，输出中位/最大 3321/16149) N=1 S=4000 L=600 after_long | W 137.2m 限流  0.0m 排空  2.1m 切换1次 | fixed_tp2:1.159 fixed_tp4:1.004 llumnix:1.742 flying_view:1.249 anchortp:1.000 restart:0.994
+24.00GB 不过滤（≤16k）   (池2931，输出中位/最大 3321/16149) N=2 S=3000 L=500 throttle   | W 223.0m 限流 72.6m 排空  5.5m 切换4次 | fixed_tp2:1.144 fixed_tp4:0.946 llumnix:1.808 flying_view:1.205 anchortp:1.005 restart:0.963
+24.00GB 不过滤（≤16k）   (池2931，输出中位/最大 3321/16149) N=2 S=3000 L=500 after_long | W 246.8m 限流 50.0m 排空  2.3m 切换2次 | fixed_tp2:1.034 fixed_tp4:0.855 llumnix:1.634 flying_view:1.088 anchortp:0.967 restart:0.882
+24.00GB 输出 ≤ 8k     (池2696，输出中位/最大 3079/8176) N=1 S=4000 L=600 throttle   | W  98.6m 限流 26.7m 排空  2.1m 切换2次 | fixed_tp2:1.213 fixed_tp4:1.044 llumnix:1.830 flying_view:1.272 anchortp:1.008 restart:1.020
+24.00GB 输出 ≤ 8k     (池2696，输出中位/最大 3079/8176) N=1 S=4000 L=600 after_long | W 102.1m 限流  0.0m 排空  2.1m 切换1次 | fixed_tp2:1.171 fixed_tp4:1.008 llumnix:1.768 flying_view:1.263 anchortp:1.006 restart:1.003
+24.00GB 输出 ≤ 8k     (池2696，输出中位/最大 3079/8176) N=2 S=3000 L=500 throttle   | W 170.1m 限流 61.1m 排空  5.0m 切换4次 | fixed_tp2:1.103 fixed_tp4:0.936 llumnix:1.712 flying_view:1.164 anchortp:1.003 restart:0.954
+24.00GB 输出 ≤ 8k     (池2696，输出中位/最大 3079/8176) N=2 S=3000 L=500 after_long | W 169.0m 限流 26.7m 排空  2.3m 切换2次 | fixed_tp2:1.110 fixed_tp4:0.942 llumnix:1.723 flying_view:1.163 anchortp:0.991 restart:0.972
+24.00GB 输出 ≤ 6k     (池2328，输出中位/最大 2694/6140) N=1 S=4000 L=600 throttle   | W  75.4m 限流 18.1m 排空  2.1m 切换2次 | fixed_tp2:1.159 fixed_tp4:1.052 llumnix:1.699 flying_view:1.215 anchortp:1.019 restart:1.023
+24.00GB 输出 ≤ 6k     (池2328，输出中位/最大 2694/6140) N=1 S=4000 L=600 after_long | W  78.5m 限流  0.0m 排空  2.1m 切换1次 | fixed_tp2:1.113 fixed_tp4:1.011 llumnix:1.632 flying_view:1.206 anchortp:1.006 restart:1.003
+24.00GB 输出 ≤ 6k     (池2328，输出中位/最大 2694/6140) N=2 S=3000 L=500 throttle   | W 126.3m 限流 44.8m 排空  4.8m 切换4次 | fixed_tp2:1.054 fixed_tp4:0.908 llumnix:1.609 flying_view:1.112 anchortp:1.007 restart:0.924
+24.00GB 输出 ≤ 6k     (池2328，输出中位/最大 2694/6140) N=2 S=3000 L=500 after_long | W 125.0m 限流 19.7m 排空  2.3m 切换2次 | fixed_tp2:1.065 fixed_tp4:0.918 llumnix:1.626 flying_view:1.120 anchortp:1.009 restart:0.939
+24.00GB 输出 ≤ 4k     (池1760，输出中位/最大 2186/4095) N=1 S=4000 L=600 throttle   | W  52.4m 限流 13.1m 排空  2.1m 切换2次 | fixed_tp2:1.051 fixed_tp4:0.994 llumnix:1.523 flying_view:1.091 anchortp:1.029 restart:0.968
+24.00GB 输出 ≤ 4k     (池1760，输出中位/最大 2186/4095) N=1 S=4000 L=600 after_long | W  51.3m 限流  0.0m 排空  2.1m 切换1次 | fixed_tp2:1.073 fixed_tp4:1.015 llumnix:1.555 flying_view:1.155 anchortp:1.010 restart:1.003
+24.00GB 输出 ≤ 4k     (池1760，输出中位/最大 2186/4095) N=2 S=3000 L=500 throttle   | W  77.4m 限流 25.5m 排空  5.5m 切换4次 | fixed_tp2:1.059 fixed_tp4:0.941 llumnix:1.567 flying_view:1.114 anchortp:1.020 restart:0.968
+24.00GB 输出 ≤ 4k     (池1760，输出中位/最大 2186/4095) N=2 S=3000 L=500 after_long | W  81.7m 限流 13.4m 排空  2.3m 切换2次 | fixed_tp2:1.004 fixed_tp4:0.892 llumnix:1.485 flying_view:1.055 anchortp:1.009 restart:0.930
+24.00GB 输出 2k–6k    (池1534，输出中位/最大 3552/6140) N=1 S=4000 L=600 throttle   | W  94.5m 限流 22.1m 排空  2.1m 切换2次 | fixed_tp2:1.161 fixed_tp4:1.005 llumnix:1.750 flying_view:1.223 anchortp:0.980 restart:0.981
+24.00GB 输出 2k–6k    (池1534，输出中位/最大 3552/6140) N=1 S=4000 L=600 after_long | W  94.1m 限流  0.0m 排空  2.1m 切换1次 | fixed_tp2:1.165 fixed_tp4:1.009 llumnix:1.757 flying_view:1.259 anchortp:1.007 restart:1.000
+24.00GB 输出 2k–6k    (池1534，输出中位/最大 3552/6140) N=2 S=3000 L=500 throttle   | W 145.0m 限流 43.6m 排空  5.0m 切换4次 | fixed_tp2:1.128 fixed_tp4:0.950 llumnix:1.758 flying_view:1.198 anchortp:0.999 restart:0.966
+24.00GB 输出 2k–6k    (池1534，输出中位/最大 3552/6140) N=2 S=3000 L=500 after_long | W 150.0m 限流 17.5m 排空  2.3m 切换2次 | fixed_tp2:1.090 fixed_tp4:0.918 llumnix:1.699 flying_view:1.141 anchortp:1.017 restart:0.977
+24.00GB 输出 3k–5k    (池 726，输出中位/最大 3972/5115) N=1 S=4000 L=600 throttle   | W  96.4m 限流 21.5m 排空  2.1m 切换2次 | fixed_tp2:1.170 fixed_tp4:0.978 llumnix:1.793 flying_view:1.235 anchortp:1.006 restart:0.981
+24.00GB 输出 3k–5k    (池 726，输出中位/最大 3972/5115) N=1 S=4000 L=600 after_long | W  93.5m 限流  0.0m 排空  2.1m 切换1次 | fixed_tp2:1.206 fixed_tp4:1.008 llumnix:1.847 flying_view:1.300 anchortp:1.003 restart:1.000
+24.00GB 输出 3k–5k     N=2: 样本不足 726
