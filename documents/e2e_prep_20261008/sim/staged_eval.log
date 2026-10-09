@@ -1,0 +1,8 @@
+EP1 L= 600 现设计（两套权重 + 两份 KV）                        预算  0.7 GB | fixed_tp2:1.084 fixed_tp4:0.934 restart:0.926 flying_view:1.164
+EP1 L= 600 staged KV（峰值 = max(源, 目标)）               预算  0.7 GB | fixed_tp2:1.100 fixed_tp4:0.948 restart:0.939 flying_view:1.181
+EP1 L= 600 staged 权重（逐层释放源权重，预算 + 8.09 GB）          预算  8.8 GB | fixed_tp2:1.220 fixed_tp4:1.052 restart:1.035 flying_view:1.295
+EP1 L= 600 staged 权重 + staged KV                    预算  8.8 GB | fixed_tp2:1.230 fixed_tp4:1.060 restart:1.026 flying_view:1.283
+EP1 L=1200 现设计（两套权重 + 两份 KV）                        预算  0.7 GB | fixed_tp2:1.225 fixed_tp4:0.958 restart:0.954 flying_view:1.313
+EP1 L=1200 staged KV（峰值 = max(源, 目标)）               预算  0.7 GB | fixed_tp2:1.237 fixed_tp4:0.967 restart:0.963 flying_view:1.325
+EP1 L=1200 staged 权重（逐层释放源权重，预算 + 8.09 GB）          预算  8.8 GB | fixed_tp2:1.331 fixed_tp4:1.040 restart:1.029 flying_view:1.417
+EP1 L=1200 staged 权重 + staged KV                    预算  8.8 GB | fixed_tp2:1.324 fixed_tp4:1.035 restart:1.013 flying_view:1.401

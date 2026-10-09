@@ -1,0 +1,6 @@
+EP2 L= 600 每卡 34.19 GB | KV 容量 TP4/TP2 1.21 | 切换预算 15.9 GB | WeaveTP 1.62 h | fixed_tp2:1.072 fixed_tp4:1.097 llumnix:1.250 flying_view:1.143 restart:1.056
+EP2 L= 600 每卡 28.00 GB | KV 容量 TP4/TP2 1.30 | 切换预算  9.7 GB | WeaveTP 1.92 h | fixed_tp2:1.103 fixed_tp4:1.059 llumnix:1.478 flying_view:1.177 restart:1.036
+EP2 L= 600 每卡 24.00 GB | KV 容量 TP4/TP2 1.40 | 切换预算  5.7 GB | WeaveTP 2.25 h | fixed_tp2:1.179 fixed_tp4:1.021 llumnix:1.859 flying_view:1.265 restart:1.015
+EP2 L=1200 每卡 34.19 GB | KV 容量 TP4/TP2 1.21 | 切换预算 15.9 GB | WeaveTP 2.75 h | fixed_tp2:1.067 fixed_tp4:1.058 llumnix:1.327 flying_view:1.139 restart:1.031
+EP2 L=1200 每卡 28.00 GB | KV 容量 TP4/TP2 1.30 | 切换预算  9.7 GB | WeaveTP 3.33 h | fixed_tp2:1.141 fixed_tp4:1.037 llumnix:1.589 flying_view:1.224 restart:1.022
+EP2 L=1200 每卡 24.00 GB | KV 容量 TP4/TP2 1.40 | 切换预算  5.7 GB | WeaveTP 3.98 h | fixed_tp2:1.227 fixed_tp4:1.023 llumnix:2.027 flying_view:1.312 restart:1.019
