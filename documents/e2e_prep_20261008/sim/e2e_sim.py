@@ -239,8 +239,9 @@ class Result:
 
 class Sim:
     def __init__(self, reqs: list[Req], method: str, *, b_max: int, plan=None, make_plan=False,
-                 qualify=None, shrink_mode="throttle"):
+                 qualify=None, shrink_mode="throttle", barrier=False):
         self.shrink_mode = shrink_mode
+        self.barrier = barrier          # True：某段的请求要等上一段全部完成才开始接纳（分阶段负载）
         self.m = METHODS[method]
         self.name = method
         self.b_max = b_max
@@ -257,9 +258,19 @@ class Sim:
         self.qualify = qualify          # 长段编号集合：生成计划时只为这些段切换
         self.res = Result(method, 0, 0, sum(q.inp + q.out for q in reqs), sum(q.out for q in reqs))
         self.seg_last_long = {}
+        self.seg_long_rids = {}
+        self.seg_rids = {}
+        for q in reqs:
+            self.seg_rids.setdefault(q.seg, []).append(q.rid)
+        self.seg_left = {sg: len(v) for sg, v in self.seg_rids.items()}
+        self.long_left = {}
+        for q in reqs:
+            if q.kind == "long":
+                self.long_left[q.seg] = self.long_left.get(q.seg, 0) + 1
         for q in self.queue:
             if q.kind == "long":
                 self.seg_last_long[q.seg] = q.rid
+                self.seg_long_rids.setdefault(q.seg, []).append(q.rid)
         self.first_long = {}
         for q in self.queue:
             if q.kind == "long" and q.seg not in self.first_long:
@@ -319,11 +330,18 @@ class Sim:
             return self.plan[self.ai][3]
         return None
 
+    def long_done(self, seg):
+        return self.long_left.get(seg, 0) == 0
+
     def throttled(self):
         if self.shrink_mode == "fcfs" or self.m.get("static"):
             return False
         seg = self.pending_shrink_seg()
-        return seg is not None and self.ptr > self.seg_last_long[seg]
+        if seg is None or self.ptr <= self.seg_last_long[seg]:
+            return False
+        if self.shrink_mode == "after_long":     # 长段全部完成前不限流；完成后若还放不下才限流
+            return self.long_done(seg)
+        return True
 
     def pre_shrink_cap(self):
         if self.shrink_mode == "drain":
@@ -352,6 +370,9 @@ class Sim:
             for q in r.pop_done(s):
                 q.t_done = self.T
                 self.done.add(q.rid)
+                self.seg_left[q.seg] -= 1
+                if q.kind == "long":
+                    self.long_left[q.seg] -= 1
                 now.append(q.rid)
         if now:
             self.last_done = now
@@ -470,6 +491,9 @@ class Sim:
             if q.rid == stop_rid:
                 reason = "anchor"
                 break
+            if self.barrier and q.seg > 0 and self.seg_left.get(q.seg - 1, 0) > 0:
+                reason = "barrier"
+                break
             need = q.inp + q.out
             best = None
             kv_short = False
@@ -555,7 +579,8 @@ class Sim:
             return None
         if self.tp == 4 and self.cur_long_seg is not None:
             last = self.seg_last_long[self.cur_long_seg]
-            if self.ptr > last:              # 长段已全部接纳
+            ready = self.ptr > last if self.shrink_mode != "after_long" else self.long_done(self.cur_long_seg)
+            if ready:                        # 长段已全部接纳（after_long：已全部完成）
                 if self.feasible(2):
                     y = min(self.last_done) if self.last_done else -1
                     anchor = ("after_complete", y)
@@ -595,30 +620,30 @@ def cluster_gain(m: str) -> float:
     return capacity(mem, 4) * (WORLD // 4) / max(1, capacity(mem, 2) * (WORLD // 2))
 
 
-def run_all(reqs, *, b_max, methods, qualify_steps=200, shrink_mode="throttle", plan_mode="shared"):
+def run_all(reqs, *, b_max, methods, qualify_steps=200, shrink_mode="throttle", plan_mode="shared", barrier=False):
     """先在固定 TP2 下判定哪些长段需要切换，再生成 WeaveTP 计划。
     plan_mode="shared"：各方法执行 WeaveTP 的同一份计划（锚点可能对其他方法不合理，例如刚缩容又立刻扩容）。
     plan_mode="own"：各方法按同一规则、用自己的容量与约束生成自己的计划；切到 TP4 不增加 KV 容量的方法不切换。"""
-    base = Sim(reqs, "fixed_tp2", b_max=b_max).run()
+    base = Sim(reqs, "fixed_tp2", b_max=b_max, barrier=barrier).run()
     qualify = {seg for seg, st in base.kv_blocked_long_steps.items() if st >= qualify_steps}
-    plan_res = Sim(reqs, "weavetp", b_max=b_max, make_plan=True, qualify=qualify, shrink_mode=shrink_mode).run()
+    plan_res = Sim(reqs, "weavetp", b_max=b_max, make_plan=True, qualify=qualify, shrink_mode=shrink_mode, barrier=barrier).run()
     plan = plan_res.plan
     out = {"fixed_tp2": base, "_plan": plan_res}
     for m in methods:
         if m == "fixed_tp2":
             continue
         if METHODS[m].get("static"):
-            out[m] = Sim(reqs, m, b_max=b_max).run()
+            out[m] = Sim(reqs, m, b_max=b_max, barrier=barrier).run()
         elif plan_mode == "own" and cluster_gain(m) <= 1.0:
-            out[m] = Sim(reqs, m, b_max=b_max, plan=[], shrink_mode=shrink_mode).run()
+            out[m] = Sim(reqs, m, b_max=b_max, plan=[], shrink_mode=shrink_mode, barrier=barrier).run()
         elif plan_mode == "own" or METHODS[m].get("own_plan"):
             if m == "weavetp":
                 out[m] = plan_res
                 continue
-            pr = Sim(reqs, m, b_max=b_max, make_plan=True, qualify=qualify, shrink_mode=shrink_mode).run()
+            pr = Sim(reqs, m, b_max=b_max, make_plan=True, qualify=qualify, shrink_mode=shrink_mode, barrier=barrier).run()
             out[m] = pr
         else:
-            out[m] = Sim(reqs, m, b_max=b_max, plan=plan, shrink_mode=shrink_mode).run()
+            out[m] = Sim(reqs, m, b_max=b_max, plan=plan, shrink_mode=shrink_mode, barrier=barrier).run()
     return out, plan, qualify
 
 
