@@ -45,6 +45,7 @@ def one(run_dir):
             "peak_reserved_gb": max(v["peak_reserved_since_last"] for v in vs) / 1e9,
             "free_min_gb": min(v["free_now"] for v in vs) / 1e9,
             "src_steps": vs[0]["src_steps_ms"], "dst_steps": vs[0]["dst_steps_ms"],
+            "after_switch": vs[0].get("after_switch"),
         })
     steady = {}
     for v in V:   # 各布局稳态单步：取所有校验中该布局步时间的中位数（去掉每组前 3 步）
@@ -65,7 +66,8 @@ def one(run_dir):
         t_src = steady.get(src_tp, float("nan")) / 1e3
         loss = sw["switch_wall_s"] - (steps + wc) * t_src
         wave_bytes = sum(w.get("bytes", 0) for w in base.get("wave_records", []))
-        after = V[k + 1] if k + 1 < len(V) else None
+        after = next((v for v in V if v.get("after_switch") == k), None)
+        hold = next((h for h in (extra[0].get("holds") or []) if h["after_switch"] == k), None)
         rec_steps = None
         if after:
             target = steady.get(dst_tp)
@@ -81,6 +83,12 @@ def one(run_dir):
             "peak_alloc_gb": after["peak_alloc_gb"] if after else None,
             "peak_reserved_gb": after["peak_reserved_gb"] if after else None,
             "recovery_steps": rec_steps,
+            "hold_tp": hold["tp"] if hold else None, "hold_steps": len(hold["steps_ms"]) if hold else 0,
+            "hold_wall_s": hold["wall_s"] if hold else 0.0,
+            "hold_step_ms": med(hold["steps_ms"][3:]) if hold else None,
+            "hold_tokens": len(hold["steps_ms"]) * (mb or 0) * (world // dst_tp) if hold else 0,
+            "hold_peak_alloc_gb": max(e["holds"][i]["peak_allocated"] for e in extra
+                                      for i in range(len(e.get("holds") or [])) if e["holds"][i]["after_switch"] == k) / 1e9 if hold else None,
         })
     return {"run": os.path.basename(run_dir), "method": r.get("method_variant"), "mb": mb, "kv_tokens": kv_tokens,
             "steady_step_ms": steady, "smi_peak_mib": smi_peak(os.path.join(run_dir, "smi.csv")),
@@ -99,11 +107,11 @@ def main(root):
         print(f"\n## {s['run']}  方法 {s['method']}  每副本 {s['mb']} 条 × {s['kv_tokens']} token；"
               f"稳态单步 TP2 {s['steady_step_ms'].get(2, float('nan')):.0f} ms / TP4 {s['steady_step_ms'].get(4, float('nan')):.0f} ms；"
               f"nvidia-smi 峰值 {sp} MiB")
-        print("  # 方向 源KV(GB/卡) 墙钟s 波数 前台步 前台token 期间单步ms 暴露等待s 增量+提交s 进度损失s 迁移GB 峰值分配GB 峰值保留GB 恢复步")
+        print("  # 方向 源KV(GB/卡) 墙钟s 波数 前台步 前台token 期间单步ms 暴露等待s 增量+提交s 进度损失s 迁移GB 峰值分配GB 峰值保留GB 恢复步 | 切换后连续解码：步数 墙钟s 单步ms token 峰值GB")
         for w in s["switches"]:
             print(f"  {w['k']} {w['dir']} {w['kv_gb_per_card_src']:6.2f} {w['wall_s']:6.2f} {w['waves']:4d} {w['fg_steps']:5d} "
                   f"{w['fg_tokens']:7d} {w['tpot_during_ms']:7.0f} {w['exposed_wait_s']:7.2f} {w['delta_commit_s']:7.2f} "
-                  f"{w['progress_loss_s']:7.2f} {w['wave_bytes_gb']:7.2f} {w['peak_alloc_gb'] or 0:7.2f} {w['peak_reserved_gb'] or 0:7.2f} {w['recovery_steps']}")
+                  f"{w['progress_loss_s']:7.2f} {w['wave_bytes_gb']:7.2f} {w['peak_alloc_gb'] or 0:7.2f} {w['peak_reserved_gb'] or 0:7.2f} {w['recovery_steps']} | {w['hold_steps']} {w['hold_wall_s']:.1f} {w['hold_step_ms'] or 0:.0f} {w['hold_tokens']} {w['hold_peak_alloc_gb'] or 0:.2f}")
     json.dump(out, open(os.path.join(root, "cycle_summary.json"), "w"), indent=1, ensure_ascii=False)
     print(f"\n已写 {os.path.join(root, 'cycle_summary.json')}")
 

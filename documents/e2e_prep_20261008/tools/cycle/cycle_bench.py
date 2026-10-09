@@ -21,7 +21,10 @@ import benchmark_live_moe_tp as B
 
 KV_TOKENS = int(os.environ.get("CYCLE_KV_TOKENS", "0"))
 EXTRA_STEPS = int(os.environ.get("CYCLE_EXTRA_STEPS", "20"))
-_records = {"validations": [], "kv_tokens": KV_TOKENS, "extra_steps": EXTRA_STEPS}
+HOLD = {4: int(os.environ.get("CYCLE_HOLD_TP4", "0")), 2: int(os.environ.get("CYCLE_HOLD_TP2", "0"))}
+_records = {"validations": [], "holds": [], "kv_tokens": KV_TOKENS, "extra_steps": EXTRA_STEPS, "hold_steps": HOLD}
+_state = {"in_switch": False, "switch_index": -1}
+_orig_waves = B._run_async_waves
 _orig_prefill = B._prefill
 _orig_validate = B._validate_cutover
 _orig_write = B._write_results
@@ -70,8 +73,42 @@ def _validate(src_model, src_context, dst_model, dst_context, args, control_grou
         rec["dst_steps_ms"].append(B._all_max(ms, control_group))
         token_value += 1
     torch.cuda.reset_peak_memory_stats()
+    rec["after_switch"] = _state["switch_index"] if _state["in_switch"] else None
     _records["validations"].append(rec)
-    return _orig_validate(src_model, src_context, dst_model, dst_context, args, control_group, token_value)
+    out = _orig_validate(src_model, src_context, dst_model, dst_context, args, control_group, token_value)
+    if _state["in_switch"]:
+        _state["in_switch"] = False
+        _hold(dst_model, dst_context, src_context, args, control_group, out[1])
+    return out
+
+
+def _waves(*a, **k):
+    _state["in_switch"] = True
+    _state["switch_index"] += 1
+    return _orig_waves(*a, **k)
+
+
+def _hold(model, context, standby_context, args, control_group, token_value):
+    """切换后在新布局上连续解码 HOLD 步（长段 / 排空期 / 恢复期的真实单步时间），备用上下文只同步偏移。"""
+    tp = _tp_of(model)
+    n = HOLD.get(tp, 0)
+    if n <= 0:
+        return
+    torch.cuda.synchronize()
+    torch.cuda.reset_peak_memory_stats()
+    t0 = time.perf_counter()
+    steps = []
+    for _ in range(n):
+        _, ms = B._decode(model, context, args, token_value=token_value)
+        steps.append(B._all_max(ms, control_group))
+        token_value += 1
+    wall = B._all_max(time.perf_counter() - t0, control_group)
+    standby_context.sequence_len_offset = context.sequence_len_offset
+    _records["holds"].append({"after_switch": _state["switch_index"], "tp": tp, "steps_ms": steps, "wall_s": wall,
+                              "offset_end": int(context.sequence_len_offset),
+                              "peak_allocated": torch.cuda.max_memory_allocated(),
+                              "peak_reserved": torch.cuda.max_memory_reserved()})
+    torch.cuda.reset_peak_memory_stats()
 
 
 def _write(args, result):
@@ -89,6 +126,7 @@ def _write(args, result):
 B._prefill = _prefill
 B._validate_cutover = _validate
 B._write_results = _write
+B._run_async_waves = _waves
 
 if __name__ == "__main__":
     B.main()

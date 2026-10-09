@@ -11,6 +11,8 @@ KV_LIST=${KV_LIST:-"8 1024 2048 3072"}
 MB=${MB:-16}
 SWITCHES=${SWITCHES:-4}
 EXTRA=${CYCLE_EXTRA_STEPS:-20}
+HOLD4=${CYCLE_HOLD_TP4:-0}          # 每次扩容后在 TP4 上连续解码的步数（长段 / 排空期）
+HOLD2=${CYCLE_HOLD_TP2:-0}          # 每次缩容后在 TP2 上连续解码的步数（恢复期）
 
 # 1) 取分支、导出快照（不动仓库工作区）；把包装器放进快照，并让快照里的启动脚本可以换入口
 git -C "$REPO" -c http.version=HTTP/1.1 fetch -q origin codex/standby-weight-storage || exit 2
@@ -50,13 +52,13 @@ for KV in $KV_LIST; do
     while pgrep -f "torch.distributed.run" >/dev/null; do sleep 20; done; sleep 10
     if nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits | awk '$1>500{b=1} END{exit !b}'; then
       echo "$(date +%T) $TAG: GPU 不空闲，跳过" | tee -a "$OUT/grid.log"; nvidia-smi >> "$D/busy.txt"; continue; fi
-    MAXPOS=$(( KV + 200 * (SWITCHES + 1) + 512 ))
+    MAXPOS=$(( KV + 200 * (SWITCHES + 1) + 512 + (SWITCHES / 2 + 1) * (HOLD4 + HOLD2) ))
     echo "$(date +%T) START $TAG maxpos=$MAXPOS" | tee -a "$OUT/grid.log"
     nvidia-smi --query-gpu=timestamp,index,memory.used --format=csv,noheader,nounits -lms 200 > "$D/smi.csv" &
     SMI=$!
     ( cd "$SNAP/code/current" && env $(method_env "$M") \
         NNODES=1 NODE_RANK=0 MASTER_ADDR=127.0.0.1 MASTER_PORT=$port \
-        ENTRYPOINT_OVERRIDE=examples/rl/cycle_bench.py CYCLE_KV_TOKENS=$KV CYCLE_EXTRA_STEPS=$EXTRA \
+        ENTRYPOINT_OVERRIDE=examples/rl/cycle_bench.py CYCLE_KV_TOKENS=$KV CYCLE_EXTRA_STEPS=$EXTRA CYCLE_HOLD_TP4=$HOLD4 CYCLE_HOLD_TP2=$HOLD2 \
         CHECKPOINT=/data/models/DeepSeek-V2-Lite-megatron-v2 ${PROFILE:+PROFILE=$PROFILE} OUT_DIR="$D/run" \
         MICRO_BATCH_SIZE=$MB SWITCHES=$SWITCHES SEQ_LENGTH=$MAXPOS MAX_POSITION_EMBEDDINGS=$MAXPOS \
         MAX_WAVES=128 MAX_OVERLAP_STEPS=1 PACK_TARGET_BYTES=0 PACK_MAX_ITEM_BYTES=0 ONLINE_REPLAN=0 \
