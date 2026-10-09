@@ -29,7 +29,7 @@ HW = dict(
 )
 
 # 单步解码时间：t = L * f_tp * g(B)；两档 L（快 / 慢）都要算
-STEP = dict(L=0.300, f4=1.075, slope=0.025)
+STEP = dict(L=0.300, f4=1.075, slope=0.025, kv_coef={2: 0.0, 4: 0.0})   # kv_coef：每副本每 KV token 的注意力读开销（s），0 = 不随上下文变化（未校准）
 # prefill：t = a + p / r（每副本每步，p 为本步新接纳请求的输入 token 总数）
 PREFILL = {2: (0.22, 9790.0), 4: (0.16, 5341.0)}
 P_CAP = 4096          # 每副本每步最多 prefill 的 token 数（激活显存受余量限制）
@@ -51,11 +51,12 @@ def set_world(n: int):
         METHODS["anchortp"]["sw"] = {"2->4": (20.26, 12), "4->2": (20.26, 22)}
 
 
-def t_dec(b: int, tp: int) -> float:
+def t_dec(b: int, tp: int, kv: int = 0) -> float:
+    """单步解码时间；kv 为本步最忙副本已用的 KV token 数（注意力读开销，需校准）。"""
     if b <= 0:
         return 0.0
     g = 1.0 + STEP["slope"] * math.log2(max(b, 16) / 16.0)
-    return STEP["L"] * (STEP["f4"] if tp == 4 else 1.0) * g
+    return STEP["L"] * (STEP["f4"] if tp == 4 else 1.0) * g + STEP["kv_coef"][tp] * kv
 
 
 def t_pf(p: int, tp: int) -> float:
@@ -266,6 +267,11 @@ class Sim:
         self.cur_long_seg = None        # 计划生成：已扩容、等待缩容的长段
         self.kvb = {}
         self.last_done = []
+        # 墙钟分解（秒）、各类别产生的 token 数、KV 占用率 × 时间（用于平均占用率）
+        self.acct: dict[str, float] = {}
+        self.tokc: dict[str, int] = {}
+        self.occ: dict[str, float] = {}
+        self.ctx = None                 # decode_until 的类别（None 时按是否限流自动判定）
 
     # ---------------- 容量与约束
     def cap(self, tp):
@@ -350,6 +356,20 @@ class Sim:
         if now:
             self.last_done = now
 
+    def _occupancy(self):
+        c = self.cap(self.tp)
+        return sum(r.used(self.s) for r in self.reps) / (len(self.reps) * c) if c else 0.0
+
+    def _add(self, cat, dt, tokens=0, occ=None):
+        self.acct[cat] = self.acct.get(cat, 0.0) + dt
+        self.tokc[cat] = self.tokc.get(cat, 0) + tokens
+        self.occ[cat] = self.occ.get(cat, 0.0) + dt * (self._occupancy() if occ is None else occ)
+
+    def _decode_cat(self):
+        if self.ctx:
+            return self.ctx
+        return "decode_throttled" if self.throttled() else "decode"
+
     def decode_until(self, last_step):
         """只解码，不接纳，从 self.s 推进到 last_step（含）。返回耗时。"""
         t0 = self.T
@@ -360,7 +380,9 @@ class Sim:
                 break
             f = min(min(nf), last_step)
             b = max(r.n for r in self.reps)
-            self.T += (f - self.s + 1) * t_dec(b, self.tp)
+            dt = (f - self.s + 1) * t_dec(b, self.tp, max(r.used(self.s) for r in self.reps))
+            self._add(self._decode_cat(), dt, (f - self.s + 1) * sum(r.n for r in self.reps))
+            self.T += dt
             self.s = f
             self._complete(f)
             self.s = f + 1
@@ -392,18 +414,33 @@ class Sim:
             new = regroup(self.reps, to_tp)
             rate = REPREFILL_RATE[to_tp]
             t_re = max((r.used(self.s) for r in new), default=0) / rate
+            self._add("stall_reload", self.m["reload"], 0, 0.0)
+            self._add("stall_reprefill", t_re, 0, 0.0)
             self.T += self.m["reload"] + t_re
             self.reps, self.tp = new, to_tp
             wall, overlap = self.m["reload"] + t_re, 0
         else:
             wall, overlap = self.m["sw"][d]
-            if self.m.get("kv_move"):
+            fit = self.m.get("sw_fit", {}).get(d)
+            if fit:                               # 实测校准：墙钟、期间前台步数随源布局每卡 KV（GB）线性变化，已含 KV 搬运
+                a, b, sa, sb = fit
+                wall = a + b * ref["kv_used_gb_per_card"]
+                overlap = max(0, int(round(sa + sb * ref["kv_used_gb_per_card"])))
+                t_kv = 0.0
+            elif self.m.get("kv_move"):
                 wall += t_kv
+            self.ctx = "switch_decode"
             used = self.decode_until(self.s + overlap - 1) if overlap else 0.0
+            self.ctx = None
             if self.m.get("kv_cutover"):         # KV 在切换点整体搬运（逐层释放源 KV），这段时间前台停住
-                self.T += max(0.0, wall - t_kv - used) + t_kv
+                stall = max(0.0, wall - t_kv - used) + t_kv
             else:
-                self.T += max(0.0, wall - used)
+                stall = max(0.0, wall - used)
+            kv_part = stall * (t_kv / wall) if wall > 0 and self.m.get("kv_move") else 0.0
+            moves_w = self.m["mem"] == "single"
+            self._add("stall_weights" if moves_w else "stall_ctrl", stall - kv_part, 0, 0.0)
+            self._add("stall_kv", kv_part, 0, 0.0)
+            self.T += stall
             self.reps = regroup(self.reps, to_tp)
             self.tp = to_tp
         self.res.switches.append(dict(dir=d, at_s=round(t_start, 1), step=self.s, wall=round(wall, 2),
@@ -411,9 +448,11 @@ class Sim:
 
     def try_trigger(self, to_tp, anchor):
         """满足约束就切；否则暂停接纳、只解码，直到满足。"""
+        self.ctx = "drain_before_expand" if to_tp == 4 else "drain_before_shrink"
         while not self.feasible(to_tp):
             if not self.jump_to_next_event():
                 break
+        self.ctx = None
         self.do_switch(to_tp, anchor)
 
     # ---------------- 接纳
@@ -467,6 +506,7 @@ class Sim:
                 else:
                     stop_rid = self._exec_hooks()
             b = max(r.n for r in self.reps)          # 本步解码的 batch（新接纳的只做 prefill）
+            ndec = sum(r.n for r in self.reps)
             pf, any_admit, reason = self.admit_step(stop_rid)
             if reason == "anchor":
                 continue                     # 下一轮由 hooks 执行切换
@@ -479,7 +519,10 @@ class Sim:
                 if not self.jump_to_next_event():
                     break
                 continue
-            self.T += t_dec(b, self.tp) + max(t_pf(p, self.tp) for p in pf)
+            td, tp_ = t_dec(b, self.tp, max(r.used(self.s) for r in self.reps)), max(t_pf(p, self.tp) for p in pf)
+            self._add(self._decode_cat(), td, ndec)
+            self._add("prefill", tp_, len(self.just_admitted))
+            self.T += td + tp_
             for q in self.just_admitted:
                 q.t_first = self.T
             self._complete(self.s)
@@ -491,6 +534,9 @@ class Sim:
         self.res.plan = self.plan
         self.res.kv_blocked_long_steps = self.kvb
         self.res.reqs = self.queue
+        self.res.acct, self.res.tokc, self.res.occ = self.acct, self.tokc, self.occ
+        if abs(sum(self.acct.values()) - self.T) > 1e-6 * max(1.0, self.T):
+            raise RuntimeError(f"{self.name}: 时间分解之和 {sum(self.acct.values()):.3f} != 总时长 {self.T:.3f}")
         return self.res
 
     # 生成计划：扩容锚点 = 合格长段的第一条请求；缩容锚点 = 该段最后一条请求被接纳后、第一个满足条件的完成事件
@@ -543,8 +589,16 @@ class Sim:
         return None
 
 
-def run_all(reqs, *, b_max, methods, qualify_steps=200, shrink_mode="throttle"):
-    """先在固定 TP2 下判定哪些长段需要切换，再生成 WeaveTP 计划，最后各方法执行同一份计划。"""
+def cluster_gain(m: str) -> float:
+    """该方法切到 TP4 后全集群 KV 容量相对 TP2 的倍数。"""
+    mem = METHODS[m]["mem"]
+    return capacity(mem, 4) * (WORLD // 4) / max(1, capacity(mem, 2) * (WORLD // 2))
+
+
+def run_all(reqs, *, b_max, methods, qualify_steps=200, shrink_mode="throttle", plan_mode="shared"):
+    """先在固定 TP2 下判定哪些长段需要切换，再生成 WeaveTP 计划。
+    plan_mode="shared"：各方法执行 WeaveTP 的同一份计划（锚点可能对其他方法不合理，例如刚缩容又立刻扩容）。
+    plan_mode="own"：各方法按同一规则、用自己的容量与约束生成自己的计划；切到 TP4 不增加 KV 容量的方法不切换。"""
     base = Sim(reqs, "fixed_tp2", b_max=b_max).run()
     qualify = {seg for seg, st in base.kv_blocked_long_steps.items() if st >= qualify_steps}
     plan_res = Sim(reqs, "weavetp", b_max=b_max, make_plan=True, qualify=qualify, shrink_mode=shrink_mode).run()
@@ -553,9 +607,32 @@ def run_all(reqs, *, b_max, methods, qualify_steps=200, shrink_mode="throttle"):
     for m in methods:
         if m == "fixed_tp2":
             continue
-        if METHODS[m].get("own_plan"):
+        if METHODS[m].get("static"):
+            out[m] = Sim(reqs, m, b_max=b_max).run()
+        elif plan_mode == "own" and cluster_gain(m) <= 1.0:
+            out[m] = Sim(reqs, m, b_max=b_max, plan=[], shrink_mode=shrink_mode).run()
+        elif plan_mode == "own" or METHODS[m].get("own_plan"):
+            if m == "weavetp":
+                out[m] = plan_res
+                continue
             pr = Sim(reqs, m, b_max=b_max, make_plan=True, qualify=qualify, shrink_mode=shrink_mode).run()
             out[m] = pr
         else:
             out[m] = Sim(reqs, m, b_max=b_max, plan=plan, shrink_mode=shrink_mode).run()
     return out, plan, qualify
+
+
+def apply_calib(path: str) -> dict:
+    """读取 calibrate.py 生成的 calib.json，覆盖单步时间、prefill 与各方法切换模型。返回所用的校准内容。"""
+    import json
+    c = json.load(open(path))
+    if "step" in c:
+        STEP.update({k: v for k, v in c["step"].items() if k != "kv_coef"})
+        if "kv_coef" in c["step"]:
+            STEP["kv_coef"] = {int(k): v for k, v in c["step"]["kv_coef"].items()}
+    if "prefill" in c:
+        PREFILL.update({int(k): tuple(v) for k, v in c["prefill"].items()})
+    for m, fits in c.get("switch", {}).items():
+        if m in METHODS:
+            METHODS[m]["sw_fit"] = {d: tuple(v) for d, v in fits.items()}
+    return c
