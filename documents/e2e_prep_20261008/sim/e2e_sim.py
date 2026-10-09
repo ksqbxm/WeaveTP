@@ -116,6 +116,8 @@ class Req:
     seg: int
     admit: int = -1
     finish: int = -1
+    t_first: float = -1.0   # 首 token 时刻（prefill 那一步结束）
+    t_done: float = -1.0    # 最后一个 token 时刻
 
 
 def load_pools(lengths_csv: str, longout_csv: str):
@@ -333,6 +335,7 @@ class Sim:
         now = []
         for r in self.reps:
             for q in r.pop_done(s):
+                q.t_done = self.T
                 self.done.add(q.rid)
                 now.append(q.rid)
         if now:
@@ -365,6 +368,8 @@ class Sim:
     def do_switch(self, to_tp, anchor):
         d = f"{self.tp}->{to_tp}"
         t_start = self.T
+        ref = dict(running=sum(r.n for r in self.reps),
+                   kv_used_gb_per_card=round(max(r.used(self.s) for r in self.reps) * kv_per_card(self.tp) / 1e9, 3))
         moved = 0
         if to_tp == 4:
             for i in range(len(self.reps) // 2):
@@ -393,7 +398,7 @@ class Sim:
             self.reps = regroup(self.reps, to_tp)
             self.tp = to_tp
         self.res.switches.append(dict(dir=d, at_s=round(t_start, 1), step=self.s, wall=round(wall, 2),
-                                      t_kv=round(t_kv, 2), anchor=anchor))
+                                      t_kv=round(t_kv, 2), anchor=anchor, **ref))
 
     def try_trigger(self, to_tp, anchor):
         """满足约束就切；否则暂停接纳、只解码，直到满足。"""
@@ -406,6 +411,7 @@ class Sim:
     def admit_step(self, stop_rid):
         """本步接纳；返回 (每副本 prefill token 数, 是否接纳了请求, 队首阻塞原因)。"""
         pf = [0] * len(self.reps)
+        self.just_admitted = []
         any_admit = False
         reason = None
         cap = self.cap(self.tp)
@@ -435,6 +441,7 @@ class Sim:
             q.admit = self.s
             q.finish = self.s + q.out - 1
             self.reps[best].add(q)
+            self.just_admitted.append(q)
             pf[best] += q.inp
             self.ptr += 1
             any_admit = True
@@ -464,6 +471,8 @@ class Sim:
                     break
                 continue
             self.T += t_dec(b, self.tp) + max(t_pf(p, self.tp) for p in pf)
+            for q in self.just_admitted:
+                q.t_first = self.T
             self._complete(self.s)
             self.s += 1
         if self.ptr < len(self.queue) or len(self.done) != len(self.queue):
@@ -472,6 +481,7 @@ class Sim:
         self.res.steps = self.s
         self.res.plan = self.plan
         self.res.kv_blocked_long_steps = self.kvb
+        self.res.reqs = self.queue
         return self.res
 
     # 生成计划：扩容锚点 = 合格长段的第一条请求；缩容锚点 = 该段最后一条请求被接纳后、第一个满足条件的完成事件

@@ -1,0 +1,6 @@
+L=  600 切换 2 次 [('2->4', 'sky_t1_17k/001188', 218.8), ('4->2', 'sky_t1_17k/000610', 3749.5)]
+        WeaveTP 1.65 h，6 柱合计 10.8 h | llumnix:1.257 flying_view:1.131 restart:1.049 fixed_tp2:1.060 fixed_tp4:1.090  -> ./plan_L600.json
+L=  900 切换 2 次 [('2->4', 'sky_t1_17k/001188', 218.8), ('4->2', 'sky_t1_17k/001122', 5522.5)]
+        WeaveTP 2.44 h，6 柱合计 16.2 h | llumnix:1.293 flying_view:1.134 restart:1.037 fixed_tp2:1.071 fixed_tp4:1.073  -> ./plan_L900.json
+L= 1200 切换 2 次 [('2->4', 'sky_t1_17k/001188', 218.8), ('4->2', 'sky_t1_17k/002668', 7261.4)]
+        WeaveTP 2.83 h，6 柱合计 18.7 h | llumnix:1.309 flying_view:1.136 restart:1.035 fixed_tp2:1.061 fixed_tp4:1.059  -> ./plan_L1200.json
