@@ -73,7 +73,8 @@ def test_full_batch_aggregation_and_render(tmp_path):
         assert (tmp_path / filename).stat().st_size > 100
 
 
-@pytest.mark.parametrize("change", ["gap", "switches", "gate", "config", "missing", "limits", "nan"])
+@pytest.mark.parametrize("change", ["gap", "switches", "gate", "config", "scope", "missing_scope",
+                                    "missing", "limits", "nan"])
 def test_reject_invalid_results(tmp_path, change):
     data = result("ilp_gap1e-4", 1)
     if change == "gap":
@@ -84,6 +85,10 @@ def test_reject_invalid_results(tmp_path, change):
         data["source_route_stats"]["global_gate_accepted"] = False
     elif change == "config":
         data["source_search_run_config"]["seq_length"] = 128
+    elif change == "scope":
+        data["source_search_run_config"]["source_search_scope"] = "global"
+    elif change == "missing_scope":
+        del data["source_search_run_config"]["source_search_scope"]
     elif change == "missing":
         del data["source_route_stats"]["source_search"]["search_rss_delta_gib"]
     elif change == "limits":

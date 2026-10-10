@@ -29,7 +29,8 @@ FORMAL = dict(world_size=8, expert_parallel_size=2, model_preset="deepseek-v2-li
               logit_validation_mode="bf16-relative", logit_max_nrmse=0.4,
               logit_min_cosine=0.93, logit_min_top1_agreement=0.0,
               active_expert_phases=[[0, 1, 2, 3, 4, 5]])
-RUN_CONFIG = dict(seq_length=1024, max_position_embeddings=1024, micro_batch_size=1,
+RUN_CONFIG = dict(source_search_scope="cached_tp2_to_tp4",
+                  seq_length=1024, max_position_embeddings=1024, micro_batch_size=1,
                   prompt_tokens=8, max_overlap_steps=1, reroute_min_gain_pct=10.,
                   reroute_min_contention_gain_pct=0., reroute_min_global_gain_pct=5.,
                   reroute_penalty_us=20., reroute_min_bytes=1048576,

@@ -1583,6 +1583,8 @@ def run_live_benchmark() -> None:
     # wave isolate source-path selection; additional waves add online feedback.
     planner_kwargs = policy.planner_kwargs() if source_reroute_enabled else {}
     planner_kwargs["source_exclude_local"] = args.live_emulate_noncollocated_sources
+    import os
+
     from megatron.core.resharding.planner import _source_search_config, _source_search_memory
 
     source_search_config = _source_search_config()
@@ -1599,6 +1601,8 @@ def run_live_benchmark() -> None:
         dst_bundle,
         num_experts=args.num_experts,
         group=reshard_group,
+        source_search_config=source_search_config,
+        source_search_audit_path=os.environ.get("WEAVETP_SEARCH_AUDIT_PATH"),
         **planner_kwargs,
     )
     if source_search_config is not None:
@@ -2457,6 +2461,7 @@ def run_live_benchmark() -> None:
         result["plan_2_to_4_build_s"] = plan_2_to_4_build_s
         result["source_search_settings"] = source_search_config
         result["source_search_run_config"] = {
+            "source_search_scope": "cached_tp2_to_tp4",
             "seq_length": args.seq_length,
             "max_position_embeddings": args.max_position_embeddings,
             "micro_batch_size": args.micro_batch_size,
@@ -2474,7 +2479,8 @@ def run_live_benchmark() -> None:
             "profile_sha256": hashlib.sha256(Path(args.live_bandwidth_profile).read_bytes()).hexdigest()
             if args.live_bandwidth_profile else None,
             "code_sha256": {name: hashlib.sha256((REPO_ROOT / name).read_bytes()).hexdigest() for name in (
-                "megatron/core/resharding/planner.py", "examples/rl/benchmark_live_moe_tp.py")},
+                "megatron/core/resharding/planner.py", "megatron/core/resharding/plan_validation.py",
+                "examples/rl/benchmark_live_moe_tp.py")},
         }
     if args.live_kv_request_identity:
         result["kv_request_domains"] = kv_request_domains
@@ -2526,10 +2532,10 @@ def main() -> None:
         args.live_active_experts_tuple = args.live_active_expert_phases_tuple[0]
         run_live_benchmark()
     finally:
-        # torchrun terminates sibling ranks after the first uncaught error. Tear
-        # down every derived NCCL/Gloo group first so in-flight work is not left
-        # behind in the driver when that termination arrives.
-        if dist.is_available() and dist.is_initialized():
+        # On failure, let torchrun report the exception and terminate siblings.
+        # Collective teardown here can hide the original exception for minutes
+        # while other ranks are still waiting for this rank's plan.
+        if sys.exc_info()[0] is None and dist.is_available() and dist.is_initialized():
             dist.destroy_process_group()
 
 

@@ -17,12 +17,14 @@ import sys
 import types
 from dataclasses import replace
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import pytest
 import torch
 
 from megatron.core.resharding import planner as p
+from megatron.core.resharding.plan_validation import validate_reshard_plans
+from megatron.core.resharding.refit import BandwidthAwareRefitPolicy
 from megatron.core.resharding.utils import ParameterMetadata
 
 BASELINE = "7deac20feaf76ee4e6a0c53b2289271a903dd12c"
@@ -80,11 +82,12 @@ def reference(ref=BASELINE):
     )
     module = types.ModuleType("megatron.core.resharding._source_search_reference")
     module.__package__ = "megatron.core.resharding"
-    exec(compile(source, "frozen_planner.py", "exec"), module.__dict__)
+    with patch.dict(sys.modules, {module.__name__: module}):
+        exec(compile(source, "frozen_planner.py", "exec"), module.__dict__)
     return module
 
 
-def replay(data, module=p, algorithm=None, gap=0.0):
+def replay(data, module=p, algorithm=None, gap=0.0, budget=60.0):
     world = len(data["dst_params"])
     sources = [[] for _ in range(world)]
     for metadata in data["src_params"].values():
@@ -101,15 +104,15 @@ def replay(data, module=p, algorithm=None, gap=0.0):
         output[:] = all_plans[:1]
 
     env = {k: v for k, v in os.environ.items() if not k.startswith("WEAVETP_")}
+    kwargs = dict(data["kwargs"])
     if algorithm is not None:
-        env.update(WEAVETP_SOURCE_SEARCH=algorithm, WEAVETP_SEARCH_BUDGET_S="60",
-                   WEAVETP_ILP_MIP_REL_GAP=str(gap))
+        kwargs["source_search_config"] = {**config(algorithm, gap), "budget_s": budget}
     with patch.dict(os.environ, env, clear=True), \
             patch.object(module.dist, "get_rank", return_value=0), \
             patch.object(module.dist, "get_world_size", return_value=world), \
             patch.object(module.dist, "gather_object", side_effect=gather), \
             patch.object(module.dist, "scatter_object_list", side_effect=scatter):
-        module.build_centralized_reshard_plan(None, None, **data["kwargs"])
+        module.build_centralized_reshard_plan(None, None, **kwargs)
     return plans
 
 
@@ -168,6 +171,80 @@ def test_default_hash_and_stats_match_frozen_planner():
         assert stats == before.source_route_stats
 
 
+def test_planner_never_reads_search_environment(monkeypatch):
+    monkeypatch.setenv("WEAVETP_SOURCE_SEARCH", "dfs")
+    monkeypatch.setenv("WEAVETP_SEARCH_AUDIT_PATH", "must-not-be-created.pkl")
+    with patch.object(p, "_source_search_config", side_effect=AssertionError("implicit search")), \
+            patch.object(p, "_run_source_search", side_effect=AssertionError("implicit search")):
+        # replay normally clears the environment; inject at the builder boundary.
+        build = p.build_centralized_reshard_plan
+
+        def poisoned(*a, **kw):
+            with patch.dict(os.environ, WEAVETP_SOURCE_SEARCH="dfs",
+                            WEAVETP_SEARCH_AUDIT_PATH="must-not-be-created.pkl"):
+                return build(*a, **kw)
+
+        with patch.object(p, "build_centralized_reshard_plan", side_effect=poisoned):
+            result = replay(fixture())
+    assert "source_search" not in result[0].source_route_stats
+
+
+@pytest.mark.parametrize("with_reference", [False, True])
+def test_audit_serializes_actual_policy_matrices(tmp_path, with_reference):
+    data = fixture()
+    matrix = data["kwargs"]["source_bandwidth_gbps"]
+    policy = BandwidthAwareRefitPolicy(
+        matrix, reference_bandwidth_gbps=matrix if with_reference else None,
+    )
+    data["kwargs"] = policy.planner_kwargs()
+    # This was the real audit failure: pickle.dump left a truncated metadata file.
+    with pytest.raises(TypeError, match="mappingproxy"):
+        pickle.dumps(data)
+    path = tmp_path / "metadata.pkl"
+    data["kwargs"]["source_search_audit_path"] = str(path)
+    plans = replay(data, algorithm="greedy")
+    restored = pickle.loads(path.read_bytes())
+    assert restored["src_params"] == data["src_params"]
+    assert restored["dst_params"] == data["dst_params"]
+    assert type(restored["kwargs"]["source_bandwidth_gbps"]) is dict
+    assert restored["kwargs"]["source_reference_bandwidth_gbps"] == (matrix if with_reference else None)
+    assert fingerprint(replay(restored, algorithm="greedy")) == fingerprint(plans)
+    with pytest.raises(FileExistsError):
+        replay(data, algorithm="greedy")
+
+
+def test_failed_audit_serialization_does_not_leave_a_partial_file(tmp_path):
+    data = fixture()
+    path = tmp_path / "metadata.pkl"
+    data["kwargs"]["source_search_audit_path"] = str(path)
+    with patch.object(pickle, "dumps", side_effect=TypeError("serialization failed")), \
+            pytest.raises(TypeError, match="serialization failed"):
+        replay(data, algorithm="greedy")
+    assert not path.exists()
+
+
+@pytest.mark.parametrize("fails", [False, True])
+def test_benchmark_main_does_not_hide_exception_in_collective_cleanup(fails):
+    import test_live_defaults as defaults
+
+    ns = defaults.load(defaults.CURRENT, ["main"])
+    args = types.SimpleNamespace(live_active_experts="0", num_experts=2,
+                                 moe_router_topk=1, live_active_expert_phases="0")
+    run = Mock(side_effect=TypeError("audit failed") if fails else None)
+    dist = Mock()
+    ns.update(parse_and_validate_args=Mock(), add_live_args=Mock(), get_args=lambda: args,
+              initialize_megatron=Mock(), _parse_experts=Mock(return_value=(0,)),
+              _parse_expert_phases=Mock(return_value=((0,),)), run_live_benchmark=run,
+              dist=dist, sys=sys)
+    if fails:
+        with pytest.raises(TypeError, match="audit failed"):
+            ns["main"]()
+        dist.destroy_process_group.assert_not_called()
+    else:
+        ns["main"]()
+        dist.destroy_process_group.assert_called_once_with()
+
+
 def test_actual_coordinator_times_only_forward_plan_and_samples_greedy_endpoints():
     import test_live_defaults as defaults
     import test_live_storage_lifecycle as lifecycle
@@ -187,7 +264,7 @@ def test_actual_coordinator_times_only_forward_plan_and_samples_greedy_endpoints
             calls = []
 
             def planner(*a, **kw):
-                calls.append(True)
+                calls.append(kw)
                 for _ in range(2 if len(calls) == 1 else 50):
                     ns["time"].perf_counter()
                 plan = build(*a, **kw)
@@ -195,7 +272,16 @@ def test_actual_coordinator_times_only_forward_plan_and_samples_greedy_endpoints
                 return plan
 
             ns["build_centralized_reshard_plan"] = planner
+            swap = ns["swap_model_weights"]
+
+            def initial_sync(*a, **kw):
+                assert "source_search_config" not in kw
+                return swap(*a, **kw)
+
+            ns["swap_model_weights"] = initial_sync
             run()
+            assert calls[0]["source_search_config"] == config("greedy")
+            assert all("source_search_config" not in kw for kw in calls[1:])
 
         ns["run_live_benchmark"] = configured_run
         return ns
@@ -244,6 +330,7 @@ def test_solver_routes_and_global_gate(algorithm):
     stats = rejected[0].source_route_stats
     json.dumps(stats, allow_nan=False)
     assert not stats["global_gate_accepted"]
+    assert stats["source_search"]["plan_validation"]["remote_tasks"] > 0
     assert stats["source_search"]["gate_outcome"] in ("rejected", "no_change")
     assert stats["source_search"]["cached_plan_predicted_H_s"] == stats["source_search"]["predicted_default_H_s"]
 
@@ -359,12 +446,24 @@ def main():
     parser.add_argument("--baseline-ref", default=BASELINE)
     parser.add_argument("--items", type=int, default=10, choices=range(10, 21))
     parser.add_argument("--seed", type=int, default=2026)
+    parser.add_argument("--budget", type=float, default=60., help="Full-plan search budget per case")
     args = parser.parse_args()
+    if not math.isfinite(args.budget) or not 0 < args.budget <= 540:
+        parser.error("--budget must be in (0, 540]")
     with args.replay.open("rb") as handle:
         data = pickle.load(handle)
     old, current = replay(data, reference(args.baseline_ref)), replay(data)
     assert fingerprint(old) == fingerprint(current)
     assert [x.source_route_stats for x in old] == [x.source_route_stats for x in current]
+    validate_reshard_plans(dict(enumerate(current)), data["src_params"], data["dst_params"])
+    full_plans = {}
+    for algorithm, gap in [(a, 0.) for a in ALGORITHMS] + [("ilp", 1e-4)]:
+        plans = replay(data, algorithm=algorithm, gap=gap, budget=args.budget)
+        validate_reshard_plans(dict(enumerate(plans)), data["src_params"], data["dst_params"])
+        full_plans[f"{algorithm}_gap{gap}"] = dict(
+            plan_sha256=fingerprint(plans), **plans[0].source_route_stats["source_search"])
+        print(json.dumps(dict(full_plan_case=algorithm, gap=gap,
+                              evidence=full_plans[f"{algorithm}_gap{gap}"]), allow_nan=False), flush=True)
     full = instance(data)
     sampled = sorted(random.Random(args.seed).sample(range(len(full.inc)), min(args.items, len(full.inc))))
     fixed = [i for i in range(len(full.inc)) if i not in sampled]
@@ -378,7 +477,7 @@ def main():
     assert all(h <= small.makespan(small.default) + 1e-10 for h in results.values())
     assert all(math.isclose(results[a], results["dfs"], rel_tol=1e-9, abs_tol=1e-10)
                for a in ("dp", "dijkstra", "ilp"))
-    print(json.dumps(dict(plan_sha256=fingerprint(current), sampled_indices=sampled,
+    print(json.dumps(dict(plan_sha256=fingerprint(current), full_plan_checks=full_plans, sampled_indices=sampled,
                          default_H_s=small.makespan(small.default), optimal_H_s=results), indent=2))
 
 

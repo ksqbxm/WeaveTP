@@ -14,6 +14,7 @@ from typing import Mapping
 import torch
 import torch.distributed as dist
 
+from .plan_validation import validate_reshard_plans, validate_source_metadata
 from .utils import (
     ParameterMetadata,
     ReshardPlan,
@@ -875,6 +876,8 @@ def build_centralized_reshard_plan(
     source_reroute_min_global_gain_pct: float = 10.0,
     source_reroute_min_bytes: int = 1 << 20,
     source_exclude_local: bool = False,
+    source_search_config: Mapping | None = None,
+    source_search_audit_path: str | None = None,
 ) -> ReshardPlan:
     """
     Centralized planning: Rank 0 builds complete plan for all ranks, then scatters.
@@ -888,8 +891,15 @@ def build_centralized_reshard_plan(
     membership (tensor_parallel_group_ranks, expert_parallel_group_ranks, etc.).
     This metadata is sufficient for rank 0 to build correct transfer plans without
     requiring dummy models.
+
+    source_search_config explicitly opts this call into the source-search
+    experiment. An omitted config uses the original greedy/default path,
+    regardless of environment variables. source_search_audit_path dumps only
+    this call's metadata; audit timings are not benchmark results.
     """
-    search_config = _source_search_config()
+    # Only the measured forward-plan caller opts in. Refit/reverse/online builds
+    # must not inherit a search algorithm from the process environment.
+    search_config = source_search_config
     use_search = (search_config is not None and search_config["algorithm"] != "greedy"
                   and source_bandwidth_gbps is not None)
     record_search = search_config is not None and source_bandwidth_gbps is not None
@@ -955,6 +965,10 @@ def build_centralized_reshard_plan(
 
     # Build the plan on global rank 0 and broadcast to all ranks
     if my_global_rank == 0:
+        source_by_rank = {
+            name: {m.owner_rank: m for m in entries}
+            for name, entries in src_param_metadata.items()
+        }
         plans_for_all_ranks = {r: ReshardPlan([], []) for r in range(world_size)}
         baseline_plans_for_all_ranks = (
             {r: ReshardPlan([], []) for r in range(world_size)}
@@ -988,18 +1002,20 @@ def build_centralized_reshard_plan(
         accepted_default_bytes_by_pair: dict[tuple[int, int], int] = {}
         accepted_candidate_bytes_by_pair: dict[tuple[int, int], int] = {}
 
-        audit_path = os.environ.get("WEAVETP_SEARCH_AUDIT_PATH")
+        audit_path = source_search_audit_path
         if audit_path and source_bandwidth_gbps is not None:
             import pickle
             from pathlib import Path
 
             path = Path(audit_path)
             path.parent.mkdir(parents=True, exist_ok=True)
-            with path.open("xb") as handle:
-                pickle.dump(dict(
+            # Policy matrices are MappingProxyType, which pickle cannot encode.
+            # Serialize completely before creating the audit file.
+            payload = pickle.dumps(dict(
                     src_params=src_param_metadata, dst_params=dst_param_metadata_by_rank,
-                    kwargs=dict(source_bandwidth_gbps=source_bandwidth_gbps,
-                                source_reference_bandwidth_gbps=source_reference_bandwidth_gbps,
+                    kwargs=dict(source_bandwidth_gbps=dict(source_bandwidth_gbps),
+                                source_reference_bandwidth_gbps=(dict(source_reference_bandwidth_gbps)
+                                    if source_reference_bandwidth_gbps is not None else None),
                                 source_latency_us=source_latency_us,
                                 source_reroute_penalty_us=source_reroute_penalty_us,
                                 source_reroute_min_gain_pct=source_reroute_min_gain_pct,
@@ -1008,7 +1024,10 @@ def build_centralized_reshard_plan(
                                 source_reroute_min_bytes=source_reroute_min_bytes,
                                 source_exclude_local=source_exclude_local,
                                 prefer_local_source=prefer_local_source),
-                ), handle, protocol=pickle.HIGHEST_PROTOCOL)
+                ), protocol=pickle.HIGHEST_PROTOCOL)
+            with path.open("xb") as handle:
+                handle.write(payload)
+            del payload
         search_override, search_stats = {}, None
         if use_search:
             search_override, search_stats = _run_source_search(
@@ -1286,6 +1305,9 @@ def build_centralized_reshard_plan(
                             baseline_destination_load_s.get(dst_rank, 0.0) + seconds
                         )
                     for src_rank, src_slice, dst_slice in default_sources:
+                        sender_metadata = source_by_rank[resolved_name][src_rank]
+                        if use_search:
+                            validate_source_metadata(default_src_metadata, sender_metadata, src_rank)
                         baseline_task_id = baseline_next_task_id
                         baseline_next_task_id += 1
                         baseline_plans_for_all_ranks[dst_rank].recv_ops.append(
@@ -1300,7 +1322,7 @@ def build_centralized_reshard_plan(
                         )
                         baseline_plans_for_all_ranks[src_rank].send_ops.append(
                             TransferOp(
-                                param_name=default_src_metadata.name,
+                                param_name=sender_metadata.name,
                                 peer_rank=dst_rank,
                                 is_send=True,
                                 my_slice=src_slice,
@@ -1309,6 +1331,9 @@ def build_centralized_reshard_plan(
                             )
                         )
                 for src_rank, src_slice, dst_slice in sources:
+                    sender_metadata = source_by_rank[resolved_name][src_rank]
+                    if use_search:
+                        validate_source_metadata(src_metadata, sender_metadata, src_rank)
                     task_id = next_task_id
                     next_task_id += 1
 
@@ -1328,7 +1353,7 @@ def build_centralized_reshard_plan(
                     )
                     plans_for_all_ranks[src_rank].send_ops.append(
                         TransferOp(
-                            param_name=src_metadata.name,
+                            param_name=sender_metadata.name,
                             peer_rank=dst_rank,
                             is_send=True,
                             my_slice=src_slice,
@@ -1338,6 +1363,16 @@ def build_centralized_reshard_plan(
                     )
         if record_search:
             search_stats["assignment_loop_s"] = time.perf_counter() - assignment_start
+        if use_search:
+            # Validate the forced candidate before Gate can replace it with baseline.
+            validation_start = time.perf_counter()
+            search_stats["plan_validation"] = validate_reshard_plans(
+                plans_for_all_ranks, src_param_metadata, dst_param_metadata_by_rank
+            )
+            validate_reshard_plans(
+                baseline_plans_for_all_ranks, src_param_metadata, dst_param_metadata_by_rank
+            )
+            search_stats["plan_validation_s"] = time.perf_counter() - validation_start
         if source_bandwidth_gbps is not None:
             projected_critical_s = max(
                 [0.0]
