@@ -8,6 +8,42 @@ import socket
 from uuid import UUID
 
 
+def observe_rank_hosts(dist, control_group):
+    """Read actual placement after switching without assuming an 8+8 topology."""
+    rows = [None] * dist.get_world_size(control_group)
+    dist.all_gather_object(rows, (dist.get_rank(), socket.gethostname()), group=control_group)
+    if sorted(rank for rank, _host in rows) != list(range(len(rows))):
+        raise ValueError("missing or duplicate rank hostname observations")
+    return dict(rows)
+
+
+def dp_sweep_metrics(record, peaks):
+    """Base-only transport; receiver bytes cover executed Base plus KV Delta.
+
+    Peaks span the existing switch timer, including post-cutover validation.
+    This function runs after all switches and never inspects tensor contents.
+    """
+    traffic = record["plan_observation"]["adopted"]["traffic"]
+    total, kinds = traffic["total"], traffic["by_kind"]
+    weight_bytes = kinds["weight"]["remote_bytes"]
+    prefix_bytes = kinds["kv_prefix"]["remote_bytes"]
+    delta_bytes = kinds["kv_delta"]["remote_bytes"]
+    return {
+        "transport_s": math.fsum(w["transport_s"] for w in record["base"]["wave_records"]),
+        "base_remote_bytes": weight_bytes + prefix_bytes,
+        "delta_remote_bytes": delta_bytes,
+        "weight_bytes": weight_bytes,
+        "kv_bytes": prefix_bytes + delta_bytes,
+        "remote_bytes": total["remote_bytes"],
+        "cross_node_bytes": total["cross_node_bytes"],
+        "max_send_bytes_per_rank": total["max_remote_send"]["bytes"],
+        "max_recv_bytes_per_rank": total["max_remote_recv"]["bytes"],
+        "local_copy_bytes": total["local_copy_bytes"],
+        "peak_mem_bytes": max(p[0] for p in peaks),
+        "peak_reserved_bytes": max(p[1] for p in peaks),
+    }
+
+
 def validate_parallel_groups(rows):
     """Validate measured membership, including reciprocal reports from every rank."""
     if len(rows) != 16 or {row["rank"] for row in rows} != set(range(16)):

@@ -28,7 +28,8 @@ from tools.resharding.standby_weights import (
 
 
 def run_coordinator(tree, *, release=False, bitwise=False, identity=False, repeat=False, fault=False, check_polls=1,
-                    peer_check_polls=0, peer_weight_valid=True, capacity=128):
+                    peer_check_polls=0, peer_weight_valid=True, capacity=128,
+                    live_overrides=None, namespace_overrides=None):
     names = ["run_live_benchmark", "add_live_args", "StaticKVCacheModule", "LiveStateBundle",
              "_run_async_waves", "_parse_rank_phases", "_pressure_ranks_for_switch",
              "_active_experts_for_switch", "_set_active_experts", "_poison_kv", "_percentile",
@@ -181,6 +182,8 @@ def run_coordinator(tree, *, release=False, bitwise=False, identity=False, repea
         audit_weight_checksums=audit_weight_checksums,
         release_standby=release_hook, cuda_memory=lambda: {"allocated": 0, "reserved": 0},
         _write_results=lambda _, result: written.append(result), json=SimpleNamespace(dumps=lambda *_a, **_kw: ""))
+    vars(args).update(live_overrides or {})
+    ns.update(namespace_overrides or {})
     with patch("torch.cuda.Stream", return_value=Mock()), patch("torch.cuda.Event", Event), \
             patch("torch.cuda.stream", return_value=nullcontext()), patch("torch.cuda.current_stream", return_value=Mock()), \
             patch("tools.resharding.standby_weights.cuda_memory", return_value={"allocated": 0, "reserved": 0}), \

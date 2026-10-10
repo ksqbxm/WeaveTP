@@ -192,7 +192,13 @@ class LiveStateBundle(torch.nn.Module):
 
 
 def add_live_args(parser):
+    from argparse import SUPPRESS
+
     group = parser.add_argument_group(title="live MoE TP benchmark")
+    group.add_argument(
+        "--live-dp-sweep-metrics", action="store_true", default=SUPPRESS,
+        help="Record DP sweep traffic and memory peaks after switching (opt-in).",
+    )
     group.add_argument("--live-weight-bitwise-audit", action="store_true",
                        help="Audit migrated raw weight bits against startup GPU checksums (requires release).")
     group.add_argument(
@@ -1303,6 +1309,7 @@ def _write_results(args, result: dict[str, object]) -> None:
 
 def run_live_benchmark() -> None:
     args = get_args()
+    dp_sweep_metrics = getattr(args, "live_dp_sweep_metrics", False)
     rank = dist.get_rank()
     world_size = dist.get_world_size()
     _validate_model_preset(args)
@@ -1832,6 +1839,8 @@ def run_live_benchmark() -> None:
             foreground_tpot_ms[(dst_tp, active_experts, pressure_ranks)] = (
                 phase_dst_tpot_ms
             )
+        if dp_sweep_metrics:
+            torch.cuda.reset_peak_memory_stats()
         switch_start = time.perf_counter()
         replan_s = 0.0
         replan_wait_s = 0.0
@@ -2235,6 +2244,9 @@ def run_live_benchmark() -> None:
             if args.live_weight_bitwise_audit:
                 local_residency["switches"][-1]["weight_bitwise_audit_s"] = weight_bitwise_audit_s
         switch_wall_s = _all_max(time.perf_counter() - switch_start, control_group)
+        if dp_sweep_metrics:
+            peak_mem_bytes = int(torch.cuda.max_memory_allocated())
+            peak_reserved_bytes = int(torch.cuda.max_memory_reserved())
         record = {
             "index": switch_index,
             "direction": direction,
@@ -2280,7 +2292,10 @@ def run_live_benchmark() -> None:
             ),
         }
         records.append(record)
-        if parallel_groups is not None:
+        if dp_sweep_metrics:
+            record["peak_mem_bytes"] = peak_mem_bytes
+            record["peak_reserved_bytes"] = peak_reserved_bytes
+        if parallel_groups is not None or dp_sweep_metrics:
             # Save existing immutable plan references only, after switch_wall_s.
             # All metadata scans and communication happen after the final switch.
             observation_inputs.append({
@@ -2320,7 +2335,7 @@ def run_live_benchmark() -> None:
         copy_service_by_rank, local_copy_service_stats, group=control_group
     )
 
-    if parallel_groups is not None:
+    if parallel_groups is not None or dp_sweep_metrics:
         local_observations = [
             observations.local_switch_observation(
                 **inputs, rank=rank, restrict_sequence=restrict_plan_sequence,
@@ -2331,11 +2346,22 @@ def run_live_benchmark() -> None:
         ]
         observations_by_rank = [None] * world_size
         dist.all_gather_object(observations_by_rank, local_observations, group=control_group)
-        rank_hosts = {row["rank"]: row["hostname"] for row in parallel_groups}
+        rank_hosts = (
+            {row["rank"]: row["hostname"] for row in parallel_groups}
+            if parallel_groups is not None else observations.observe_rank_hosts(dist, control_group)
+        )
         for index, record in enumerate(records):
             record["plan_observation"] = observations.merge_switch_observations(
                 [rows[index] for rows in observations_by_rank], rank_hosts,
             )
+        if dp_sweep_metrics:
+            local_peaks = [(r["peak_mem_bytes"], r["peak_reserved_bytes"]) for r in records]
+            peaks_by_rank = [None] * world_size
+            dist.all_gather_object(peaks_by_rank, local_peaks, group=control_group)
+            for index, record in enumerate(records):
+                record.update(observations.dp_sweep_metrics(
+                    record, [peaks[index] for peaks in peaks_by_rank],
+                ))
 
     result = {
         "benchmark": "live-moe-tp2-tp4",

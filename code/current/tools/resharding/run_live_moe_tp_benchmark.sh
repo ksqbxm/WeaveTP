@@ -18,7 +18,11 @@ if ! [[ "$NPROC_PER_NODE" =~ ^[1-9][0-9]*$ && "$NNODES" =~ ^[1-9][0-9]*$ &&
     echo "Invalid worker count, node rank, or master port" >&2
     exit 2
 fi
-WORLD_SIZE=$((NPROC_PER_NODE * NNODES))
+WORLD_SIZE=${WORLD_SIZE_OVERRIDE:-$((NPROC_PER_NODE * NNODES))}
+if ! [[ "$WORLD_SIZE" =~ ^[1-9][0-9]*$ ]]; then
+    echo "WORLD_SIZE_OVERRIDE must be a positive integer" >&2
+    exit 2
+fi
 DIST_ARGS=(--standalone)
 if (( NNODES > 1 )); then
     DIST_ARGS=(--nnodes="$NNODES" --node_rank="$NODE_RANK"
@@ -199,6 +203,9 @@ else
 fi
 
 LIVE_FEATURE_ARGS=()
+if [[ "${DP_SWEEP_METRICS:-0}" == "1" ]]; then
+    LIVE_FEATURE_ARGS+=(--live-dp-sweep-metrics)
+fi
 if [[ "${WEIGHT_BITWISE_AUDIT:-0}" == "1" ]]; then
     if [[ "${RELEASE_STANDBY_WEIGHTS:-0}" != 1 ]]; then
         echo "Weight bitwise audit requires standby weight release" >&2
