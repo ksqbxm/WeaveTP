@@ -1,9 +1,14 @@
 # Copyright (c) 2024, NVIDIA CORPORATION. All rights reserved.
 from __future__ import annotations
 
+import heapq
 import logging
 import math
+import os
 import statistics
+import sys
+import time
+from dataclasses import dataclass, field
 from typing import Mapping
 
 import torch
@@ -21,6 +26,428 @@ from .utils import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _source_search_config():
+    algorithm = os.environ.get("WEAVETP_SOURCE_SEARCH")
+    if algorithm is None:
+        return None
+    if algorithm not in {"greedy", "ls", "heap", "dp", "dfs", "dijkstra", "ilp"}:
+        raise ValueError(f"Unknown WEAVETP_SOURCE_SEARCH: {algorithm!r}")
+    budget = float(os.environ.get("WEAVETP_SEARCH_BUDGET_S", "300"))
+    memory = float(os.environ.get("WEAVETP_SEARCH_MEM_GIB", "8"))
+    gap = float(os.environ.get("WEAVETP_ILP_MIP_REL_GAP", "0"))
+    if not math.isfinite(budget) or not 0 < budget <= 540:
+        raise ValueError("WEAVETP_SEARCH_BUDGET_S must be in (0, 540]")
+    if not math.isfinite(memory) or memory <= 0:
+        raise ValueError("WEAVETP_SEARCH_MEM_GIB must be positive and finite")
+    if gap not in (0.0, 1.0e-4):
+        raise ValueError("WEAVETP_ILP_MIP_REL_GAP must be 0 or 1e-4")
+    return dict(algorithm=algorithm, budget_s=budget, memory_gib=memory, mip_rel_gap=gap)
+
+
+def _source_search_memory():
+    """Current RSS for limits; the process high water is diagnostic only."""
+    import psutil
+
+    info = psutil.Process().memory_info()
+    peak = getattr(info, "peak_wset", None)
+    if peak is None:
+        import resource
+
+        peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+        peak *= 1 if sys.platform == "darwin" else 1024
+    return info.rss / (1 << 30), peak / (1 << 30)
+
+
+class _SourceSearchStopped(Exception):
+    def __init__(self, status):
+        self.status = status
+
+
+class _SourceSearchLimits:
+    def __init__(self, config):
+        self.started = time.perf_counter()
+        self.deadline = self.started + config["budget_s"]
+        self.timed = config["algorithm"] not in ("greedy", "ls")
+        self.memory_gib = config["memory_gib"]
+        self.rss_start, self.peak_rss = _source_search_memory()
+        self.rss_max = self.rss_start
+        self.steps = 0
+        self.best = None
+        self.best_h = math.inf
+        self.details = {}
+
+    def check(self, force=False, enforce=True):
+        self.steps += 1
+        if not force and self.steps % 4096:
+            return
+        rss, peak = _source_search_memory()
+        self.rss_max = max(self.rss_max, rss)
+        self.peak_rss = max(self.peak_rss, peak)
+        if not enforce:
+            return
+        if self.rss_max - self.rss_start >= self.memory_gib:
+            raise _SourceSearchStopped("memory")
+        if self.timed and time.perf_counter() >= self.deadline:
+            raise _SourceSearchStopped("budget")
+
+    def consider(self, inst, choice):
+        h = inst.makespan(choice)
+        if h < self.best_h:
+            self.best, self.best_h = list(choice), h
+
+
+@dataclass
+class _SourceSearchInstance:
+    base: list[float]
+    inc: list[list[tuple[tuple[int, float], ...]]]
+    default: list[int]
+    keys: list[tuple[int, str]] = field(default_factory=list)
+    candidates: list[list[ParameterMetadata]] = field(default_factory=list)
+
+    def loads(self, choice):
+        loads = list(self.base)
+        for i, a in enumerate(choice):
+            for r, seconds in self.inc[i][a]:
+                loads[r] += seconds
+        return loads
+
+    def makespan(self, choice):
+        return max(self.loads(choice), default=0.0)
+
+
+def _build_source_search_instance(src_params, dst_params, bandwidth, latency, penalty,
+                                  min_bytes, exclude_local, limits):
+    resources, base, increments, defaults, keys, candidates = {}, [], [], [], [], []
+
+    def increment(name, metadata, dst, rank, extra_latency):
+        values = {}
+        for (sender, receiver), seconds in _source_metadata_transfer_seconds(
+            name, metadata, dst, rank, bandwidth, latency + extra_latency
+        ).items():
+            for key in (("link", sender, receiver), ("source", sender), ("destination", receiver)):
+                if key not in resources:
+                    resources[key] = len(base)
+                    base.append(0.0)
+                r = resources[key]
+                values[r] = values.get(r, 0.0) + seconds
+        return tuple(sorted(values.items()))
+
+    for rank, params in dst_params.items():
+        for name, dst in params.items():
+            limits.check()
+            source = src_params.get(name)
+            if not source:
+                raise RuntimeError(f"Destination parameter {name!r} on rank {rank} not found")
+            if exclude_local:
+                nonlocal_source = [m for m in source if all(
+                    s != rank for s, _, _ in _determine_source_ranks_for_dst_param(name, m, dst, rank)
+                )]
+                source = nonlocal_source or source
+            default = select_src_metadata_balanced(source, dst, rank, prefer_local_source=True)
+            # Match select_src_metadata_balanced's EP filter before deduplicating routes.
+            ep = dst.expert_parallel_group_ranks
+            source_ep = source[0].expert_parallel_group_ranks
+            if ep is not None and source_ep and len(ep) == len(source_ep):
+                local = ep.index(rank)
+                source = [m for m in source if m.expert_parallel_group_ranks
+                          and m.expert_parallel_group_ranks.index(m.owner_rank) == local]
+            routes = {}
+            for m in sorted(source, key=lambda m: m.owner_rank):
+                limits.check()
+                ranks = tuple(s for s, _, _ in _determine_source_ranks_for_dst_param(name, m, dst, rank))
+                routes.setdefault(ranks, m)
+            transfers = _determine_source_ranks_for_dst_param(name, default, dst, rank)
+            default_ranks = tuple(s for s, _, _ in transfers)
+            routes[default_ranks] = default
+            size = sum(_slice_numel(tuple(dst.shape), sl) * dst.element_size for _, _, sl in transfers)
+            if len(routes) == 1 or size < min_bytes:
+                for r, seconds in increment(name, default, dst, rank, 0.0):
+                    base[r] += seconds
+                continue
+            choices = sorted(routes.values(), key=lambda m: m.owner_rank)
+            default_index = choices.index(default)
+            increments.append([increment(name, m, dst, rank, 0.0 if a == default_index else penalty)
+                               for a, m in enumerate(choices)])
+            defaults.append(default_index)
+            keys.append((rank, name))
+            candidates.append(choices)
+    limits.check(force=True)
+    return _SourceSearchInstance(base, increments, defaults, keys, candidates)
+
+
+def _search_child(loads, inc):
+    child = list(loads)
+    for r, seconds in inc:
+        child[r] += seconds
+    return tuple(child)
+
+
+def _search_path(path):
+    choices = []
+    while path is not None:
+        a, path = path
+        choices.append(a)
+    return choices[::-1]
+
+
+def _search_local_cost(loads, inc):
+    return max((loads[r] + seconds for r, seconds in inc), default=0.0)
+
+
+def _search_ls(inst, limits):
+    loads, choice = list(inst.base), []
+    try:
+        for options in inst.inc:
+            a = min(range(len(options)), key=lambda a: (_search_local_cost(loads, options[a]), a))
+            choice.append(a)
+            loads = list(_search_child(loads, options[a]))
+            limits.check()
+        limits.consider(inst, choice)
+        for _ in range(50):
+            changed = False
+            for i, options in enumerate(inst.inc):
+                for a, inc in enumerate(options):
+                    limits.check()
+                    if a == choice[i]:
+                        continue
+                    old_h = max(loads, default=0.0)
+                    old_inc = options[choice[i]]
+                    saved = {r: loads[r] for r, _ in old_inc + inc}
+                    for r, seconds in old_inc:
+                        loads[r] -= seconds
+                    for r, seconds in inc:
+                        loads[r] += seconds
+                    if max(loads, default=0.0) < old_h:
+                        choice[i] = a
+                        changed = True
+                    else:
+                        for r, value in saved.items():
+                            loads[r] = value
+            if not changed:
+                break
+    finally:
+        if len(choice) == len(inst.inc):
+            limits.consider(inst, choice)
+        limits.check(force=True, enforce=sys.exc_info()[0] is None)
+
+
+def _search_heap(inst, limits):
+    loads, versions = list(inst.base), [0] * len(inst.base)
+    touched = [sorted({r for inc in options for r, _ in inc}) for options in inst.inc]
+    heap, choice = [], list(inst.default)
+
+    def entry(i):
+        options = inst.inc[i]
+        a = min(range(len(options)), key=lambda a: (_search_local_cost(loads, options[a]), a))
+        return (_search_local_cost(loads, options[a]), i, a, tuple(versions[r] for r in touched[i]))
+
+    try:
+        for i in range(len(inst.inc)):
+            heapq.heappush(heap, entry(i))
+            limits.check()
+        while heap:
+            _, i, a, stamp = heapq.heappop(heap)
+            if stamp != tuple(versions[r] for r in touched[i]):
+                heapq.heappush(heap, entry(i))
+            else:
+                choice[i] = a
+                for r, seconds in inst.inc[i][a]:
+                    loads[r] += seconds
+                    versions[r] += 1
+                if not heap:
+                    limits.consider(inst, choice)
+            limits.check()
+    finally:
+        limits.check(force=True, enforce=sys.exc_info()[0] is None)
+
+
+def _search_dfs(inst, limits):
+    stack = [(0, tuple(inst.base), None)]
+    try:
+        while stack:
+            depth, loads, path = stack.pop()
+            limits.check()
+            if max(loads, default=0.0) >= limits.best_h:
+                continue
+            if depth == len(inst.inc):
+                limits.consider(inst, _search_path(path))
+                continue
+            children = []
+            for a, inc in enumerate(inst.inc[depth]):
+                child = _search_child(loads, inc)
+                h = max(child, default=0.0)
+                if h < limits.best_h:
+                    children.append((h, a, child))
+                limits.check()
+            for _, a, child in sorted(children, reverse=True):
+                stack.append((depth + 1, child, (a, path)))
+    finally:
+        limits.check(force=True, enforce=sys.exc_info()[0] is None)
+
+
+def _search_dp(inst, limits):
+    states = {tuple(inst.base): None}
+    try:
+        for depth, options in enumerate(inst.inc):
+            following = {}
+            for loads, path in states.items():
+                for a, inc in enumerate(options):
+                    child = _search_child(loads, inc)
+                    if max(child, default=0.0) < limits.best_h:
+                        parent = (a, path)
+                        if depth + 1 == len(inst.inc):
+                            limits.consider(inst, _search_path(parent))
+                        else:
+                            following.setdefault(child, parent)
+                    limits.check()
+            states = following
+            if not states:
+                break
+    finally:
+        limits.check(force=True, enforce=sys.exc_info()[0] is None)
+
+
+def _search_dijkstra(inst, limits):
+    start = tuple(inst.base)
+    heap, seen, serial = [(max(start, default=0.0), 0, 0, start, None)], {(0, start)}, 0
+    try:
+        while heap:
+            _, _, depth, loads, path = heapq.heappop(heap)
+            if depth == len(inst.inc):
+                limits.consider(inst, _search_path(path))
+                return
+            for a, inc in enumerate(inst.inc[depth]):
+                child = _search_child(loads, inc)
+                key = (depth + 1, child)
+                if key not in seen:
+                    seen.add(key)
+                    parent = (a, path)
+                    serial += 1
+                    heapq.heappush(heap, (max(child, default=0.0), serial, depth + 1, child, parent))
+                    if depth + 1 == len(inst.inc) and max(child, default=0.0) < limits.best_h:
+                        limits.consider(inst, _search_path(parent))
+                limits.check()
+    finally:
+        limits.check(force=True, enforce=sys.exc_info()[0] is None)
+
+
+def _search_ilp(inst, limits, gap):
+    if not inst.inc:
+        limits.check(force=True)
+        return
+    import numpy as np
+    from scipy.optimize import Bounds, LinearConstraint, milp
+    from scipy.sparse import coo_matrix
+
+    try:
+        nx = sum(map(len, inst.inc))
+        nres, nitems = len(inst.base), len(inst.inc)
+        rows, cols, values = [], [], []
+        j = 0
+        for i, options in enumerate(inst.inc):
+            for inc in options:
+                for r, seconds in inc:
+                    rows.append(r)
+                    cols.append(j)
+                    values.append(seconds)
+                rows.append(nres + i)
+                cols.append(j)
+                values.append(1.0)
+                j += 1
+                limits.check()
+        for r in range(nres):
+            rows.append(r)
+            cols.append(nx)
+            values.append(-1.0)
+        matrix = coo_matrix((values, (rows, cols)), shape=(nres + nitems, nx + 1)).tocsc()
+        upper = np.r_[-np.asarray(inst.base), np.ones(nitems)]
+        lower = np.r_[np.full(nres, -np.inf), np.ones(nitems)]
+        limits.check(force=True)
+        remaining = limits.deadline - time.perf_counter()
+        if remaining <= 0:
+            raise _SourceSearchStopped("budget")
+        result = milp(
+            np.r_[np.zeros(nx), 1.0], integrality=np.r_[np.ones(nx), 0],
+            bounds=Bounds(np.zeros(nx + 1), np.r_[np.ones(nx), np.inf]),
+            constraints=LinearConstraint(matrix, lower, upper),
+            options={"time_limit": remaining, "mip_rel_gap": gap, "disp": False},
+        )
+        limits.details.update(ilp_status=int(result.status), ilp_message=str(result.message),
+                              mip_gap=getattr(result, "mip_gap", None),
+                              mip_dual_bound=getattr(result, "mip_dual_bound", None))
+        if result.status not in (0, 1):
+            raise RuntimeError(f"MILP failed: {result.message}")
+        if result.x is not None:
+            x = np.asarray(result.x)
+            binary = x[:nx]
+            if (not np.all(np.isfinite(x)) or np.any(binary < -1e-6)
+                    or np.any(binary > 1 + 1e-6)
+                    or np.any(np.abs(binary - np.rint(binary)) > 1e-6)):
+                raise RuntimeError("MILP returned a non-integral incumbent")
+            choice, offset = [], 0
+            for options in inst.inc:
+                block = binary[offset:offset + len(options)]
+                if abs(float(block.sum()) - 1.0) > 1e-6:
+                    raise RuntimeError("MILP incumbent violates one-choice constraint")
+                choice.append(int(block.argmax()))
+                offset += len(options)
+            if inst.makespan(choice) > float(x[-1]) + 1e-6 * max(1.0, abs(float(x[-1]))):
+                raise RuntimeError("MILP incumbent violates resource constraints")
+            limits.consider(inst, choice)
+        elif result.status == 0:
+            raise RuntimeError("MILP reported success without an incumbent")
+        if result.status == 1:
+            raise _SourceSearchStopped("budget")
+    finally:
+        limits.check(force=True, enforce=sys.exc_info()[0] is None)
+
+
+def _run_source_search(src_params, dst_params, config, bandwidth, latency, penalty,
+                       min_bytes, exclude_local):
+    limits = _SourceSearchLimits(config)
+    inst, solver_start, solver_s, status = None, None, 0.0, "complete"
+    try:
+        inst = _build_source_search_instance(src_params, dst_params, bandwidth, latency,
+                                            penalty, min_bytes, exclude_local, limits)
+        limits.best = list(inst.default)
+        limits.best_h = inst.makespan(inst.default)
+        solver_start = time.perf_counter()
+        if config["algorithm"] == "ilp":
+            _search_ilp(inst, limits, config["mip_rel_gap"])
+        else:
+            solvers = dict(ls=_search_ls, heap=_search_heap, dp=_search_dp,
+                           dfs=_search_dfs, dijkstra=_search_dijkstra)
+            solvers[config["algorithm"]](inst, limits)
+    except _SourceSearchStopped as stopped:
+        status = stopped.status
+    finally:
+        if solver_start is not None:
+            solver_s = time.perf_counter() - solver_start
+    override = {}
+    if inst is not None:
+        for i, a in enumerate(limits.best):
+            if a != inst.default[i]:
+                override[inst.keys[i]] = inst.candidates[i][a]
+    try:
+        limits.check(force=True)
+    except _SourceSearchStopped as stopped:
+        if status == "complete":
+            status = stopped.status
+    stats = dict(
+        algorithm=config["algorithm"], prepass_s=time.perf_counter() - limits.started,
+        solver_s=solver_s, status=status, budget_s=config["budget_s"],
+        memory_limit_gib=config["memory_gib"],
+        decision_items=len(inst.inc) if inst is not None else None,
+        log10_search_space=sum(math.log10(len(row)) for row in inst.inc) if inst is not None else None,
+        overridden_entries=len(override), search_rss_delta_gib=limits.rss_max - limits.rss_start,
+        rss_start_gib=limits.rss_start, peak_rss_gib=limits.peak_rss,
+        rss_measurement_scope="prepass_and_solver_checkpoints",
+        mip_rel_gap=config["mip_rel_gap"] if config["algorithm"] == "ilp" else None,
+        **limits.details,
+    )
+    return override, stats
 
 
 def _slice_numel(shape: tuple[int, ...], index: tuple[slice, ...]) -> int:
@@ -462,6 +889,11 @@ def build_centralized_reshard_plan(
     This metadata is sufficient for rank 0 to build correct transfer plans without
     requiring dummy models.
     """
+    search_config = _source_search_config()
+    use_search = (search_config is not None and search_config["algorithm"] != "greedy"
+                  and source_bandwidth_gbps is not None)
+    record_search = search_config is not None and source_bandwidth_gbps is not None
+
     # Use group.rank() instead of dist.get_rank(group) to support cross-cluster
     # ProcessGroups where members have independent default PGs (same default rank).
     my_global_rank = group.rank() if group is not None else dist.get_rank()
@@ -556,6 +988,44 @@ def build_centralized_reshard_plan(
         accepted_default_bytes_by_pair: dict[tuple[int, int], int] = {}
         accepted_candidate_bytes_by_pair: dict[tuple[int, int], int] = {}
 
+        audit_path = os.environ.get("WEAVETP_SEARCH_AUDIT_PATH")
+        if audit_path and source_bandwidth_gbps is not None:
+            import pickle
+            from pathlib import Path
+
+            path = Path(audit_path)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with path.open("xb") as handle:
+                pickle.dump(dict(
+                    src_params=src_param_metadata, dst_params=dst_param_metadata_by_rank,
+                    kwargs=dict(source_bandwidth_gbps=source_bandwidth_gbps,
+                                source_reference_bandwidth_gbps=source_reference_bandwidth_gbps,
+                                source_latency_us=source_latency_us,
+                                source_reroute_penalty_us=source_reroute_penalty_us,
+                                source_reroute_min_gain_pct=source_reroute_min_gain_pct,
+                                source_reroute_min_contention_gain_pct=source_reroute_min_contention_gain_pct,
+                                source_reroute_min_global_gain_pct=source_reroute_min_global_gain_pct,
+                                source_reroute_min_bytes=source_reroute_min_bytes,
+                                source_exclude_local=source_exclude_local,
+                                prefer_local_source=prefer_local_source),
+                ), handle, protocol=pickle.HIGHEST_PROTOCOL)
+        search_override, search_stats = {}, None
+        if use_search:
+            search_override, search_stats = _run_source_search(
+                src_param_metadata, dst_param_metadata_by_rank, search_config,
+                source_bandwidth_gbps, source_latency_us, source_reroute_penalty_us,
+                source_reroute_min_bytes, source_exclude_local,
+            )
+        elif record_search:
+            search_stats = dict(
+                algorithm="greedy", prepass_s=0.0, solver_s=None, status="complete",
+                budget_s=search_config["budget_s"], memory_limit_gib=search_config["memory_gib"],
+                decision_items=None, log10_search_space=None, overridden_entries=0,
+                search_rss_delta_gib=None, rss_start_gib=None, peak_rss_gib=None,
+                rss_measurement_scope="planner_endpoints", mip_rel_gap=None,
+            )
+        assignment_start = time.perf_counter() if record_search else None
+
         # Pipeline-parallel (PP) "mapping" is handled implicitly.
         # Each rank contributes metadata only for the parameters it actually owns
         # (i.e., the module partitioning for its PP stage). When PP sizes differ
@@ -619,13 +1089,16 @@ def build_centralized_reshard_plan(
                         source_load_s,
                         destination_load_s,
                     )
-                src_metadata = select_src_metadata_balanced(
-                    src_meta_list,
-                    dst_metadata,
-                    dst_rank,
-                    prefer_local_source=prefer_local_source,
-                    source_cost_fn=source_cost_fn,
-                )
+                if use_search:
+                    src_metadata = search_override.get((dst_rank, resolved_name), default_src_metadata)
+                else:
+                    src_metadata = select_src_metadata_balanced(
+                        src_meta_list,
+                        dst_metadata,
+                        dst_rank,
+                        prefer_local_source=prefer_local_source,
+                        source_cost_fn=source_cost_fn,
+                    )
                 sources = _determine_source_ranks_for_dst_param(
                     resolved_name, src_metadata, dst_metadata, dst_rank
                 )
@@ -640,7 +1113,21 @@ def build_centralized_reshard_plan(
                     route_changed = [source[0] for source in sources] != [
                         source[0] for source in default_sources
                     ]
-                    if route_changed:
+                    if route_changed and use_search:
+                        source_route_proposals += 1
+                        source_route_changes += 1
+                        route_accepted = True
+                        for transfers, counter in (
+                            (default_sources, accepted_default_bytes_by_pair),
+                            (sources, accepted_candidate_bytes_by_pair),
+                        ):
+                            for src_rank, _src_slice, dst_slice in transfers:
+                                pair = (src_rank, dst_rank)
+                                num_bytes = _slice_numel(tuple(dst_metadata.shape), dst_slice) * dst_metadata.element_size
+                                counter[pair] = counter.get(pair, 0) + num_bytes
+                                if counter is accepted_candidate_bytes_by_pair:
+                                    source_route_accepted_bytes += num_bytes
+                    if route_changed and not use_search:
                         source_route_proposals += 1
                         candidate_bytes = sum(
                             _slice_numel(tuple(dst_metadata.shape), dst_slice)
@@ -849,6 +1336,8 @@ def build_centralized_reshard_plan(
                             task_id=task_id,
                         )
                     )
+        if record_search:
+            search_stats["assignment_loop_s"] = time.perf_counter() - assignment_start
         if source_bandwidth_gbps is not None:
             projected_critical_s = max(
                 [0.0]
@@ -870,6 +1359,15 @@ def build_centralized_reshard_plan(
                 tentative_changes > 0
                 and projected_global_gain_pct >= source_reroute_min_global_gain_pct
             )
+            if record_search:
+                search_stats.update(
+                    predicted_default_H_s=baseline_projected_critical_s,
+                    predicted_H_s=projected_critical_s,
+                    cached_plan_predicted_H_s=(projected_critical_s if global_gate_accepted
+                                              else baseline_projected_critical_s),
+                    gate_outcome=("accepted" if global_gate_accepted else
+                                  "rejected" if tentative_changes else "no_change"),
+                )
             if not global_gate_accepted:
                 plans_for_all_ranks = baseline_plans_for_all_ranks
                 rerouted_task_ids_by_rank = {
@@ -943,6 +1441,8 @@ def build_centralized_reshard_plan(
                 global_gate_accepted if source_bandwidth_gbps is not None else False
             ),
         }
+        if record_search:
+            route_stats["source_search"] = search_stats
         if source_bandwidth_gbps is not None and global_gate_accepted:
             for rank_id, rank_plan in plans_for_all_ranks.items():
                 # Dirty refresh can deliberately use the untouched source layout

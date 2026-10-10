@@ -1583,7 +1583,17 @@ def run_live_benchmark() -> None:
     # wave isolate source-path selection; additional waves add online feedback.
     planner_kwargs = policy.planner_kwargs() if source_reroute_enabled else {}
     planner_kwargs["source_exclude_local"] = args.live_emulate_noncollocated_sources
+    from megatron.core.resharding.planner import _source_search_config, _source_search_memory
+
+    source_search_config = _source_search_config()
+    if source_search_config is not None and not source_reroute_enabled:
+        raise ValueError("Source-search benchmark requires source rerouting to be enabled")
     print_rank_0("Building cached TP2->TP4 live-state plan...")
+    greedy_rss_start = None
+    if source_search_config is not None:
+        if rank == 0 and source_search_config["algorithm"] == "greedy":
+            greedy_rss_start, _ = _source_search_memory()
+        plan_build_start = time.perf_counter()
     plan_2_to_4 = build_centralized_reshard_plan(
         src_bundle,
         dst_bundle,
@@ -1591,6 +1601,16 @@ def run_live_benchmark() -> None:
         group=reshard_group,
         **planner_kwargs,
     )
+    if source_search_config is not None:
+        plan_build_local_s = time.perf_counter() - plan_build_start
+        if greedy_rss_start is not None:
+            rss_end, peak_rss = _source_search_memory()
+            plan_2_to_4.source_route_stats["source_search"].update(
+                rss_start_gib=greedy_rss_start,
+                search_rss_delta_gib=max(greedy_rss_start, rss_end) - greedy_rss_start,
+                peak_rss_gib=peak_rss,
+            )
+        plan_2_to_4_build_s = _all_max(plan_build_local_s, control_group)
     print_rank_0("Building cached TP4->TP2 live-state plan...")
     reverse_planner_kwargs = planner_kwargs if args.live_allow_aware_shrink else {}
     plan_4_to_2 = build_centralized_reshard_plan(
@@ -2431,6 +2451,31 @@ def run_live_benchmark() -> None:
             str(tp): tracker.snapshot() for tp, tracker in trackers.items()
         },
     }
+    if source_search_config is not None:
+        import hashlib
+
+        result["plan_2_to_4_build_s"] = plan_2_to_4_build_s
+        result["source_search_settings"] = source_search_config
+        result["source_search_run_config"] = {
+            "seq_length": args.seq_length,
+            "max_position_embeddings": args.max_position_embeddings,
+            "micro_batch_size": args.micro_batch_size,
+            "prompt_tokens": args.live_prompt_tokens,
+            "max_overlap_steps": args.live_max_overlap_steps,
+            "reroute_min_gain_pct": args.live_reroute_min_gain_pct,
+            "reroute_min_contention_gain_pct": args.live_reroute_min_contention_gain_pct,
+            "reroute_min_global_gain_pct": args.live_reroute_min_global_gain_pct,
+            "reroute_penalty_us": args.live_reroute_penalty_us,
+            "reroute_min_bytes": args.live_reroute_min_bytes,
+            "release_standby_weights": args.live_release_standby_weights,
+            "kv_request_identity": args.live_kv_request_identity,
+            "checkpoint": str(Path(args.load).resolve()) if args.load else None,
+            "profile": str(Path(args.live_bandwidth_profile).resolve()) if args.live_bandwidth_profile else None,
+            "profile_sha256": hashlib.sha256(Path(args.live_bandwidth_profile).read_bytes()).hexdigest()
+            if args.live_bandwidth_profile else None,
+            "code_sha256": {name: hashlib.sha256((REPO_ROOT / name).read_bytes()).hexdigest() for name in (
+                "megatron/core/resharding/planner.py", "examples/rl/benchmark_live_moe_tp.py")},
+        }
     if args.live_kv_request_identity:
         result["kv_request_domains"] = kv_request_domains
     if args.live_release_standby_weights:
