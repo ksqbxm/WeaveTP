@@ -1,0 +1,23 @@
+test_all_240_directions_one_warmup_three_passes_and_no_diagonal_probe (t085_cpu_suite.ProfileTests.test_all_240_directions_one_warmup_three_passes_and_no_diagonal_probe) ... ok
+test_bad_launch_arguments_fail_in_dry_run (t085_cpu_suite.ProfileTests.test_bad_launch_arguments_fail_in_dry_run) ... ok
+test_cli_validation_without_importing_torch (t085_cpu_suite.ProfileTests.test_cli_validation_without_importing_torch) ... ok
+test_compare_checks_profile_before_git_identity (t085_cpu_suite.ProfileTests.test_compare_checks_profile_before_git_identity) ... ok
+test_decimal_gbps_uses_total_transferred_bytes_and_median (t085_cpu_suite.ProfileTests.test_decimal_gbps_uses_total_transferred_bytes_and_median) ... ok
+test_default_matrix_missing_samples_and_duplicate_pairs_fail (t085_cpu_suite.ProfileTests.test_default_matrix_missing_samples_and_duplicate_pairs_fail) ... ok
+test_formal_launcher_validates_before_torchrun (t085_cpu_suite.ProfileTests.test_formal_launcher_validates_before_torchrun) ... ok
+test_missing_file_and_hash_mismatch_fail (t085_cpu_suite.ProfileTests.test_missing_file_and_hash_mismatch_fail) ... ok
+test_network_gate_distinguishes_bootstrap_from_data_transport (t085_cpu_suite.ProfileTests.test_network_gate_distinguishes_bootstrap_from_data_transport) ... ok
+test_nonpositive_nonfinite_or_nonnumeric_bandwidth_fails (t085_cpu_suite.ProfileTests.test_nonpositive_nonfinite_or_nonnumeric_bandwidth_fails) ... ok
+test_pair_hash_mismatch_prevents_formal_launch (t085_cpu_suite.ProfileTests.test_pair_hash_mismatch_prevents_formal_launch) ... ok
+test_profiling_dry_run_both_nodes_and_info_isolation (t085_cpu_suite.ProfileTests.test_profiling_dry_run_both_nodes_and_info_isolation) ... ok
+test_rank_mapping_uuid_and_log_provenance (t085_cpu_suite.ProfileTests.test_rank_mapping_uuid_and_log_provenance) ... ok
+test_real_profiler_control_flow_with_mock_torch (t085_cpu_suite.ProfileTests.test_real_profiler_control_flow_with_mock_torch) ... ok
+test_socket_fallback_stops_before_pair_sweep (t085_cpu_suite.ProfileTests.test_socket_fallback_stops_before_pair_sweep) ... ok
+test_source_unit_parameters_and_diagonal_are_required (t085_cpu_suite.ProfileTests.test_source_unit_parameters_and_diagonal_are_required) ... ok
+test_valid_profile_and_matching_hash (t085_cpu_suite.ProfileTests.test_valid_profile_and_matching_hash) ... ok
+test_wrong_dimensions_and_world_size (t085_cpu_suite.ProfileTests.test_wrong_dimensions_and_world_size) ... ok
+
+----------------------------------------------------------------------
+Ran 18 tests in 1.745s
+
+OK

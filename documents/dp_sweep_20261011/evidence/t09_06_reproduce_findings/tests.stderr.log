@@ -1,0 +1,8 @@
+test_cleanup_final_state_accepts_earlier_exit_snapshot (t085_cpu_suite.ReviewRegressions.test_cleanup_final_state_accepts_earlier_exit_snapshot) ... ok
+test_default_and_adopted_are_required_for_each_selection (t085_cpu_suite.ReviewRegressions.test_default_and_adopted_are_required_for_each_selection) ... ok
+test_t07_binds_code_to_verified_repository_before_execution (t085_cpu_suite.ReviewRegressions.test_t07_binds_code_to_verified_repository_before_execution) ... ok
+
+----------------------------------------------------------------------
+Ran 3 tests in 0.853s
+
+OK

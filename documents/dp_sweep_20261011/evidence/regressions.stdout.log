@@ -1,0 +1,35 @@
+........................................................................ [ 22%]
+........................................................................ [ 44%]
+................................................................................................................... [ 80%]
+..............................................................                                                      [100%]
+============================== warnings summary ===============================
+megatron\core\optimizer\__init__.py:25
+  C:\Users\ksqbx\.codex\worktrees\dp-sweep\WeaveTP_代码与实验资料_20260920\code\current\megatron\core\optimizer\__init__.py:25: UserWarning: Transformer Engine and Apex are not installed. Falling back to Torch optimizers.
+    warnings.warn(
+
+megatron\core\distributed\fsdp\src\megatron_fsdp\mixed_precision.py:115
+  C:\Users\ksqbx\.codex\worktrees\dp-sweep\WeaveTP_代码与实验资料_20260920\code\current\megatron\core\distributed\fsdp\src\megatron_fsdp\mixed_precision.py:115: UserWarning: Transformer Engine and Apex are not installed. Falling back to local implementations of multi_tensor_applier and multi_tensor_scale
+    warnings.warn(
+
+megatron\core\optimizer\optimizer.py:29
+  C:\Users\ksqbx\.codex\worktrees\dp-sweep\WeaveTP_代码与实验资料_20260920\code\current\megatron\core\optimizer\optimizer.py:29: UserWarning: Transformer Engine and Apex are not installed. Falling back to local implementations of multi_tensor_applier and multi_tensor_scale
+    warnings.warn(
+
+megatron\core\optimizer\clip_grads.py:32
+  C:\Users\ksqbx\.codex\worktrees\dp-sweep\WeaveTP_代码与实验资料_20260920\code\current\megatron\core\optimizer\clip_grads.py:32: UserWarning: Transformer Engine and Apex are not installed. Falling back to local implementations of multi_tensor_applier, multi_tensor_l2norm, and multi_tensor_scale
+    warnings.warn(
+
+megatron\core\hyper_comm_grid.py:26
+  C:\Users\ksqbx\.codex\worktrees\dp-sweep\WeaveTP_代码与实验资料_20260920\code\current\megatron\core\hyper_comm_grid.py:26: UserWarning: absl.logging is not installed. Using logging.getLogger(__name__) instead. Please install absl.logging with `pip install absl-py` to use absl.logging.
+    warnings.warn(
+
+megatron\core\inference\contexts\__init__.py:9
+  C:\Users\ksqbx\.codex\worktrees\dp-sweep\WeaveTP_代码与实验资料_20260920\code\current\megatron\core\inference\contexts\__init__.py:9: DeprecationWarning: The following imports from `dynamic_context.py` will be removed in this file in `megatron-core` 0.14. The imports here result in a cyclic import issue that causes rotary embeddings to import from Apex rather than Transformer Engine.
+    warnings.warn(
+
+megatron\core\models\backends.py:34
+  C:\Users\ksqbx\.codex\worktrees\dp-sweep\WeaveTP_代码与实验资料_20260920\code\current\megatron\core\models\backends.py:34: UserWarning: Apex is not installed. Falling back to Torch Norm
+    warnings.warn("Apex is not installed. Falling back to Torch Norm")
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+321 passed, 7 warnings, 130 subtests passed in 55.08s

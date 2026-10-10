@@ -1,0 +1,33 @@
+test_16gpu_scaling_works_but_absolute_table2_check_is_refused (t085_cpu_suite.FormalSummaryTests.test_16gpu_scaling_works_but_absolute_table2_check_is_refused) ... ok
+test_all_scopes_average_switches_then_launches_with_sample_sd (t085_cpu_suite.FormalSummaryTests.test_all_scopes_average_switches_then_launches_with_sample_sd) ... ok
+test_cli_success_writes_both_reports_and_leaves_inputs_unchanged (t085_cpu_suite.FormalSummaryTests.test_cli_success_writes_both_reports_and_leaves_inputs_unchanged) ... ok
+test_duplicate_contents_under_distinct_paths_are_rejected (t085_cpu_suite.FormalSummaryTests.test_duplicate_contents_under_distinct_paths_are_rejected) ... ok
+test_duplicate_identity_and_path_are_rejected (t085_cpu_suite.FormalSummaryTests.test_duplicate_identity_and_path_are_rejected) ... ok
+test_existing_output_cannot_be_overwritten (t085_cpu_suite.FormalSummaryTests.test_existing_output_cannot_be_overwritten) ... ok
+test_improvement_is_ratio_of_launch_means_with_both_signs (t085_cpu_suite.FormalSummaryTests.test_improvement_is_ratio_of_launch_means_with_both_signs) ... ok
+test_incomplete_and_out_of_order_switches_are_rejected (t085_cpu_suite.FormalSummaryTests.test_incomplete_and_out_of_order_switches_are_rejected) ... ok
+test_invalid_inputs_exit_two_without_output (t085_cpu_suite.FormalSummaryTests.test_invalid_inputs_exit_two_without_output) ... ok
+test_missing_and_invalid_time_fields_are_rejected (t085_cpu_suite.FormalSummaryTests.test_missing_and_invalid_time_fields_are_rejected) ... ok
+test_missing_file_is_rejected (t085_cpu_suite.FormalSummaryTests.test_missing_file_is_rejected) ... ok
+test_missing_launch_is_rejected (t085_cpu_suite.FormalSummaryTests.test_missing_launch_is_rejected) ... ok
+test_missing_transport_cannot_be_reconstructed_from_stage_or_wall (t085_cpu_suite.FormalSummaryTests.test_missing_transport_cannot_be_reconstructed_from_stage_or_wall) ... ok
+test_mixed_batch_paths_are_rejected (t085_cpu_suite.FormalSummaryTests.test_mixed_batch_paths_are_rejected) ... ok
+test_mixed_world_size_and_fixed_config_drift_are_rejected (t085_cpu_suite.FormalSummaryTests.test_mixed_world_size_and_fixed_config_drift_are_rejected) ... ok
+test_non_object_result_and_manifest_are_rejected (t085_cpu_suite.FormalSummaryTests.test_non_object_result_and_manifest_are_rejected) ... ok
+test_one_case_cannot_mix_two_directories (t085_cpu_suite.FormalSummaryTests.test_one_case_cannot_mix_two_directories) ... ok
+test_optional_recorded_config_must_be_consistent_within_case (t085_cpu_suite.FormalSummaryTests.test_optional_recorded_config_must_be_consistent_within_case) ... ok
+test_output_inside_historical_input_batch_is_rejected (t085_cpu_suite.FormalSummaryTests.test_output_inside_historical_input_batch_is_rejected) ... ok
+test_percentage_labels_compare_displayed_tenths (t085_cpu_suite.FormalSummaryTests.test_percentage_labels_compare_displayed_tenths) ... ok
+test_quoted_history_stays_quoted_and_missing_rows_use_rounded_table (t085_cpu_suite.FormalSummaryTests.test_quoted_history_stays_quoted_and_missing_rows_use_rounded_table) ... ok
+test_synthetic_paper_fixture_passes_all_54_checks (t085_cpu_suite.FormalSummaryTests.test_synthetic_paper_fixture_passes_all_54_checks) ... ok
+test_table2_failure_exits_one_and_keeps_diagnostic_evidence (t085_cpu_suite.FormalSummaryTests.test_table2_failure_exits_one_and_keeps_diagnostic_evidence) ... ok
+test_table2_tolerance_includes_rounding_and_only_1ns_slack (t085_cpu_suite.FormalSummaryTests.test_table2_tolerance_includes_rounding_and_only_1ns_slack) ... ok
+test_transport_sums_per_wave_rank_maxima_not_rank_totals_or_stages (t085_cpu_suite.FormalSummaryTests.test_transport_sums_per_wave_rank_maxima_not_rank_totals_or_stages) ... ok
+test_unknown_observations_and_actual_path_are_preserved_without_inference (t085_cpu_suite.FormalSummaryTests.test_unknown_observations_and_actual_path_are_preserved_without_inference) ... ok
+test_wave_count_and_empty_waves_are_rejected (t085_cpu_suite.FormalSummaryTests.test_wave_count_and_empty_waves_are_rejected) ... ok
+test_wrong_hash_is_rejected (t085_cpu_suite.FormalSummaryTests.test_wrong_hash_is_rejected) ... ok
+
+----------------------------------------------------------------------
+Ran 28 tests in 2.046s
+
+OK

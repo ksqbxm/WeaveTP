@@ -1,0 +1,29 @@
+[
+  {
+    "case": "t09_all",
+    "baseline_sha256": "b4a09eb0e27c2a5ee3721c6fe3bccfbec4bfcec524db3622b3daf6f4f2ed6d75",
+    "current_sha256": "b4a09eb0e27c2a5ee3721c6fe3bccfbec4bfcec524db3622b3daf6f4f2ed6d75",
+    "baseline_bytes": 34787,
+    "current_bytes": 34787,
+    "byte_identical": true,
+    "cases": 9
+  },
+  {
+    "case": "t09_only_weavetp_r1",
+    "baseline_sha256": "b89623b10ab75cd0529b7925858d611d08835fd53781b0e3eb0f1e8179c8f234",
+    "current_sha256": "b89623b10ab75cd0529b7925858d611d08835fd53781b0e3eb0f1e8179c8f234",
+    "baseline_bytes": 3869,
+    "current_bytes": 3869,
+    "byte_identical": true,
+    "cases": 1
+  },
+  {
+    "case": "t09_r1",
+    "baseline_sha256": "3ca20a9903cc993306991a4b1b3623c35be5d6333fd2181bf870965b1e1decc4",
+    "current_sha256": "3ca20a9903cc993306991a4b1b3623c35be5d6333fd2181bf870965b1e1decc4",
+    "baseline_bytes": 11599,
+    "current_bytes": 11599,
+    "byte_identical": true,
+    "cases": 3
+  }
+]

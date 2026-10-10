@@ -1,0 +1,29 @@
+test_actual_parallel_groups_are_required_for_both_layouts (t085_cpu_suite.SmokeTests.test_actual_parallel_groups_are_required_for_both_layouts) ... ok
+test_actual_wrapper_receives_two_switches_on_both_nodes (t085_cpu_suite.SmokeTests.test_actual_wrapper_receives_two_switches_on_both_nodes) ... ok
+test_both_directions_require_default_and_adopted_plans (t085_cpu_suite.SmokeTests.test_both_directions_require_default_and_adopted_plans) ... ok
+test_controller_never_writes_into_existing_root (t085_cpu_suite.SmokeTests.test_controller_never_writes_into_existing_root) ... ok
+test_controller_success_failure_interrupt_and_warning_only (t085_cpu_suite.SmokeTests.test_controller_success_failure_interrupt_and_warning_only) ... ok
+test_failed_peer_stops_without_retry_and_retains_evidence (t085_cpu_suite.SmokeTests.test_failed_peer_stops_without_retry_and_retains_evidence) ... ok
+test_formal_also_rejects_explicit_result_marker (t085_cpu_suite.SmokeTests.test_formal_also_rejects_explicit_result_marker) ... ok
+test_formal_dry_run_is_byte_identical_to_baseline (t085_cpu_suite.SmokeTests.test_formal_dry_run_is_byte_identical_to_baseline) ... ok
+test_formal_rejects_request_or_completion_marker_after_copying_four_switches (t085_cpu_suite.SmokeTests.test_formal_rejects_request_or_completion_marker_after_copying_four_switches) ... ok
+test_formal_rejects_smoke_path_even_with_four_switches (t085_cpu_suite.SmokeTests.test_formal_rejects_smoke_path_even_with_four_switches) ... ok
+test_invalid_smoke_results_fail (t085_cpu_suite.SmokeTests.test_invalid_smoke_results_fail) ... ok
+test_live_smoke_rejects_symlink_escape (t085_cpu_suite.SmokeTests.test_live_smoke_rejects_symlink_escape) ... ok
+test_path_modes_reject_cross_use_traversal_and_prefix_tricks (t085_cpu_suite.SmokeTests.test_path_modes_reject_cross_use_traversal_and_prefix_tricks) ... ok
+test_preflight_gates_and_no_gpu_launch (t085_cpu_suite.SmokeTests.test_preflight_gates_and_no_gpu_launch) ... ok
+test_preflight_identity_is_pinned_before_launch (t085_cpu_suite.SmokeTests.test_preflight_identity_is_pinned_before_launch) ... ok
+test_profile_hash_and_t08_record_are_both_required_without_log_checks (t085_cpu_suite.SmokeTests.test_profile_hash_and_t08_record_are_both_required_without_log_checks) ... ok
+test_profile_inputs_are_mandatory (t085_cpu_suite.SmokeTests.test_profile_inputs_are_mandatory) ... ok
+test_shell_keeps_operator_profile_even_if_env_file_overrides_it (t085_cpu_suite.SmokeTests.test_shell_keeps_operator_profile_even_if_env_file_overrides_it) ... ok
+test_smoke_and_formal_share_idle_and_recovery_functions (t085_cpu_suite.SmokeTests.test_smoke_and_formal_share_idle_and_recovery_functions) ... ok
+test_smoke_dry_run_has_one_case_and_only_switch_setting_differs (t085_cpu_suite.SmokeTests.test_smoke_dry_run_has_one_case_and_only_switch_setting_differs) ... ok
+test_smoke_dry_run_never_calls_rpc_or_writes (t085_cpu_suite.SmokeTests.test_smoke_dry_run_never_calls_rpc_or_writes) ... ok
+test_smoke_timeout_and_interrupt_reuse_existing_cleanup (t085_cpu_suite.SmokeTests.test_smoke_timeout_and_interrupt_reuse_existing_cleanup) ... ok
+test_smoke_validator_preserves_original_bytes (t085_cpu_suite.SmokeTests.test_smoke_validator_preserves_original_bytes) ... ok
+test_success_uses_smoke_validator_and_never_rewrites_benchmark_result (t085_cpu_suite.SmokeTests.test_success_uses_smoke_validator_and_never_rewrites_benchmark_result) ... ok
+
+----------------------------------------------------------------------
+Ran 24 tests in 3.004s
+
+OK

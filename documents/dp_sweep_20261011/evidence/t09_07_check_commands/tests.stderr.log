@@ -1,0 +1,22 @@
+test_controller_scenarios (t085_cpu_suite.ControllerTests.test_controller_scenarios) ... ok
+test_wait_pair_notices_failure_without_waiting_for_peer (t085_cpu_suite.ControllerTests.test_wait_pair_notices_failure_without_waiting_for_peer) ... ok
+test_wait_pair_timeout (t085_cpu_suite.ControllerTests.test_wait_pair_timeout) ... ok
+test_actual_launcher_dry_run_preserves_info_rdma_and_task_tag (t085_cpu_suite.NodeTests.test_actual_launcher_dry_run_preserves_info_rdma_and_task_tag) ... ok
+test_busy_gpu_prevents_launch (t085_cpu_suite.NodeTests.test_busy_gpu_prevents_launch) ... ok
+test_cancel_before_start_prevents_popen (t085_cpu_suite.NodeTests.test_cancel_before_start_prevents_popen) ... ok
+test_cancellation_waits_for_popen_publication (t085_cpu_suite.NodeTests.test_cancellation_waits_for_popen_publication) ... ok
+test_cleanup_confirmation_uses_live_state_not_exit_receipt (t085_cpu_suite.NodeTests.test_cleanup_confirmation_uses_live_state_not_exit_receipt) ... ok
+test_cleanup_observation_failure_is_unconfirmed (t085_cpu_suite.NodeTests.test_cleanup_observation_failure_is_unconfirmed) ... ok
+test_cleanup_rejects_remaining_pid_or_unrestored_memory (t085_cpu_suite.NodeTests.test_cleanup_rejects_remaining_pid_or_unrestored_memory) ... ok
+test_five_gb_preflight_passes_exact_bytes_to_node_checker (t085_cpu_suite.NodeTests.test_five_gb_preflight_passes_exact_bytes_to_node_checker) ... ok
+test_interruption_and_timeout_reap_a_real_cpu_child (t085_cpu_suite.NodeTests.test_interruption_and_timeout_reap_a_real_cpu_child) ... ok
+test_low_disk_and_dirty_commit_prevent_launch (t085_cpu_suite.NodeTests.test_low_disk_and_dirty_commit_prevent_launch) ... ok
+test_node_cli_accepts_the_streamed_source_arguments (t085_cpu_suite.NodeTests.test_node_cli_accepts_the_streamed_source_arguments) ... ok
+test_profile_verification_checks_both_hash_and_actual_transport (t085_cpu_suite.NodeTests.test_profile_verification_checks_both_hash_and_actual_transport) ... ok
+test_run_uses_frozen_environment (t085_cpu_suite.NodeTests.test_run_uses_frozen_environment) ... ok
+test_signal_during_popen_does_not_lose_the_child_handle (t085_cpu_suite.NodeTests.test_signal_during_popen_does_not_lose_the_child_handle) ... ok
+
+----------------------------------------------------------------------
+Ran 17 tests in 1.045s
+
+OK

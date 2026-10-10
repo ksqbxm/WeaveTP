@@ -1,0 +1,341 @@
+{
+  "baseline": "7deac20feaf76ee4e6a0c53b2289271a903dd12c",
+  "t09_tests": 181,
+  "t09_passed": 181,
+  "t09_suites": [
+    {
+      "command": [
+        "C:\\Users\\ksqbx\\miniforge3\\python.exe",
+        "-B",
+        "-X",
+        "utf8",
+        "C:\\Users\\ksqbx\\.codex\\worktrees\\dp-sweep\\WeaveTP_代码与实验资料_20260920\\documents\\dp_sweep_20261011\\check_cpu.py",
+        "--worker",
+        "C:\\Users\\ksqbx\\.codex\\worktrees\\dp-sweep\\WeaveTP_代码与实验资料_20260920\\code\\current\\tests\\unit_tests\\resharding\\test_summarize_weavetp_formal.py",
+        "--output-dir",
+        "C:\\data\\weavetp-dp-sweep-s1-20261011\\t09_00_test_summarize_weavetp_formal"
+      ],
+      "cwd": "C:\\data\\weavetp-dp-sweep-s1-20261011\\t09_00_test_summarize_weavetp_formal",
+      "exit_code": 0,
+      "tests": 28,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "passed": 28,
+      "suite": "code\\current\\tests\\unit_tests\\resharding\\test_summarize_weavetp_formal.py"
+    },
+    {
+      "command": [
+        "C:\\Users\\ksqbx\\miniforge3\\python.exe",
+        "-B",
+        "-X",
+        "utf8",
+        "C:\\Users\\ksqbx\\.codex\\worktrees\\dp-sweep\\WeaveTP_代码与实验资料_20260920\\documents\\dp_sweep_20261011\\check_cpu.py",
+        "--worker",
+        "C:\\Users\\ksqbx\\.codex\\worktrees\\dp-sweep\\WeaveTP_代码与实验资料_20260920\\code\\current\\tests\\unit_tests\\resharding\\test_compare_weavetp_16gpu.py",
+        "--output-dir",
+        "C:\\data\\weavetp-dp-sweep-s1-20261011\\t09_01_test_compare_weavetp_16gpu"
+      ],
+      "cwd": "C:\\data\\weavetp-dp-sweep-s1-20261011\\t09_01_test_compare_weavetp_16gpu",
+      "exit_code": 0,
+      "tests": 29,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "passed": 29,
+      "suite": "code\\current\\tests\\unit_tests\\resharding\\test_compare_weavetp_16gpu.py"
+    },
+    {
+      "command": [
+        "C:\\Users\\ksqbx\\miniforge3\\python.exe",
+        "-B",
+        "-X",
+        "utf8",
+        "C:\\Users\\ksqbx\\.codex\\worktrees\\dp-sweep\\WeaveTP_代码与实验资料_20260920\\documents\\dp_sweep_20261011\\check_cpu.py",
+        "--worker",
+        "C:\\Users\\ksqbx\\.codex\\worktrees\\dp-sweep\\WeaveTP_代码与实验资料_20260920\\code\\current\\tests\\unit_tests\\resharding\\test_profile_weavetp_16gpu.py",
+        "--output-dir",
+        "C:\\data\\weavetp-dp-sweep-s1-20261011\\t09_02_test_profile_weavetp_16gpu"
+      ],
+      "cwd": "C:\\data\\weavetp-dp-sweep-s1-20261011\\t09_02_test_profile_weavetp_16gpu",
+      "exit_code": 0,
+      "tests": 18,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "passed": 18,
+      "suite": "code\\current\\tests\\unit_tests\\resharding\\test_profile_weavetp_16gpu.py"
+    },
+    {
+      "command": [
+        "C:\\Users\\ksqbx\\miniforge3\\python.exe",
+        "-B",
+        "-X",
+        "utf8",
+        "C:\\Users\\ksqbx\\.codex\\worktrees\\dp-sweep\\WeaveTP_代码与实验资料_20260920\\documents\\dp_sweep_20261011\\check_cpu.py",
+        "--worker",
+        "C:\\Users\\ksqbx\\.codex\\worktrees\\dp-sweep\\WeaveTP_代码与实验资料_20260920\\code\\current\\tests\\unit_tests\\resharding\\test_server_acceptance.py",
+        "--output-dir",
+        "C:\\data\\weavetp-dp-sweep-s1-20261011\\t09_03_test_server_acceptance"
+      ],
+      "cwd": "C:\\data\\weavetp-dp-sweep-s1-20261011\\t09_03_test_server_acceptance",
+      "exit_code": 0,
+      "tests": 11,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "passed": 11,
+      "suite": "code\\current\\tests\\unit_tests\\resharding\\test_server_acceptance.py"
+    },
+    {
+      "command": [
+        "C:\\Users\\ksqbx\\miniforge3\\python.exe",
+        "-B",
+        "-X",
+        "utf8",
+        "C:\\Users\\ksqbx\\.codex\\worktrees\\dp-sweep\\WeaveTP_代码与实验资料_20260920\\documents\\dp_sweep_20261011\\check_cpu.py",
+        "--worker",
+        "C:\\Users\\ksqbx\\.codex\\worktrees\\dp-sweep\\WeaveTP_代码与实验资料_20260920\\code\\current\\tests\\unit_tests\\resharding\\test_weavetp_review_findings.py",
+        "--output-dir",
+        "C:\\data\\weavetp-dp-sweep-s1-20261011\\t09_04_test_weavetp_review_findings"
+      ],
+      "cwd": "C:\\data\\weavetp-dp-sweep-s1-20261011\\t09_04_test_weavetp_review_findings",
+      "exit_code": 0,
+      "tests": 4,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "passed": 4,
+      "suite": "code\\current\\tests\\unit_tests\\resharding\\test_weavetp_review_findings.py"
+    },
+    {
+      "command": [
+        "C:\\Users\\ksqbx\\miniforge3\\python.exe",
+        "-B",
+        "-X",
+        "utf8",
+        "C:\\Users\\ksqbx\\.codex\\worktrees\\dp-sweep\\WeaveTP_代码与实验资料_20260920\\documents\\dp_sweep_20261011\\check_cpu.py",
+        "--worker",
+        "C:\\Users\\ksqbx\\.codex\\worktrees\\dp-sweep\\WeaveTP_代码与实验资料_20260920\\code\\current\\tests\\unit_tests\\resharding\\test_weavetp_observations.py",
+        "--output-dir",
+        "C:\\data\\weavetp-dp-sweep-s1-20261011\\t09_05_test_weavetp_observations"
+      ],
+      "cwd": "C:\\data\\weavetp-dp-sweep-s1-20261011\\t09_05_test_weavetp_observations",
+      "exit_code": 0,
+      "tests": 25,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "passed": 25,
+      "suite": "code\\current\\tests\\unit_tests\\resharding\\test_weavetp_observations.py"
+    },
+    {
+      "command": [
+        "C:\\Users\\ksqbx\\miniforge3\\python.exe",
+        "-B",
+        "-X",
+        "utf8",
+        "C:\\Users\\ksqbx\\.codex\\worktrees\\dp-sweep\\WeaveTP_代码与实验资料_20260920\\documents\\dp_sweep_20261011\\check_cpu.py",
+        "--worker",
+        "C:\\Users\\ksqbx\\.codex\\worktrees\\dp-sweep\\WeaveTP_代码与实验资料_20260920\\documents\\16gpu_T06_T07_review_20261001\\reproduce_findings.py",
+        "--output-dir",
+        "C:\\data\\weavetp-dp-sweep-s1-20261011\\t09_06_reproduce_findings"
+      ],
+      "cwd": "C:\\data\\weavetp-dp-sweep-s1-20261011\\t09_06_reproduce_findings",
+      "exit_code": 0,
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "passed": 3,
+      "suite": "documents\\16gpu_T06_T07_review_20261001\\reproduce_findings.py"
+    },
+    {
+      "command": [
+        "C:\\Users\\ksqbx\\miniforge3\\python.exe",
+        "-B",
+        "-X",
+        "utf8",
+        "C:\\Users\\ksqbx\\.codex\\worktrees\\dp-sweep\\WeaveTP_代码与实验资料_20260920\\documents\\dp_sweep_20261011\\check_cpu.py",
+        "--worker",
+        "C:\\Users\\ksqbx\\.codex\\worktrees\\dp-sweep\\WeaveTP_代码与实验资料_20260920\\documents\\16gpu_T08_20261001\\check_commands.py",
+        "--output-dir",
+        "C:\\data\\weavetp-dp-sweep-s1-20261011\\t09_07_check_commands"
+      ],
+      "cwd": "C:\\data\\weavetp-dp-sweep-s1-20261011\\t09_07_check_commands",
+      "exit_code": 0,
+      "tests": 17,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "passed": 17,
+      "suite": "documents\\16gpu_T08_20261001\\check_commands.py"
+    },
+    {
+      "command": [
+        "C:\\Users\\ksqbx\\miniforge3\\python.exe",
+        "-B",
+        "-X",
+        "utf8",
+        "C:\\Users\\ksqbx\\.codex\\worktrees\\dp-sweep\\WeaveTP_代码与实验资料_20260920\\documents\\dp_sweep_20261011\\check_cpu.py",
+        "--worker",
+        "C:\\Users\\ksqbx\\.codex\\worktrees\\dp-sweep\\WeaveTP_代码与实验资料_20260920\\documents\\16gpu_T085_20261001\\test_smoke.py",
+        "--output-dir",
+        "C:\\data\\weavetp-dp-sweep-s1-20261011\\t09_08_test_smoke"
+      ],
+      "cwd": "C:\\data\\weavetp-dp-sweep-s1-20261011\\t09_08_test_smoke",
+      "exit_code": 0,
+      "tests": 24,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "passed": 24,
+      "suite": "documents\\16gpu_T085_20261001\\test_smoke.py"
+    },
+    {
+      "command": [
+        "C:\\Users\\ksqbx\\miniforge3\\python.exe",
+        "-B",
+        "-X",
+        "utf8",
+        "C:\\Users\\ksqbx\\.codex\\worktrees\\dp-sweep\\WeaveTP_代码与实验资料_20260920\\documents\\dp_sweep_20261011\\check_cpu.py",
+        "--worker",
+        "C:\\Users\\ksqbx\\.codex\\worktrees\\dp-sweep\\WeaveTP_代码与实验资料_20260920\\documents\\16gpu_T09_20261003\\test_t09.py",
+        "--output-dir",
+        "C:\\data\\weavetp-dp-sweep-s1-20261011\\t09_09_test_t09"
+      ],
+      "cwd": "C:\\data\\weavetp-dp-sweep-s1-20261011\\t09_09_test_t09",
+      "exit_code": 0,
+      "tests": 22,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "passed": 22,
+      "suite": "documents\\16gpu_T09_20261003\\test_t09.py"
+    }
+  ],
+  "regressions": {
+    "command": [
+      "C:\\Users\\ksqbx\\miniforge3\\python.exe",
+      "-B",
+      "-m",
+      "pytest",
+      "-q",
+      "-o",
+      "addopts=",
+      "-p",
+      "no:cacheprovider",
+      "--confcutdir=tests/unit_tests/resharding",
+      "--tb=short",
+      "--junitxml=C:\\data\\weavetp-dp-sweep-s1-20261011\\regressions.xml",
+      "tests/unit_tests/resharding/test_standby_weights.py",
+      "tests/unit_tests/resharding/test_live_storage_lifecycle.py",
+      "tests/unit_tests/resharding/test_live_defaults.py",
+      "tests/unit_tests/resharding/test_weight_acceptance.py",
+      "tests/unit_tests/resharding/test_live_resharding.py",
+      "tests/unit_tests/resharding/test_execution_controls.py",
+      "tests/unit_tests/resharding/test_nccl_packing.py",
+      "tests/unit_tests/resharding/test_planner.py",
+      "tests/unit_tests/resharding/test_weavetp_observations.py",
+      "tests/unit_tests/resharding/test_refit_bandwidth_policy.py",
+      "tests/unit_tests/resharding/test_delta_stream_lifetime.py",
+      "tests/unit_tests/resharding/test_weight_ordering.py",
+      "tests/unit_tests/resharding/test_weight_bitwise.py",
+      "tests/unit_tests/resharding/test_weight_fix2.py",
+      "tests/unit_tests/resharding/test_dp_sweep.py",
+      "tests/unit_tests/resharding/test_summarize_dp_sweep.py",
+      "tests/unit_tests/resharding/test_dp_sweep_coordinator.py",
+      "tools/resharding/correctness/test_correctness.py"
+    ],
+    "cwd": "C:\\Users\\ksqbx\\.codex\\worktrees\\dp-sweep\\WeaveTP_代码与实验资料_20260920\\code\\current",
+    "exit_code": 0
+  },
+  "dry_runs": [
+    {
+      "case": "t09_all",
+      "baseline_sha256": "b4a09eb0e27c2a5ee3721c6fe3bccfbec4bfcec524db3622b3daf6f4f2ed6d75",
+      "current_sha256": "b4a09eb0e27c2a5ee3721c6fe3bccfbec4bfcec524db3622b3daf6f4f2ed6d75",
+      "baseline_bytes": 34787,
+      "current_bytes": 34787,
+      "byte_identical": true,
+      "cases": 9
+    },
+    {
+      "case": "t09_only_weavetp_r1",
+      "baseline_sha256": "b89623b10ab75cd0529b7925858d611d08835fd53781b0e3eb0f1e8179c8f234",
+      "current_sha256": "b89623b10ab75cd0529b7925858d611d08835fd53781b0e3eb0f1e8179c8f234",
+      "baseline_bytes": 3869,
+      "current_bytes": 3869,
+      "byte_identical": true,
+      "cases": 1
+    },
+    {
+      "case": "t09_r1",
+      "baseline_sha256": "3ca20a9903cc993306991a4b1b3623c35be5d6333fd2181bf870965b1e1decc4",
+      "current_sha256": "3ca20a9903cc993306991a4b1b3623c35be5d6333fd2181bf870965b1e1decc4",
+      "baseline_bytes": 11599,
+      "current_bytes": 11599,
+      "byte_identical": true,
+      "cases": 3
+    }
+  ],
+  "default_parity": {
+    "command": [
+      "C:\\Users\\ksqbx\\miniforge3\\python.exe",
+      "-B",
+      "-X",
+      "utf8",
+      "C:\\Users\\ksqbx\\.codex\\worktrees\\dp-sweep\\WeaveTP_代码与实验资料_20260920\\documents\\dp_sweep_20261011\\check_cpu.py",
+      "--default-receipts",
+      "--baseline",
+      "7deac20feaf76ee4e6a0c53b2289271a903dd12c",
+      "--output-dir",
+      "C:\\data\\weavetp-dp-sweep-s1-20261011"
+    ],
+    "cwd": "C:\\Users\\ksqbx\\.codex\\worktrees\\dp-sweep\\WeaveTP_代码与实验资料_20260920\\code\\current",
+    "exit_code": 0
+  },
+  "static_checks": [
+    {
+      "command": [
+        "C:/Program Files/Git/bin/bash.exe",
+        "-n",
+        "C:\\Users\\ksqbx\\.codex\\worktrees\\dp-sweep\\WeaveTP_代码与实验资料_20260920\\code\\current\\tools\\resharding\\run_live_moe_tp_benchmark.sh"
+      ],
+      "cwd": "C:\\Users\\ksqbx\\.codex\\worktrees\\dp-sweep\\WeaveTP_代码与实验资料_20260920\\code\\current",
+      "exit_code": 0
+    },
+    {
+      "command": [
+        "C:/Program Files/Git/bin/bash.exe",
+        "-n",
+        "C:\\Users\\ksqbx\\.codex\\worktrees\\dp-sweep\\WeaveTP_代码与实验资料_20260920\\code\\current\\tools\\resharding\\run_deepseek_v2_lite_live_benchmark.sh"
+      ],
+      "cwd": "C:\\Users\\ksqbx\\.codex\\worktrees\\dp-sweep\\WeaveTP_代码与实验资料_20260920\\code\\current",
+      "exit_code": 0
+    },
+    {
+      "command": [
+        "git",
+        "diff",
+        "--check"
+      ],
+      "cwd": "C:\\Users\\ksqbx\\.codex\\worktrees\\dp-sweep\\WeaveTP_代码与实验资料_20260920",
+      "exit_code": 0
+    }
+  ],
+  "compiled_files": [
+    "code\\current\\examples\\rl\\benchmark_live_moe_tp.py",
+    "code\\current\\tools\\resharding\\weavetp_observations.py",
+    "code\\current\\tools\\resharding\\summarize_dp_sweep.py",
+    "documents\\dp_sweep_20261011\\check_cpu.py",
+    "code\\current\\tests\\unit_tests\\resharding\\test_dp_sweep.py",
+    "code\\current\\tests\\unit_tests\\resharding\\test_summarize_dp_sweep.py",
+    "code\\current\\tests\\unit_tests\\resharding\\test_dp_sweep_coordinator.py",
+    "code\\current\\tests\\unit_tests\\resharding\\test_live_storage_lifecycle.py"
+  ],
+  "protected_core_and_history_unchanged": true,
+  "gpu_started": false,
+  "server_connected": false,
+  "ok": true
+}

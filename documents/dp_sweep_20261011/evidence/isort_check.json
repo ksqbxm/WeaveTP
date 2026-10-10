@@ -1,0 +1,31 @@
+{
+  "command": [
+    "C:/Users/ksqbx/AppData/Local/Temp/weavetp-storage-tools/bin/uv.exe",
+    "run",
+    "--no-project",
+    "--python",
+    "C:/Users/ksqbx/miniforge3/python.exe",
+    "--no-python-downloads",
+    "python",
+    "-m",
+    "isort",
+    "--settings-path",
+    "code/current/pyproject.toml",
+    "--src-path",
+    "code/current",
+    "-p",
+    "megatron",
+    "-p",
+    "tools",
+    "--check-only",
+    "code/current/examples/rl/benchmark_live_moe_tp.py",
+    "code/current/tools/resharding/weavetp_observations.py",
+    "code/current/tools/resharding/summarize_dp_sweep.py",
+    "code/current/tests/unit_tests/resharding/test_dp_sweep.py",
+    "code/current/tests/unit_tests/resharding/test_summarize_dp_sweep.py",
+    "code/current/tests/unit_tests/resharding/test_dp_sweep_coordinator.py",
+    "documents/dp_sweep_20261011/check_cpu.py"
+  ],
+  "exit_code": 0,
+  "output": "WARN No valid certificates found in `SSL_CERT_DIR`: C:\\Users\\ksqbx\\miniforge3\\Library\\ssl\\certs. No default certificates will be trusted.\r\nWARN `--no-project` was provided, but no project was found\r\n"
+}

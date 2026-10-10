@@ -1,0 +1,9 @@
+test_failed_cleanup_terminates_active_run_command_and_marks_unknown (t085_cpu_suite.FailureLifecycleTests.test_failed_cleanup_terminates_active_run_command_and_marks_unknown) ... ok
+test_remote_command_timeout_is_reported (t085_cpu_suite.FailureLifecycleTests.test_remote_command_timeout_is_reported) ... ok
+test_successful_cleanup_preserves_runner_exit_receipt (t085_cpu_suite.FailureLifecycleTests.test_successful_cleanup_preserves_runner_exit_receipt) ... ok
+test_unreachable_cleanup_does_not_wait_for_other_run_rpc (t085_cpu_suite.FailureLifecycleTests.test_unreachable_cleanup_does_not_wait_for_other_run_rpc) ... ok
+
+----------------------------------------------------------------------
+Ran 4 tests in 0.207s
+
+OK

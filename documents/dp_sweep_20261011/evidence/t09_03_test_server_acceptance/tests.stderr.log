@@ -1,0 +1,16 @@
+test_actual_group_memberships_for_tp2_and_tp4 (t085_cpu_suite.ServerAcceptanceTests.test_actual_group_memberships_for_tp2_and_tp4) ... ok
+test_cpu_worker_uses_synthetic_output_and_no_model (t085_cpu_suite.ServerAcceptanceTests.test_cpu_worker_uses_synthetic_output_and_no_model) ... ok
+test_formal_receipts_reject_config_drift_and_failed_peer (t085_cpu_suite.ServerAcceptanceTests.test_formal_receipts_reject_config_drift_and_failed_peer) ... ok
+test_formal_receipts_require_both_hosts_and_bound_completion (t085_cpu_suite.ServerAcceptanceTests.test_formal_receipts_require_both_hosts_and_bound_completion) ... ok
+test_group_size_asymmetry_placement_and_shared_gpu_fail (t085_cpu_suite.ServerAcceptanceTests.test_group_size_asymmetry_placement_and_shared_gpu_fail) ... ok
+test_independent_statistics_use_launch_repeats_and_wave_sum (t085_cpu_suite.ServerAcceptanceTests.test_independent_statistics_use_launch_repeats_and_wave_sum) ... ok
+test_profile_checks_real_local_logs_and_live_gpu_uuid (t085_cpu_suite.ServerAcceptanceTests.test_profile_checks_real_local_logs_and_live_gpu_uuid) ... ok
+test_profile_hash_mismatch_and_late_socket_fallback_are_rejected (t085_cpu_suite.ServerAcceptanceTests.test_profile_hash_mismatch_and_late_socket_fallback_are_rejected) ... ok
+test_schema_valid_profile_cannot_replace_missing_original_logs (t085_cpu_suite.ServerAcceptanceTests.test_schema_valid_profile_cannot_replace_missing_original_logs) ... ok
+test_synthetic_result_is_never_accepted_as_formal_data (t085_cpu_suite.ServerAcceptanceTests.test_synthetic_result_is_never_accepted_as_formal_data) ... ok
+test_tp_ep_or_etp_crossing_nodes_is_rejected (t085_cpu_suite.ServerAcceptanceTests.test_tp_ep_or_etp_crossing_nodes_is_rejected) ... ok
+
+----------------------------------------------------------------------
+Ran 11 tests in 1.677s
+
+OK

@@ -1,0 +1,96 @@
+{
+  "checks": [
+    {
+      "command": [
+        "C:/Users/ksqbx/AppData/Local/Temp/weavetp-storage-tools/bin/uv.exe",
+        "run",
+        "--no-project",
+        "--python",
+        "C:\\Users\\ksqbx\\miniforge3\\python.exe",
+        "--no-python-downloads",
+        "python",
+        "-m",
+        "isort",
+        "--settings-path",
+        "code/current/pyproject.toml",
+        "--src-path",
+        "code/current",
+        "-p",
+        "megatron",
+        "-p",
+        "tools",
+        "--check-only",
+        "code/current/examples/rl/benchmark_live_moe_tp.py",
+        "code/current/tests/unit_tests/resharding/test_dp_sweep.py",
+        "code/current/tests/unit_tests/resharding/test_dp_sweep_coordinator.py",
+        "code/current/tests/unit_tests/resharding/test_summarize_dp_sweep.py",
+        "code/current/tools/resharding/summarize_dp_sweep.py",
+        "code/current/tools/resharding/weavetp_observations.py",
+        "documents/dp_sweep_20261011/check_cpu.py"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": "WARN No valid certificates found in `SSL_CERT_DIR`: C:\\Users\\ksqbx\\miniforge3\\Library\\ssl\\certs. No default certificates will be trusted.\nWARN `--no-project` was provided, but no project was found\n"
+    },
+    {
+      "command": [
+        "git",
+        "diff",
+        "--check"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "git",
+        "diff",
+        "--cached",
+        "--check"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "git",
+        "diff",
+        "--exit-code",
+        "7deac20",
+        "--",
+        "code/current/megatron",
+        "documents/16gpu_T09_20261003",
+        "code/current/tools/resharding/summarize_weavetp_formal.py"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    }
+  ],
+  "compiled_files": [
+    "code/current/examples/rl/benchmark_live_moe_tp.py",
+    "code/current/tests/unit_tests/resharding/test_dp_sweep.py",
+    "code/current/tests/unit_tests/resharding/test_dp_sweep_coordinator.py",
+    "code/current/tests/unit_tests/resharding/test_live_storage_lifecycle.py",
+    "code/current/tests/unit_tests/resharding/test_summarize_dp_sweep.py",
+    "code/current/tools/resharding/summarize_dp_sweep.py",
+    "code/current/tools/resharding/weavetp_observations.py",
+    "documents/dp_sweep_20261011/check_cpu.py"
+  ],
+  "workspace_sha256": {
+    "code/current/examples/rl/benchmark_live_moe_tp.py": "1843a8bdca4a4087be0aea5b4faa3f1895e5faed4dfff982031ac46289abdfe2",
+    "code/current/tests/unit_tests/resharding/test_dp_sweep.py": "f43c6d7981f84ca69c9848e343c283b716dadde90d12a500b53e800b881d6d98",
+    "code/current/tests/unit_tests/resharding/test_dp_sweep_coordinator.py": "4d9b829349935a2b34677435c0425a6754c9056dd517b5e0201a09a5ed402f98",
+    "code/current/tests/unit_tests/resharding/test_live_storage_lifecycle.py": "d81f73b4a81ac0ec4769f340505d547e81bc277920f6e77cba99eb96701b7b0a",
+    "code/current/tests/unit_tests/resharding/test_summarize_dp_sweep.py": "1cc00dbd30145ff3e37ddf15e6afc4dec09af6c8f5c863d6d18cf02e917fac09",
+    "code/current/tools/resharding/run_deepseek_v2_lite_live_benchmark.sh": "5c006c7ba9a687e961e4747f5940e6ea3c52d4e43b963f0ce5c8458d1b49b368",
+    "code/current/tools/resharding/run_live_moe_tp_benchmark.sh": "bcbe7ee96e8d6f946164a98c1ee437c758c700d137807939422d14963a7e43be",
+    "code/current/tools/resharding/summarize_dp_sweep.py": "81d921ce016e01af87dcbf181ca56e4ec5ea31cf9e9da82d17893a3aa26ee158",
+    "code/current/tools/resharding/weavetp_observations.py": "ddb36a143f4b7b032332c946341be465efb965fe84d89dab58a09bff47795c5a",
+    "documents/dp_sweep_20261011/check_cpu.py": "7c0a7b1585518baa9c3889184e1ecf4f74b726bb0e4bfecb0f9fcce36d40d098"
+  },
+  "main_sha": "f7d555998b45756998465924d733fd70e553d6b4",
+  "ok": true
+}

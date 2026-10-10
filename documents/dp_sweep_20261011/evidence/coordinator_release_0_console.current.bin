@@ -1,0 +1,783 @@
+Building TP2 active MoE model...
+Building TP4 standby MoE model...
+Synchronizing initial TP2 weights into TP4...
+Building cached TP2->TP4 live-state plan...
+Building cached TP4->TP2 live-state plan...
+Switch 1/4 2->4: stable_kv_tokens=9 variant=baseline wave_scheduler=baseline adaptive_reason=disabled hybrid_fast=False reason=disabled
+Completed 2->4: waves=1 overlap_steps=2 base_wall=0.007000s cutover_delta=0.001000s max_diff=0
+Switch 2/4 4->2: stable_kv_tokens=12 variant=baseline wave_scheduler=baseline adaptive_reason=disabled hybrid_fast=False reason=disabled
+Completed 4->2: waves=1 overlap_steps=2 base_wall=0.007000s cutover_delta=0.001000s max_diff=0
+Switch 3/4 2->4: stable_kv_tokens=15 variant=baseline wave_scheduler=baseline adaptive_reason=disabled hybrid_fast=False reason=disabled
+Completed 2->4: waves=1 overlap_steps=2 base_wall=0.007000s cutover_delta=0.001000s max_diff=0
+Switch 4/4 4->2: stable_kv_tokens=18 variant=baseline wave_scheduler=baseline adaptive_reason=disabled hybrid_fast=False reason=disabled
+Completed 4->2: waves=1 overlap_steps=2 base_wall=0.007000s cutover_delta=0.001000s max_diff=0
+{
+  "benchmark": "live-moe-tp2-tp4",
+  "method_variant": "moetp++",
+  "proxy_semantics": "full weight and KV migration",
+  "model_preset": "synthetic",
+  "checkpoint_loaded": false,
+  "checkpoint_iteration": null,
+  "world_size": 4,
+  "parallel_groups": null,
+  "num_experts": 4,
+  "expert_parallel_size": 1,
+  "router_mode": "fixed-hot",
+  "logit_validation_mode": "allclose",
+  "logit_max_nrmse": 0.35,
+  "logit_min_cosine": 0.97,
+  "logit_min_top1_agreement": 0.8,
+  "active_expert_phases": [
+    [
+      0,
+      1
+    ]
+  ],
+  "hotspot_phase_expansions": 1,
+  "hotspot_pressure_bytes": 0,
+  "hotspot_pressure_iters": 1,
+  "pressure_rank_phases": [
+    []
+  ],
+  "scheduler_mode": "baseline",
+  "hybrid_fast_path": false,
+  "hybrid_min_predicted_gain_pct": 10.0,
+  "hybrid_max_remote_cv": 0.22,
+  "hybrid_max_foreground_pressure": 0.2,
+  "adaptive_hybrid": false,
+  "adaptive_min_predicted_e2e_gain_pct": 5.0,
+  "adaptive_residual_max_waves": 8,
+  "bandwidth_aware_plan": false,
+  "source_reroute_enabled": false,
+  "emulate_noncollocated_sources": false,
+  "bandwidth_aware_shrink": false,
+  "source_route_stats": {},
+  "initial_validation_max_diff": 0.0,
+  "online_replan": false,
+  "online_plan_controller": null,
+  "pending_replan_discarded": false,
+  "foreground_tpot_ms": [
+    {
+      "tp": 2,
+      "active_experts": [
+        0,
+        1
+      ],
+      "pressure_ranks": [],
+      "tpot_ms": 1.0
+    },
+    {
+      "tp": 4,
+      "active_experts": [
+        0,
+        1
+      ],
+      "pressure_ranks": [],
+      "tpot_ms": 1.0
+    }
+  ],
+  "foreground_link_history": [
+    {
+      "switch_index": 0,
+      "source_tp": 2,
+      "active_experts": [
+        0,
+        1
+      ],
+      "pressure_ranks": [],
+      "links": []
+    },
+    {
+      "switch_index": 1,
+      "source_tp": 4,
+      "active_experts": [
+        0,
+        1
+      ],
+      "pressure_ranks": [],
+      "links": []
+    },
+    {
+      "switch_index": 2,
+      "source_tp": 2,
+      "active_experts": [
+        0,
+        1
+      ],
+      "pressure_ranks": [],
+      "links": []
+    },
+    {
+      "switch_index": 3,
+      "source_tp": 4,
+      "active_experts": [
+        0,
+        1
+      ],
+      "pressure_ranks": [],
+      "links": []
+    }
+  ],
+  "max_waves": 1,
+  "max_wave_tasks": 0,
+  "expansion_max_wave_tasks": 0,
+  "shrink_max_wave_tasks": 0,
+  "pack_target_bytes": 0,
+  "pack_max_item_bytes": 0,
+  "unpack_chunk_bytes": 67108864,
+  "p2p_order": "nccl-round",
+  "persistent_pack_buffers": false,
+  "pack_rerouted_only": false,
+  "candidate_route_available": false,
+  "packing_candidate_available": false,
+  "online_migration_first_guard": null,
+  "online_dual_objective_guard": null,
+  "guard_tpot_metric": "p95",
+  "switches": [
+    {
+      "index": 0,
+      "direction": "2->4",
+      "active_experts": [
+        0,
+        1
+      ],
+      "pressure_ranks": [],
+      "hotspot_phase_changed": false,
+      "phase_calibration_max_diff": null,
+      "plan_variant": "baseline",
+      "requested_plan_variant": "baseline",
+      "candidate_fallback_reason": null,
+      "snapshot_tokens": 9,
+      "delta_tokens": 2,
+      "delta_and_commit_s": 0.0010000000000000009,
+      "pointer_switch_s": 0.0010000000000000009,
+      "validation_max_diff": 0.0,
+      "replanned": false,
+      "online_replan_s": 0.0,
+      "online_replan_wait_s": 0.0,
+      "online_replan_scheduled": false,
+      "online_replan_trigger_expansion": -1,
+      "online_replan_useful": null,
+      "hybrid_fast_path": {
+        "enabled": false,
+        "reason": "disabled"
+      },
+      "adaptive_hybrid": null,
+      "adaptive_decision_s": 0.0,
+      "switch_wall_s": 0.013,
+      "foreground_baseline_used_tpot_ms": 1.0,
+      "foreground_baseline_updated_tpot_ms": 1.0,
+      "source_route_stats": {},
+      "candidate_route_available": false,
+      "packing_candidate_available": false,
+      "base": {
+        "waves": 1,
+        "wall_s": 0.007,
+        "exposed_wait_s": 0.002,
+        "overlap_steps": 2,
+        "tpot_mean_ms": 1.0,
+        "tpot_p95_ms": 1.0,
+        "tpot_p99_ms": 1.0,
+        "tpot_std_ms": 0.0,
+        "tpot_cv": 0.0,
+        "foreground_pressure_mean": 0.0,
+        "foreground_pressure_p95": 0.0,
+        "wave_records": [
+          {
+            "tasks": 3,
+            "bytes": 336,
+            "elapsed_s": 0.005,
+            "transport_s": 0.001,
+            "transport_stage_s": {},
+            "overlap_steps": 2,
+            "exposed_wait_s": 0.001,
+            "commit_s": 0.001,
+            "observed_gbps": [],
+            "copy_service": {
+              "stage_elapsed_s": {}
+            },
+            "copy_service_rank": 0,
+            "foreground_pressure_mean": 0.0
+          }
+        ],
+        "execution_mode": "baseline",
+        "max_wave_tasks": 0,
+        "hybrid_fast_path": false,
+        "hybrid_fast_path_reason": {
+          "enabled": false,
+          "reason": "disabled"
+        }
+      },
+      "residual_bandwidth": {
+        "samples": 3,
+        "foreground_samples": 2,
+        "wave_samples": 1,
+        "capacity": [
+          {
+            "src": 0,
+            "dst": 0,
+            "gbps": 100.0
+          }
+        ],
+        "foreground": [],
+        "service": [],
+        "residual": [
+          {
+            "src": 0,
+            "dst": 0,
+            "gbps": 100.0
+          }
+        ]
+      },
+      "migration_first_guard": null,
+      "dual_objective_guard": null,
+      "online_plan_controller": null
+    },
+    {
+      "index": 1,
+      "direction": "4->2",
+      "active_experts": [
+        0,
+        1
+      ],
+      "pressure_ranks": [],
+      "hotspot_phase_changed": false,
+      "phase_calibration_max_diff": null,
+      "plan_variant": "baseline",
+      "requested_plan_variant": "baseline",
+      "candidate_fallback_reason": null,
+      "snapshot_tokens": 12,
+      "delta_tokens": 2,
+      "delta_and_commit_s": 0.0010000000000000009,
+      "pointer_switch_s": 0.0009999999999999974,
+      "validation_max_diff": 0.0,
+      "replanned": false,
+      "online_replan_s": 0.0,
+      "online_replan_wait_s": 0.0,
+      "online_replan_scheduled": false,
+      "online_replan_trigger_expansion": -1,
+      "online_replan_useful": null,
+      "hybrid_fast_path": {
+        "enabled": false,
+        "reason": "disabled"
+      },
+      "adaptive_hybrid": null,
+      "adaptive_decision_s": 0.0,
+      "switch_wall_s": 0.013,
+      "foreground_baseline_used_tpot_ms": 1.0,
+      "foreground_baseline_updated_tpot_ms": 1.0,
+      "source_route_stats": {},
+      "candidate_route_available": false,
+      "packing_candidate_available": false,
+      "base": {
+        "waves": 1,
+        "wall_s": 0.006999999999999999,
+        "exposed_wait_s": 0.0019999999999999983,
+        "overlap_steps": 2,
+        "tpot_mean_ms": 1.0,
+        "tpot_p95_ms": 1.0,
+        "tpot_p99_ms": 1.0,
+        "tpot_std_ms": 0.0,
+        "tpot_cv": 0.0,
+        "foreground_pressure_mean": 0.0,
+        "foreground_pressure_p95": 0.0,
+        "wave_records": [
+          {
+            "tasks": 3,
+            "bytes": 432,
+            "elapsed_s": 0.005000000000000001,
+            "transport_s": 0.001,
+            "transport_stage_s": {},
+            "overlap_steps": 2,
+            "exposed_wait_s": 0.0009999999999999974,
+            "commit_s": 0.0010000000000000009,
+            "observed_gbps": [],
+            "copy_service": {
+              "stage_elapsed_s": {}
+            },
+            "copy_service_rank": 0,
+            "foreground_pressure_mean": 0.0
+          }
+        ],
+        "execution_mode": "baseline",
+        "max_wave_tasks": 0,
+        "hybrid_fast_path": false,
+        "hybrid_fast_path_reason": {
+          "enabled": false,
+          "reason": "disabled"
+        }
+      },
+      "residual_bandwidth": {
+        "samples": 3,
+        "foreground_samples": 2,
+        "wave_samples": 1,
+        "capacity": [
+          {
+            "src": 0,
+            "dst": 0,
+            "gbps": 100.0
+          }
+        ],
+        "foreground": [],
+        "service": [],
+        "residual": [
+          {
+            "src": 0,
+            "dst": 0,
+            "gbps": 100.0
+          }
+        ]
+      },
+      "migration_first_guard": null,
+      "dual_objective_guard": null,
+      "online_plan_controller": null
+    },
+    {
+      "index": 2,
+      "direction": "2->4",
+      "active_experts": [
+        0,
+        1
+      ],
+      "pressure_ranks": [],
+      "hotspot_phase_changed": false,
+      "phase_calibration_max_diff": null,
+      "plan_variant": "baseline",
+      "requested_plan_variant": "baseline",
+      "candidate_fallback_reason": null,
+      "snapshot_tokens": 15,
+      "delta_tokens": 2,
+      "delta_and_commit_s": 0.0010000000000000009,
+      "pointer_switch_s": 0.0010000000000000009,
+      "validation_max_diff": 0.0,
+      "replanned": false,
+      "online_replan_s": 0.0,
+      "online_replan_wait_s": 0.0,
+      "online_replan_scheduled": false,
+      "online_replan_trigger_expansion": -1,
+      "online_replan_useful": null,
+      "hybrid_fast_path": {
+        "enabled": false,
+        "reason": "disabled"
+      },
+      "adaptive_hybrid": null,
+      "adaptive_decision_s": 0.0,
+      "switch_wall_s": 0.013000000000000001,
+      "foreground_baseline_used_tpot_ms": 1.0,
+      "foreground_baseline_updated_tpot_ms": 1.0,
+      "source_route_stats": {},
+      "candidate_route_available": false,
+      "packing_candidate_available": false,
+      "base": {
+        "waves": 1,
+        "wall_s": 0.006999999999999996,
+        "exposed_wait_s": 0.0020000000000000018,
+        "overlap_steps": 2,
+        "tpot_mean_ms": 1.0,
+        "tpot_p95_ms": 1.0,
+        "tpot_p99_ms": 1.0,
+        "tpot_std_ms": 0.0,
+        "tpot_cv": 0.0,
+        "foreground_pressure_mean": 0.0,
+        "foreground_pressure_p95": 0.0,
+        "wave_records": [
+          {
+            "tasks": 3,
+            "bytes": 528,
+            "elapsed_s": 0.0050000000000000044,
+            "transport_s": 0.001,
+            "transport_stage_s": {},
+            "overlap_steps": 2,
+            "exposed_wait_s": 0.0010000000000000009,
+            "commit_s": 0.0010000000000000009,
+            "observed_gbps": [],
+            "copy_service": {
+              "stage_elapsed_s": {}
+            },
+            "copy_service_rank": 0,
+            "foreground_pressure_mean": 0.0
+          }
+        ],
+        "execution_mode": "baseline",
+        "max_wave_tasks": 0,
+        "hybrid_fast_path": false,
+        "hybrid_fast_path_reason": {
+          "enabled": false,
+          "reason": "disabled"
+        }
+      },
+      "residual_bandwidth": {
+        "samples": 6,
+        "foreground_samples": 4,
+        "wave_samples": 2,
+        "capacity": [
+          {
+            "src": 0,
+            "dst": 0,
+            "gbps": 100.0
+          }
+        ],
+        "foreground": [],
+        "service": [],
+        "residual": [
+          {
+            "src": 0,
+            "dst": 0,
+            "gbps": 100.0
+          }
+        ]
+      },
+      "migration_first_guard": null,
+      "dual_objective_guard": null,
+      "online_plan_controller": null
+    },
+    {
+      "index": 3,
+      "direction": "4->2",
+      "active_experts": [
+        0,
+        1
+      ],
+      "pressure_ranks": [],
+      "hotspot_phase_changed": false,
+      "phase_calibration_max_diff": null,
+      "plan_variant": "baseline",
+      "requested_plan_variant": "baseline",
+      "candidate_fallback_reason": null,
+      "snapshot_tokens": 18,
+      "delta_tokens": 2,
+      "delta_and_commit_s": 0.0010000000000000009,
+      "pointer_switch_s": 0.0010000000000000009,
+      "validation_max_diff": 0.0,
+      "replanned": false,
+      "online_replan_s": 0.0,
+      "online_replan_wait_s": 0.0,
+      "online_replan_scheduled": false,
+      "online_replan_trigger_expansion": -1,
+      "online_replan_useful": null,
+      "hybrid_fast_path": {
+        "enabled": false,
+        "reason": "disabled"
+      },
+      "adaptive_hybrid": null,
+      "adaptive_decision_s": 0.0,
+      "switch_wall_s": 0.012999999999999998,
+      "foreground_baseline_used_tpot_ms": 1.0,
+      "foreground_baseline_updated_tpot_ms": 1.0,
+      "source_route_stats": {},
+      "candidate_route_available": false,
+      "packing_candidate_available": false,
+      "base": {
+        "waves": 1,
+        "wall_s": 0.007000000000000006,
+        "exposed_wait_s": 0.0020000000000000018,
+        "overlap_steps": 2,
+        "tpot_mean_ms": 1.0,
+        "tpot_p95_ms": 1.0,
+        "tpot_p99_ms": 1.0,
+        "tpot_std_ms": 0.0,
+        "tpot_cv": 0.0,
+        "foreground_pressure_mean": 0.0,
+        "foreground_pressure_p95": 0.0,
+        "wave_records": [
+          {
+            "tasks": 3,
+            "bytes": 624,
+            "elapsed_s": 0.0050000000000000044,
+            "transport_s": 0.001,
+            "transport_stage_s": {},
+            "overlap_steps": 2,
+            "exposed_wait_s": 0.0010000000000000009,
+            "commit_s": 0.0010000000000000009,
+            "observed_gbps": [],
+            "copy_service": {
+              "stage_elapsed_s": {}
+            },
+            "copy_service_rank": 0,
+            "foreground_pressure_mean": 0.0
+          }
+        ],
+        "execution_mode": "baseline",
+        "max_wave_tasks": 0,
+        "hybrid_fast_path": false,
+        "hybrid_fast_path_reason": {
+          "enabled": false,
+          "reason": "disabled"
+        }
+      },
+      "residual_bandwidth": {
+        "samples": 6,
+        "foreground_samples": 4,
+        "wave_samples": 2,
+        "capacity": [
+          {
+            "src": 0,
+            "dst": 0,
+            "gbps": 100.0
+          }
+        ],
+        "foreground": [],
+        "service": [],
+        "residual": [
+          {
+            "src": 0,
+            "dst": 0,
+            "gbps": 100.0
+          }
+        ]
+      },
+      "migration_first_guard": null,
+      "dual_objective_guard": null,
+      "online_plan_controller": null
+    }
+  ],
+  "copy_service_by_rank": [
+    {
+      "rank": 0,
+      "switches": [
+        {
+          "index": 0,
+          "direction": "2->4",
+          "plan_variant": "baseline",
+          "waves": [
+            {
+              "stage_elapsed_s": {}
+            }
+          ]
+        },
+        {
+          "index": 1,
+          "direction": "4->2",
+          "plan_variant": "baseline",
+          "waves": [
+            {
+              "stage_elapsed_s": {}
+            }
+          ]
+        },
+        {
+          "index": 2,
+          "direction": "2->4",
+          "plan_variant": "baseline",
+          "waves": [
+            {
+              "stage_elapsed_s": {}
+            }
+          ]
+        },
+        {
+          "index": 3,
+          "direction": "4->2",
+          "plan_variant": "baseline",
+          "waves": [
+            {
+              "stage_elapsed_s": {}
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 0,
+      "switches": [
+        {
+          "index": 0,
+          "direction": "2->4",
+          "plan_variant": "baseline",
+          "waves": [
+            {
+              "stage_elapsed_s": {}
+            }
+          ]
+        },
+        {
+          "index": 1,
+          "direction": "4->2",
+          "plan_variant": "baseline",
+          "waves": [
+            {
+              "stage_elapsed_s": {}
+            }
+          ]
+        },
+        {
+          "index": 2,
+          "direction": "2->4",
+          "plan_variant": "baseline",
+          "waves": [
+            {
+              "stage_elapsed_s": {}
+            }
+          ]
+        },
+        {
+          "index": 3,
+          "direction": "4->2",
+          "plan_variant": "baseline",
+          "waves": [
+            {
+              "stage_elapsed_s": {}
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 0,
+      "switches": [
+        {
+          "index": 0,
+          "direction": "2->4",
+          "plan_variant": "baseline",
+          "waves": [
+            {
+              "stage_elapsed_s": {}
+            }
+          ]
+        },
+        {
+          "index": 1,
+          "direction": "4->2",
+          "plan_variant": "baseline",
+          "waves": [
+            {
+              "stage_elapsed_s": {}
+            }
+          ]
+        },
+        {
+          "index": 2,
+          "direction": "2->4",
+          "plan_variant": "baseline",
+          "waves": [
+            {
+              "stage_elapsed_s": {}
+            }
+          ]
+        },
+        {
+          "index": 3,
+          "direction": "4->2",
+          "plan_variant": "baseline",
+          "waves": [
+            {
+              "stage_elapsed_s": {}
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 0,
+      "switches": [
+        {
+          "index": 0,
+          "direction": "2->4",
+          "plan_variant": "baseline",
+          "waves": [
+            {
+              "stage_elapsed_s": {}
+            }
+          ]
+        },
+        {
+          "index": 1,
+          "direction": "4->2",
+          "plan_variant": "baseline",
+          "waves": [
+            {
+              "stage_elapsed_s": {}
+            }
+          ]
+        },
+        {
+          "index": 2,
+          "direction": "2->4",
+          "plan_variant": "baseline",
+          "waves": [
+            {
+              "stage_elapsed_s": {}
+            }
+          ]
+        },
+        {
+          "index": 3,
+          "direction": "4->2",
+          "plan_variant": "baseline",
+          "waves": [
+            {
+              "stage_elapsed_s": {}
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "final_active_tp": 2,
+  "final_residual_bandwidth": {
+    "samples": 6,
+    "foreground_samples": 4,
+    "wave_samples": 2,
+    "capacity": [
+      {
+        "src": 0,
+        "dst": 0,
+        "gbps": 100.0
+      }
+    ],
+    "foreground": [],
+    "service": [],
+    "residual": [
+      {
+        "src": 0,
+        "dst": 0,
+        "gbps": 100.0
+      }
+    ]
+  },
+  "final_residual_bandwidth_by_tp": {
+    "2": {
+      "samples": 6,
+      "foreground_samples": 4,
+      "wave_samples": 2,
+      "capacity": [
+        {
+          "src": 0,
+          "dst": 0,
+          "gbps": 100.0
+        }
+      ],
+      "foreground": [],
+      "service": [],
+      "residual": [
+        {
+          "src": 0,
+          "dst": 0,
+          "gbps": 100.0
+        }
+      ]
+    },
+    "4": {
+      "samples": 6,
+      "foreground_samples": 4,
+      "wave_samples": 2,
+      "capacity": [
+        {
+          "src": 0,
+          "dst": 0,
+          "gbps": 100.0
+        }
+      ],
+      "foreground": [],
+      "service": [],
+      "residual": [
+        {
+          "src": 0,
+          "dst": 0,
+          "gbps": 100.0
+        }
+      ]
+    }
+  }
+}
+Saved live benchmark results to C:\data\weavetp-dp-sweep-s1-20261011\tmpie3gtlvy\result.json

@@ -1,0 +1,34 @@
+test_both_successful_exits_do_not_accept_incomplete_result (t085_cpu_suite.CompareTests.test_both_successful_exits_do_not_accept_incomplete_result) ... ok
+test_cleanup_preserves_unrelated_processes_and_records_memory (t085_cpu_suite.CompareTests.test_cleanup_preserves_unrelated_processes_and_records_memory) ... ok
+test_cleanup_selection_requires_exact_tag_and_worker (t085_cpu_suite.CompareTests.test_cleanup_selection_requires_exact_tag_and_worker) ... ok
+test_cleanup_still_uses_launch_baseline_plus_16 (t085_cpu_suite.CompareTests.test_cleanup_still_uses_launch_baseline_plus_16) ... ok
+test_corrupted_result_and_changed_code_block_resume (t085_cpu_suite.CompareTests.test_corrupted_result_and_changed_code_block_resume) ... ok
+test_dry_run_performs_no_rpc_and_no_output_writes (t085_cpu_suite.CompareTests.test_dry_run_performs_no_rpc_and_no_output_writes) ... ok
+test_environment_does_not_inherit_experimental_flags (t085_cpu_suite.CompareTests.test_environment_does_not_inherit_experimental_flags) ... ok
+test_exit_configuration_drift_cannot_complete (t085_cpu_suite.CompareTests.test_exit_configuration_drift_cannot_complete) ... ok
+test_formal_shell_dispatch_dry_run_and_legacy_argument_rejection (t085_cpu_suite.CompareTests.test_formal_shell_dispatch_dry_run_and_legacy_argument_rejection) ... ok
+test_gpu_occupancy_refuses_without_waiting (t085_cpu_suite.CompareTests.test_gpu_occupancy_refuses_without_waiting) ... ok
+test_gpu_process_gate_allows_only_configured_mps_owner (t085_cpu_suite.CompareTests.test_gpu_process_gate_allows_only_configured_mps_owner) ... ok
+test_gpu_query_includes_utilization_and_process_gpu (t085_cpu_suite.CompareTests.test_gpu_query_includes_utilization_and_process_gpu) ... ok
+test_invalid_results_never_complete (t085_cpu_suite.CompareTests.test_invalid_results_never_complete) ... ok
+test_launcher_and_wrapper_generate_real_argv_without_torch (t085_cpu_suite.CompareTests.test_launcher_and_wrapper_generate_real_argv_without_torch) ... ok
+test_master_result_alone_never_skips_or_launches (t085_cpu_suite.CompareTests.test_master_result_alone_never_skips_or_launches) ... ok
+test_mismatched_code_stops_before_either_gpu_launch (t085_cpu_suite.CompareTests.test_mismatched_code_stops_before_either_gpu_launch) ... ok
+test_mismatched_config_stops_before_either_gpu_launch (t085_cpu_suite.CompareTests.test_mismatched_config_stops_before_either_gpu_launch) ... ok
+test_missing_node1_exit_blocks_resume (t085_cpu_suite.CompareTests.test_missing_node1_exit_blocks_resume) ... ok
+test_nine_rotating_cases_and_fixed_settings (t085_cpu_suite.CompareTests.test_nine_rotating_cases_and_fixed_settings) ... ok
+test_node1_cannot_drive_compare (t085_cpu_suite.CompareTests.test_node1_cannot_drive_compare) ... ok
+test_node1_failure_stops_peer_and_retains_both_exit_codes (t085_cpu_suite.CompareTests.test_node1_failure_stops_peer_and_retains_both_exit_codes) ... ok
+test_node_prepare_cannot_be_reused_after_configuration_change (t085_cpu_suite.CompareTests.test_node_prepare_cannot_be_reused_after_configuration_change) ... ok
+test_node_receipt_persists_exit_and_effective_environment (t085_cpu_suite.CompareTests.test_node_receipt_persists_exit_and_effective_environment) ... ok
+test_node_timeout_records_failure_and_cleans_only_tagged_task (t085_cpu_suite.CompareTests.test_node_timeout_records_failure_and_cleans_only_tagged_task) ... ok
+test_peer_stop_before_delayed_launch_cannot_start_gpu (t085_cpu_suite.CompareTests.test_peer_stop_before_delayed_launch_cannot_start_gpu) ... ok
+test_port_in_use_blocks_prepare_without_starting_process (t085_cpu_suite.CompareTests.test_port_in_use_blocks_prepare_without_starting_process) ... ok
+test_queue_stops_after_first_failed_case (t085_cpu_suite.CompareTests.test_queue_stops_after_first_failed_case) ... ok
+test_success_and_verified_resume (t085_cpu_suite.CompareTests.test_success_and_verified_resume) ... ok
+test_two_node_commands_share_tag_and_request (t085_cpu_suite.CompareTests.test_two_node_commands_share_tag_and_request) ... ok
+
+----------------------------------------------------------------------
+Ran 29 tests in 6.129s
+
+OK

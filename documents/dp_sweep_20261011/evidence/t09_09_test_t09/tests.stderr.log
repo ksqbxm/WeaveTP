@@ -1,0 +1,27 @@
+test_both_prepare_before_move_and_verify_before_unlock (t085_cpu_suite.IsolationTests.test_both_prepare_before_move_and_verify_before_unlock) ... ok
+test_lost_move_reply_and_unreachable_rollback_preserve_locks (t085_cpu_suite.IsolationTests.test_lost_move_reply_and_unreachable_rollback_preserve_locks) ... ok
+test_lost_reply_after_prepare_or_move_restores_real_directories (t085_cpu_suite.IsolationTests.test_lost_reply_after_prepare_or_move_restores_real_directories) ... ok
+test_node_refuses_residual_process_and_completed_evidence (t085_cpu_suite.IsolationTests.test_node_refuses_residual_process_and_completed_evidence) ... ok
+test_node_rename_records_reason_and_rollback_preserves_bytes (t085_cpu_suite.IsolationTests.test_node_rename_records_reason_and_rollback_preserves_bytes) ... ok
+test_peer_unlock_failure_keeps_controller_locked (t085_cpu_suite.IsolationTests.test_peer_unlock_failure_keeps_controller_locked) ... ok
+test_prepare_rejection_releases_owned_lock_and_preserves_foreign_lock (t085_cpu_suite.IsolationTests.test_prepare_rejection_releases_owned_lock_and_preserves_foreign_lock) ... ok
+test_process_match_is_exact_including_supervisor (t085_cpu_suite.IsolationTests.test_process_match_is_exact_including_supervisor) ... ok
+test_second_move_failure_restores_both_before_unlock (t085_cpu_suite.IsolationTests.test_second_move_failure_restores_both_before_unlock) ... ok
+test_disk_constant_matches_budget (t085_cpu_suite.OperationsTests.test_disk_constant_matches_budget) ... ok
+test_dry_run_nine_only_and_no_io (t085_cpu_suite.OperationsTests.test_dry_run_nine_only_and_no_io) ... ok
+test_failed_directory_is_ignored_by_executor_and_manifest_paths (t085_cpu_suite.OperationsTests.test_failed_directory_is_ignored_by_executor_and_manifest_paths) ... ok
+test_failure_stops_queue_and_end_is_printed (t085_cpu_suite.OperationsTests.test_failure_stops_queue_and_end_is_printed) ... ok
+test_fixed_directional_requests_and_commands_byte_identical (t085_cpu_suite.OperationsTests.test_fixed_directional_requests_and_commands_byte_identical) ... ok
+test_only_then_resume_reuses_executor_and_preserves_requests_and_round_order (t085_cpu_suite.OperationsTests.test_only_then_resume_reuses_executor_and_preserves_requests_and_round_order) ... ok
+test_paths_and_selection_fail_closed (t085_cpu_suite.OperationsTests.test_paths_and_selection_fail_closed) ... ok
+test_preflight_checks_both_nodes_and_rejects_each_gate (t085_cpu_suite.OperationsTests.test_preflight_checks_both_nodes_and_rejects_each_gate) ... ok
+test_round_summary_rejects_stale_or_changed_completion (t085_cpu_suite.OperationsTests.test_round_summary_rejects_stale_or_changed_completion) ... ok
+test_each_direction_requires_aware_geometry_and_accepted_gate (t085_cpu_suite.W2Tests.test_each_direction_requires_aware_geometry_and_accepted_gate) ... ok
+test_request_and_complete_configuration_are_mandatory (t085_cpu_suite.W2Tests.test_request_and_complete_configuration_are_mandatory) ... ok
+test_w0_missing_configuration_and_mismatched_configuration_rejected (t085_cpu_suite.W2Tests.test_w0_missing_configuration_and_mismatched_configuration_rejected) ... ok
+test_w2_geometry_accepts_baseline_fifo_labels_and_original_bytes (t085_cpu_suite.W2Tests.test_w2_geometry_accepts_baseline_fifo_labels_and_original_bytes) ... ok
+
+----------------------------------------------------------------------
+Ran 22 tests in 3.044s
+
+OK

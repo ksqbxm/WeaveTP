@@ -1,0 +1,30 @@
+test_accepted_candidate_and_adaptive_fallback_are_independent (t085_cpu_suite.CandidateTests.test_accepted_candidate_and_adaptive_fallback_are_independent) ... ok
+test_candidate_adopted_with_actual_fifo_or_residual (t085_cpu_suite.CandidateTests.test_candidate_adopted_with_actual_fifo_or_residual) ... ok
+test_distinct_false_gate_reasons_and_missing_evidence (t085_cpu_suite.CandidateTests.test_distinct_false_gate_reasons_and_missing_evidence) ... ok
+test_missing_execution_mode_not_inferred (t085_cpu_suite.CandidateTests.test_missing_execution_mode_not_inferred) ... ok
+test_observation_does_not_mutate_plans_stats_or_records (t085_cpu_suite.CandidateTests.test_observation_does_not_mutate_plans_stats_or_records) ... ok
+test_rejected_candidate_cannot_masquerade_as_restored_default (t085_cpu_suite.CandidateTests.test_rejected_candidate_cannot_masquerade_as_restored_default) ... ok
+test_shrink_does_not_inherit_expansion_candidate (t085_cpu_suite.CandidateTests.test_shrink_does_not_inherit_expansion_candidate) ... ok
+test_both_real_layout_sizes_and_reciprocity (t085_cpu_suite.GroupTests.test_both_real_layout_sizes_and_reciprocity) ... ok
+test_cross_host_tp_etp_ep_fail_even_with_reciprocal_members (t085_cpu_suite.GroupTests.test_cross_host_tp_etp_ep_fail_even_with_reciprocal_members) ... ok
+test_incorrect_dp_or_edp_fails (t085_cpu_suite.GroupTests.test_incorrect_dp_or_edp_fails) ... ok
+test_rank_device_uuid_and_host_failures (t085_cpu_suite.GroupTests.test_rank_device_uuid_and_host_failures) ... ok
+test_reader_queries_actual_groups_and_measured_sizes (t085_cpu_suite.GroupTests.test_reader_queries_actual_groups_and_measured_sizes) ... ok
+test_same_size_wrong_members_and_nonreciprocal_groups_fail (t085_cpu_suite.GroupTests.test_same_size_wrong_members_and_nonreciprocal_groups_fail) ... ok
+test_all_rank_merge_json_roundtrip_and_recomputable_totals (t085_cpu_suite.IntegrationTests.test_all_rank_merge_json_roundtrip_and_recomputable_totals) ... ok
+test_hooks_are_outside_switch_timer_and_wave_loop (t085_cpu_suite.IntegrationTests.test_hooks_are_outside_switch_timer_and_wave_loop) ... ok
+test_merge_rejects_disagreement_missing_ranks_and_wrong_receiver (t085_cpu_suite.IntegrationTests.test_merge_rejects_disagreement_missing_ranks_and_wrong_receiver) ... ok
+test_server_checker_accepts_global_rejection_without_inventing_candidate (t085_cpu_suite.IntegrationTests.test_server_checker_accepts_global_rejection_without_inventing_candidate) ... ok
+test_server_checker_reads_both_directions_and_actual_paths (t085_cpu_suite.IntegrationTests.test_server_checker_reads_both_directions_and_actual_paths) ... ok
+test_server_checker_rejects_missing_or_corrupted_evidence (t085_cpu_suite.IntegrationTests.test_server_checker_rejects_missing_or_corrupted_evidence) ... ok
+test_invalid_kv_capacity_and_duplicate_receiver_rejected (t085_cpu_suite.TrafficTests.test_invalid_kv_capacity_and_duplicate_receiver_rejected) ... ok
+test_noncontiguous_slice_bytes (t085_cpu_suite.TrafficTests.test_noncontiguous_slice_bytes) ... ok
+test_plan_identity_changes_with_source_and_is_stable_across_ranges (t085_cpu_suite.TrafficTests.test_plan_identity_changes_with_source_and_is_stable_across_ranges) ... ok
+test_prefix_delta_use_effective_range_not_capacity (t085_cpu_suite.TrafficTests.test_prefix_delta_use_effective_range_not_capacity) ... ok
+test_send_mirror_ignored_local_separated_bidirectional_conservation (t085_cpu_suite.TrafficTests.test_send_mirror_ignored_local_separated_bidirectional_conservation) ... ok
+test_zero_length_prefix_and_delta (t085_cpu_suite.TrafficTests.test_zero_length_prefix_and_delta) ... ok
+
+----------------------------------------------------------------------
+Ran 25 tests in 0.120s
+
+OK
