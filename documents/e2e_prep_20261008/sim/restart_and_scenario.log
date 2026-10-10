@@ -1,0 +1,19 @@
+## (1) 重启敏感性（N=1，Sky 全量，L=600，34 GB，各自计划）
+  重载  35s，重新 prefill 速度 ×1.0：重启每次切换墙钟 [68, 52] s，停服合计 2.0 min / 总 101 min → WeaveTP/重启 1.036
+  重载  60s，重新 prefill 速度 ×1.0：重启每次切换墙钟 [93, 77] s，停服合计 2.8 min / 总 102 min → WeaveTP/重启 1.045
+  重载 120s，重新 prefill 速度 ×1.0：重启每次切换墙钟 [153, 137] s，停服合计 4.8 min / 总 104 min → WeaveTP/重启 1.065
+  重载  35s，重新 prefill 速度 ×0.5：重启每次切换墙钟 [101, 69] s，停服合计 2.8 min / 总 102 min → WeaveTP/重启 1.045
+  重载 120s，重新 prefill 速度 ×0.5：重启每次切换墙钟 [186, 154] s，停服合计 5.7 min / 总 105 min → WeaveTP/重启 1.074
+
+## (2) 超长上下文：长段为合成请求，输入 U(a,b)、输出 U(300,1000)；短段 ShareGPT 4000 条；34 GB
+   每副本容量 TP2 154k、TP4 372k token
+  输入 8k–16k，L=100：每副本可并发 TP2≈12、TP4≈29（全集群 96 vs 116）| WeaveTP 22 min，切换 2 次 | fixed_tp2:0.963 fixed_tp4:1.280 restart:1.100
+  输入 8k–16k，L=300：每副本可并发 TP2≈12、TP4≈29（全集群 96 vs 116）| WeaveTP 36 min，切换 2 次 | fixed_tp2:0.901 fixed_tp4:1.147 restart:1.040
+  输入 30k–50k，L=100：每副本可并发 TP2≈3、TP4≈9（全集群 24 vs 36）| WeaveTP 39 min，切换 2 次 | fixed_tp2:0.865 fixed_tp4:1.094 restart:0.999
+  输入 30k–50k，L=300：每副本可并发 TP2≈3、TP4≈9（全集群 24 vs 36）| WeaveTP 82 min，切换 2 次 | fixed_tp2:0.874 fixed_tp4:1.052 restart:1.020
+  输入 60k–75k，L=100：每副本可并发 TP2≈2、TP4≈5（全集群 16 vs 20）| WeaveTP 56 min，切换 2 次 | fixed_tp2:0.850 fixed_tp4:1.057 restart:0.998
+  输入 60k–75k，L=300：每副本可并发 TP2≈2、TP4≈5（全集群 16 vs 20）| WeaveTP 131 min，切换 2 次 | fixed_tp2:0.857 fixed_tp4:1.044 restart:1.019
+  输入 80k–100k，L=100：每副本可并发 TP2≈1、TP4≈4（全集群 8 vs 16）| WeaveTP 67 min，切换 2 次 | fixed_tp2:1.067 fixed_tp4:1.060 restart:1.004
+  输入 80k–100k，L=300：每副本可并发 TP2≈1、TP4≈4（全集群 8 vs 16）| WeaveTP 162 min，切换 2 次 | fixed_tp2:1.136 fixed_tp4:1.025 restart:0.993
+  输入 100k–140k，L=100：每副本可并发 TP2≈1、TP4≈3（全集群 8 vs 12）| WeaveTP 81 min，切换 2 次 | fixed_tp2:0.970 fixed_tp4:1.071 restart:1.043
+  输入 100k–140k，L=300：每副本可并发 TP2≈1、TP4≈3（全集群 8 vs 12）| WeaveTP 210 min，切换 2 次 | fixed_tp2:0.962 fixed_tp4:1.010 restart:1.014
