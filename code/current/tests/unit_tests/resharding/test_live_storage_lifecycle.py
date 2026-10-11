@@ -29,37 +29,49 @@ from tools.resharding.standby_weights import (
 
 def run_coordinator(tree, *, release=False, bitwise=False, identity=False, repeat=False, fault=False, check_polls=1,
                     peer_check_polls=0, peer_weight_valid=True, capacity=128,
-                    live_overrides=None, namespace_overrides=None):
+                    live_overrides=None, namespace_overrides=None, src_tp=2, dst_tp=4, world_size=4,
+                    model_initializer=None):
     names = ["run_live_benchmark", "add_live_args", "StaticKVCacheModule", "LiveStateBundle",
              "_run_async_waves", "_parse_rank_phases", "_pressure_ranks_for_switch",
              "_active_experts_for_switch", "_set_active_experts", "_poison_kv", "_percentile",
              "_tasks_for_ids", "_validate_cutover", "_expert_hotness"]
+    if any(getattr(node, "name", None) == "_model_metadata" for node in tree.body):
+        names.append("_model_metadata")
     ns = defaults.load(tree, names)
     parser = argparse.ArgumentParser()
     ns["add_live_args"](parser)
     args = parser.parse_args([])
     vars(args).update(live_release_standby_weights=release, live_kv_request_identity=identity,
                       live_weight_bitwise_audit=bitwise,
-                      tensor_model_parallel_size=2, expert_tensor_parallel_size=2,
+                      tensor_model_parallel_size=src_tp, expert_tensor_parallel_size=src_tp,
+                      live_dst_tp=dst_tp,
                       expert_model_parallel_size=1, num_experts=4, micro_batch_size=1,
                       use_tp_pp_dp_mapping=False, seed=7, max_position_embeddings=capacity,
                       live_active_experts_tuple=(0, 1), live_active_expert_phases_tuple=((0, 1),),
                       live_switches=4, live_repeat_forward=repeat, live_scheduler_mode="baseline",
                       live_max_waves=1, live_max_overlap_steps=2)
+    if src_tp != 2:
+        args.live_src_tp = src_tp
     groups = SimpleNamespace(rank=lambda: 0, size=lambda: 1)
     models, releases, written = [], [], []
-    pg = SimpleNamespace(tp=groups, dp=groups, ep=groups)
+    pg = SimpleNamespace(tp=groups, dp=groups, ep=groups, expt_tp=groups, expt_dp=groups)
 
     class Model(torch.nn.Module):
         def __init__(self):
             super().__init__()
             self.w = torch.nn.Parameter(torch.arange(12.).reshape(3, 4), requires_grad=False)
             self.config, self.pg_collection = SimpleNamespace(), pg
+            self.decoder = SimpleNamespace(layers=[
+                SimpleNamespace(mlp=SimpleNamespace(**({"experts": object()} if index else {})))
+                for index in range(getattr(args, "num_layers", 0))
+            ])
         def cuda(self):
             return self
 
     def model_builder(*_a, **_kw):
         model = Model()
+        if model_initializer is not None:
+            model_initializer(model, len(models))
         models.append(model)
         return [model]
 
@@ -162,7 +174,7 @@ def run_coordinator(tree, *, release=False, bitwise=False, identity=False, repea
         ns[name] = getattr(live, name)
     clock = itertools.count()
     ns.update(get_args=lambda: args, dist=SimpleNamespace(
-        get_rank=lambda: 0, get_world_size=lambda **_: 4, new_group=lambda **_: groups,
+        get_rank=lambda *_: 0, get_world_size=lambda *_, **__: world_size, new_group=lambda **_: groups,
         barrier=lambda **_: None, broadcast_object_list=lambda *_a, **_kw: None,
         all_gather_object=lambda out, value, **_: out.__setitem__(slice(None), [value] * len(out))),
         time=SimpleNamespace(perf_counter=lambda: next(clock) / 1000), statistics=__import__("statistics"),
@@ -178,6 +190,7 @@ def run_coordinator(tree, *, release=False, bitwise=False, identity=False, repea
         _collect_active_collective_links=lambda *_a, **_kw: set(), collect_transfer_tasks=tasks,
         launch_reshard_plan=launch_reshard_plan, _hybrid_fast_path_decision=lambda *_a, **_kw: {"enabled": False, "reason": "disabled"},
         _configure_request_domains=request_domains, StandbyWeights=StandbyWeights,
+        observations=SimpleNamespace(observe_parallel_groups=lambda *_a, **_kw: None),
         validate_release_mode=validate_release_mode, storage_bytes=storage_bytes,
         audit_weight_checksums=audit_weight_checksums,
         release_standby=release_hook, cuda_memory=lambda: {"allocated": 0, "reserved": 0},

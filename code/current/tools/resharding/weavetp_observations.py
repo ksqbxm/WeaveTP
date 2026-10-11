@@ -44,23 +44,39 @@ def dp_sweep_metrics(record, peaks):
     }
 
 
-def validate_parallel_groups(rows):
+def validate_parallel_groups(rows, *, src_tp=None, dst_tp=None, ep=None):
     """Validate measured membership, including reciprocal reports from every rank."""
-    if len(rows) != 16 or {row["rank"] for row in rows} != set(range(16)):
-        raise ValueError("parallel groups require all 16 actual ranks")
+    legacy = src_tp is None and dst_tp is None and ep is None
+    if legacy:
+        src_tp, dst_tp, ep = 2, 4, 2
+    elif (src_tp not in (1, 2) or dst_tp != 2 * src_tp
+          or type(ep) is not int or ep <= 0):
+        raise ValueError("parallel groups require (src_tp, dst_tp) = (1, 2) or (2, 4) and positive EP")
+    world_size = 16 if legacy else len(rows)
+    if not world_size or len(rows) != world_size or {row["rank"] for row in rows} != set(range(world_size)):
+        raise ValueError(f"parallel groups require all {world_size} actual ranks")
+    if world_size % (dst_tp * ep):
+        raise ValueError("parallel groups require world size divisible by destination TP * EP")
     by_rank = {row["rank"]: row for row in rows}
-    if any(not row["gpu_uuid"] for row in rows) or len({r["gpu_uuid"] for r in rows}) != 16:
-        raise ValueError("parallel groups require 16 distinct GPU UUIDs")
+    if any(not row["gpu_uuid"] for row in rows) or len({r["gpu_uuid"] for r in rows}) != world_size:
+        raise ValueError(f"parallel groups require {world_size} distinct GPU UUIDs")
+    if not legacy:
+        for host in {row["hostname"] for row in rows}:
+            local_ranks = [row["local_rank"] for row in rows if row["hostname"] == host]
+            if not host or sorted(local_ranks) != list(range(len(local_ranks))):
+                raise ValueError(f"host {host}: missing or duplicate local ranks")
     for rank, row in by_rank.items():
-        expected_host = "sl3060" if rank < 8 else "sl3061"
-        if row["hostname"].split(".")[0].lower() != expected_host:
-            raise ValueError(f"rank {rank}: wrong hostname placement")
-        if row["local_rank"] != rank % 8 or row["cuda_device"] != row["local_rank"]:
+        if legacy:
+            expected_host = "sl3060" if rank < 8 else "sl3061"
+            if row["hostname"].split(".")[0].lower() != expected_host:
+                raise ValueError(f"rank {rank}: wrong hostname placement")
+        if ((legacy and row["local_rank"] != rank % 8)
+                or row["cuda_device"] != row["local_rank"]):
             raise ValueError(f"rank {rank}: wrong local rank / CUDA device")
-        for tp, dp, edp in ((2, 8, 4), (4, 4, 2)):
+        for tp in (src_tp, dst_tp):
             for name, expected_size in {
-                "tp": tp, "expt_tp": tp, "ep": 2, "dp": dp,
-                "expt_dp": edp, "pp": 1, "cp": 1,
+                "tp": tp, "expt_tp": tp, "ep": ep, "dp": world_size // tp,
+                "expt_dp": world_size // (tp * ep), "pp": 1, "cp": 1,
             }.items():
                 measured = row["groups"][str(tp)][name]
                 members = measured["members"]
@@ -73,9 +89,14 @@ def validate_parallel_groups(rows):
                 if name in ("tp", "expt_tp", "ep"):
                     if len({by_rank[peer]["hostname"] for peer in members}) != 1:
                         raise ValueError(f"rank {rank}, TP{tp}: {name} crosses nodes")
+        for name in ("tp", "expt_tp"):
+            source = row["groups"][str(src_tp)][name]["members"]
+            target = row["groups"][str(dst_tp)][name]["members"]
+            if not set(source) <= set(target):
+                raise ValueError(f"rank {rank}: TP{src_tp} {name} is not nested in TP{dst_tp}")
 
 
-def observe_parallel_groups(torch, dist, collections, control_group):
+def observe_parallel_groups(torch, dist, collections, control_group, *, src_tp=None, dst_tp=None, ep=None):
     """Called once before switching, using the two models' real collections."""
     device = torch.cuda.current_device()
     local = {
@@ -96,13 +117,14 @@ def observe_parallel_groups(torch, dist, collections, control_group):
             }
     rows = [None] * dist.get_world_size(control_group)
     dist.all_gather_object(rows, local, group=control_group)
-    validate_parallel_groups(rows)
+    validate_parallel_groups(rows, src_tp=src_tp, dst_tp=dst_tp, ep=ep)
     return rows
 
 
 def candidate_gate(stats, *, direction, enabled, allow_aware_shrink, threshold):
     """False alone is not evidence of rejection. Stats belong to the cached plan."""
-    if direction == "4->2" and not allow_aware_shrink:
+    source_tp, target_tp = map(int, direction.split("->"))
+    if source_tp > target_tp and not allow_aware_shrink:
         state = "not_applicable"
     elif not enabled:
         state = "disabled"
@@ -224,6 +246,8 @@ def local_switch_observation(record, *, default_plan, cached_plan, adopted_plan,
     """Run after ALL switches. Default/candidate use the same effective KV ranges."""
     start = record["snapshot_tokens"]
     end = start + record["delta_tokens"]
+    source_tp, target_tp = map(int, record["direction"].split("->"))
+    expansion = source_tp < target_tp
     gate = candidate_gate(
         getattr(cached_plan, "source_route_stats", {}) or {},
         direction=record["direction"], enabled=enabled,
@@ -254,10 +278,10 @@ def local_switch_observation(record, *, default_plan, cached_plan, adopted_plan,
         "fallback_reason": record["candidate_fallback_reason"],
         "candidate_route_available": candidate_available,
         "packing_candidate_available": bool(
-            record.get("packing_candidate_available", False) and record["direction"] == "2->4"
+            record.get("packing_candidate_available", False) and expansion
         ),
         "candidate_plan_available": bool(candidate_available or (
-            record.get("packing_candidate_available", False) and record["direction"] == "2->4"
+            record.get("packing_candidate_available", False) and expansion
         )),
         "candidate_unavailable_reason": (
             None if candidate_available else

@@ -51,7 +51,14 @@ def test_default_result_fields_and_calculations_are_main_ast():
         run = function(tree, "run_live_benchmark")
         return next(n.value for n in run.body if isinstance(n, ast.Assign)
                     and any(isinstance(t, ast.Name) and t.id == "result" for t in n.targets))
-    assert ast.dump(result(CURRENT)) == ast.dump(result(BASE))
+    # Stage 2 renames the expansion plan without changing fields or calculations.
+    class PlanName(ast.NodeTransformer):
+        def visit_Name(self, node):
+            if node.id == "expansion_plan":
+                node.id = "plan_2_to_4"
+            return node
+    current = PlanName().visit(copy.deepcopy(result(CURRENT)))
+    assert ast.dump(current) == ast.dump(result(BASE))
 
 
 def test_identity_parser_defaults_off():

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # Copyright (c) 2026, NVIDIA CORPORATION. All rights reserved.
-"""Live MoE TP2<->TP4 reshard benchmark with state-preserving KV cutover.
+"""Live MoE TP(src)<->TP(2*src) reshard benchmark with state-preserving KV cutover.
 
 The active model keeps executing real MoE decode steps while a standby layout
 receives model weights and the stable KV prefix through non-blocking NCCL. At a
@@ -209,19 +209,23 @@ def add_live_args(parser):
     group.add_argument(
         "--live-kv-request-identity",
         action="store_true",
-        help="Scope KV transfers and synthetic tokens by TP4 request domain (opt-in).",
+        help="Scope KV transfers and synthetic tokens by destination TP request domain (opt-in).",
     )
     group.add_argument(
         "--live-model-preset",
         choices=("synthetic", "deepseek-v2-lite"),
         default="synthetic",
     )
+    group.add_argument("--live-src-tp", type=int, default=SUPPRESS,
+                       help="Source TP (default: 2); must match model and expert TP.")
+    group.add_argument("--live-skip-checkpoint", action="store_true", default=SUPPRESS,
+                       help="Use Megatron random initialization for the DeepSeek source model.")
     group.add_argument("--live-dst-tp", type=int, default=4)
     group.add_argument("--live-switches", type=int, default=4)
     group.add_argument(
         "--live-repeat-forward",
         action="store_true",
-        help="Repeat 2->4 expansions in one process instead of alternating with 4->2.",
+        help="Repeat source->destination expansions instead of alternating with shrink.",
     )
     group.add_argument(
         "--live-method-variant",
@@ -251,7 +255,7 @@ def add_live_args(parser):
         type=int,
         default=0,
         help=(
-            "Optional TP2->TP4 task bound; zero reuses --live-max-wave-tasks. "
+            "Optional expansion task bound; zero reuses --live-max-wave-tasks. "
             "This also bounds the post-overlap KV delta."
         ),
     )
@@ -260,7 +264,7 @@ def add_live_args(parser):
         type=int,
         default=0,
         help=(
-            "Optional TP4->TP2 task bound; zero reuses --live-max-wave-tasks. "
+            "Optional shrink task bound; zero reuses --live-max-wave-tasks. "
             "This also bounds the post-overlap KV delta."
         ),
     )
@@ -524,7 +528,7 @@ def _apply_hotspot_pressure(model: GPTModel, args) -> None:
 
 def _configure_live_model(config: TransformerConfig, args) -> None:
     # Autoregressive decode advances one token at a time, so its sequence
-    # dimension is not divisible by TP2/TP4 as sequence parallel requires.
+    # dimension is not divisible by both TP layouts as sequence parallel requires.
     config.sequence_parallel = False
     config.hidden_dropout = 0.0
     config.attention_dropout = 0.0
@@ -539,11 +543,12 @@ def _configure_live_model(config: TransformerConfig, args) -> None:
 def _validate_model_preset(args) -> None:
     if args.live_model_preset == "synthetic":
         return
-    if not args.load:
+    if not args.load and not getattr(args, "live_skip_checkpoint", False):
         raise ValueError("deepseek-v2-lite requires --load with a converted Megatron checkpoint")
 
+    if not 1 <= args.num_layers <= 27:
+        raise ValueError("DeepSeek-V2-Lite requires a prefix of 1 to 27 layers")
     expected = {
-        "num_layers": 27,
         "hidden_size": 2048,
         "ffn_hidden_size": 10944,
         "num_attention_heads": 16,
@@ -565,7 +570,7 @@ def _validate_model_preset(args) -> None:
         for name, value in expected.items()
         if getattr(args, name, None) != value
     ]
-    expected_moe_pattern = [0] + [1] * 26
+    expected_moe_pattern = [0] + [1] * (args.num_layers - 1)
     if args.moe_layer_freq != expected_moe_pattern:
         mismatches.append(
             f"moe_layer_freq={args.moe_layer_freq!r} (expected {expected_moe_pattern!r})"
@@ -594,6 +599,32 @@ def _install_live_router(block_spec: TransformerBlockSubmodules) -> None:
         mlp_submodules = getattr(layer_spec.submodules.mlp, "submodules", None)
         if mlp_submodules is not None and hasattr(mlp_submodules, "router"):
             mlp_submodules.router = LiveTopologyInvariantTopKRouter
+
+
+def _model_metadata(args, model, control_group) -> dict:
+    """Count one logical source model, excluding TP replicas and all DP copies."""
+    while hasattr(model, "module"):
+        model = model.module
+    pg = model.pg_collection
+    local_count = 0
+    for parameter in model.parameters():
+        expert = not getattr(parameter, "allreduce", True)
+        tp_group = pg.expt_tp if expert else pg.tp
+        dp_group = pg.expt_dp if expert else pg.dp
+        if dist.get_rank(dp_group) == 0 and (
+            getattr(parameter, "tensor_model_parallel", False) or dist.get_rank(tp_group) == 0
+        ):
+            local_count += parameter.numel()
+    counts = [None] * dist.get_world_size(control_group)
+    dist.all_gather_object(counts, local_count, group=control_group)
+    layer_types = ["moe" if hasattr(layer.mlp, "experts") else "dense"
+                   for layer in model.decoder.layers]
+    return {
+        "weights_random_init": bool(getattr(args, "live_skip_checkpoint", False)),
+        "num_layers": len(layer_types),
+        "layer_types": layer_types,
+        "parameter_count": sum(counts),
+    }
 
 
 def model_provider(
@@ -684,30 +715,35 @@ def _load_bandwidth_matrix(args, world_size: int) -> dict[tuple[int, int], float
 
 
 def _configure_request_domains(args, src_pg, dst_pg, control_group) -> dict:
-    """Pair synthetic requests by TP4 DP ordinal, shared by two TP2 replicas.
+    """Pair synthetic requests by destination DP ordinal, shared by two source replicas.
 
     Real request callers must supply their own stable request/batch identity to
     StaticKVCacheModule instead of inferring identity from physical DP ordinals.
     """
+    src_tp = getattr(args, "live_src_tp", 2)
+    dst_tp = getattr(args, "live_dst_tp", 4)
+    src_key, dst_key = f"tp{src_tp}_ranks", f"tp{dst_tp}_ranks"
     domain_id = dist.get_rank(dst_pg.dp)
     local_mapping = {
         "rank": dist.get_rank(),
         "request_id": str(domain_id),
         "token_offset": domain_id,
-        "tp2_ranks": dist.get_process_group_ranks(src_pg.tp),
-        "tp4_ranks": dist.get_process_group_ranks(dst_pg.tp),
+        src_key: dist.get_process_group_ranks(src_pg.tp),
+        dst_key: dist.get_process_group_ranks(dst_pg.tp),
     }
     rank_mapping = [None] * dist.get_world_size(control_group)
     dist.all_gather_object(rank_mapping, local_mapping, group=control_group)
     # Every rank checks the same gathered topology before either model prefills.
-    if any(not set(row["tp2_ranks"]).issubset(row["tp4_ranks"]) for row in rank_mapping):
-        raise ValueError("synthetic KV request domains require TP2 groups nested within TP4 groups")
+    if any(not set(row[src_key]).issubset(row[dst_key]) for row in rank_mapping):
+        raise ValueError(
+            f"synthetic KV request domains require TP{src_tp} groups nested within TP{dst_tp} groups"
+        )
     domain_count = len({row["request_id"] for row in rank_mapping})
     if args.padded_vocab_size < domain_count:
         raise ValueError("padded vocab size must distinguish every KV request domain")
     args.live_request_domain_id = domain_id
     return {
-        "scheme": "synthetic-tp4-dp-request-domains-v1",
+        "scheme": f"synthetic-tp{dst_tp}-dp-request-domains-v1",
         "domain_count": domain_count,
         "rank_mapping": rank_mapping,
     }
@@ -897,15 +933,17 @@ def _print_equivalence_diagnostics(
     reference_layers: dict[int, torch.Tensor],
     candidate_layers: dict[int, torch.Tensor],
     control_group,
+    src_tp=2,
+    dst_tp=4,
 ) -> None:
     logits_metrics = _comparison_metrics(
         reference_logits, candidate_logits, control_group
     )
-    print_rank_0(f"Initial TP2/TP4 prefill equivalence: {logits_metrics}")
+    print_rank_0(f"Initial TP{src_tp}/TP{dst_tp} prefill equivalence: {logits_metrics}")
     common_layers = sorted(set(reference_layers) & set(candidate_layers))
     if len(common_layers) != len(reference_layers) or len(common_layers) != len(candidate_layers):
         raise AssertionError(
-            "equivalence diagnostics did not capture the same layers for TP2 and TP4"
+            f"equivalence diagnostics did not capture the same layers for TP{src_tp} and TP{dst_tp}"
         )
     for layer_index in common_layers:
         metrics = _comparison_metrics(
@@ -1023,7 +1061,7 @@ def _hybrid_fast_path_decision(
 
     checks = [
         ("disabled", not args.live_hybrid_fast_path),
-        ("direction_not_supported", direction != "2->4"),
+        ("direction_not_supported", int(direction.split("->")[0]) >= int(direction.split("->")[1])),
         ("candidate_plan_unavailable", not candidate_route_available),
         ("baseline_variant", plan_variant != "candidate"),
         (
@@ -1321,10 +1359,14 @@ def run_live_benchmark() -> None:
         validate_release_mode(args)
     if args.live_weight_bitwise_audit and not args.live_release_standby_weights:
         raise ValueError("weight bitwise audit requires standby weight release")
-    src_tp = args.tensor_model_parallel_size
+    src_tp = getattr(args, "live_src_tp", 2)
     dst_tp = args.live_dst_tp
-    if src_tp != 2 or dst_tp != 4:
-        raise ValueError("this benchmark currently implements the requested TP2<->TP4 cycle")
+    if src_tp not in (1, 2) or dst_tp != 2 * src_tp:
+        raise ValueError("live TP pair must be (1, 2) or (2, 4)")
+    if args.tensor_model_parallel_size != src_tp:
+        raise ValueError("source tensor parallel size must match --live-src-tp")
+    expansion_direction = f"{src_tp}->{dst_tp}"
+    shrink_direction = f"{dst_tp}->{src_tp}"
     if world_size % dst_tp != 0:
         raise ValueError(f"WORLD_SIZE={world_size} must be divisible by TP={dst_tp}")
     if args.num_experts is None or args.num_experts < 2:
@@ -1432,11 +1474,11 @@ def run_live_benchmark() -> None:
     )
     shrink_max_wave_tasks = args.live_shrink_max_wave_tasks or args.live_max_wave_tasks
     directional_max_wave_tasks = {
-        "2->4": expansion_max_wave_tasks,
-        "4->2": shrink_max_wave_tasks,
+        expansion_direction: expansion_max_wave_tasks,
+        shrink_direction: shrink_max_wave_tasks,
     }
 
-    print_rank_0("Building TP2 active MoE model...")
+    print_rank_0(f"Building TP{src_tp} active MoE model...")
     src_model = get_training_model(
         lambda pre_process, post_process, **kwargs: model_provider(
             pre_process=pre_process,
@@ -1447,14 +1489,14 @@ def run_live_benchmark() -> None:
     )[0].cuda()
     src_model.eval()
     loaded_checkpoint_iteration = None
-    if args.live_model_preset == "deepseek-v2-lite":
+    if args.live_model_preset == "deepseek-v2-lite" and not getattr(args, "live_skip_checkpoint", False):
         loaded_checkpoint_iteration, _ = load_checkpoint([src_model], None, None)
         print_rank_0(
-            "Loaded DeepSeek-V2-Lite checkpoint before constructing the TP4 standby "
+            f"Loaded DeepSeek-V2-Lite checkpoint before constructing the TP{dst_tp} standby "
             f"layout (iteration={loaded_checkpoint_iteration})."
         )
 
-    print_rank_0("Building TP4 standby MoE model...")
+    print_rank_0(f"Building TP{dst_tp} standby MoE model...")
     dst_pg = build_inference_pg_collection(
         world_size,
         tp_size=dst_tp,
@@ -1490,8 +1532,17 @@ def run_live_benchmark() -> None:
         observations.observe_parallel_groups(
             torch, dist, {src_tp: src_model.pg_collection, dst_tp: dst_model.pg_collection},
             control_group,
+            **({"src_tp": src_tp, "dst_tp": dst_tp, "ep": ep_size}
+               if src_tp != 2 or ep_size != 2 or dp_sweep_metrics else {}),
         )
-        if world_size == 16 else None
+        if world_size == 16 or src_tp != 2 or dp_sweep_metrics else None
+    )
+    model_metadata = (
+        _model_metadata(args, src_model, control_group)
+        if args.live_model_preset == "deepseek-v2-lite" and (
+            dp_sweep_metrics or src_tp != 2 or getattr(args, "live_skip_checkpoint", False)
+            or args.num_layers != 27
+        ) else None
     )
     source_reroute_enabled = bool(
         args.live_scheduler_mode != "baseline"
@@ -1520,7 +1571,7 @@ def run_live_benchmark() -> None:
         pack_rerouted_only=args.live_pack_rerouted_only,
     )
 
-    print_rank_0("Synchronizing initial TP2 weights into TP4...")
+    print_rank_0(f"Synchronizing initial TP{src_tp} weights into TP{dst_tp}...")
     swap_model_weights(
         src_model,
         dst_model,
@@ -1559,6 +1610,8 @@ def run_live_benchmark() -> None:
             reference_layers=src_layer_outputs,
             candidate_layers=dst_layer_outputs,
             control_group=control_group,
+            src_tp=src_tp,
+            dst_tp=dst_tp,
         )
     request_id = str(args.live_request_domain_id) if args.live_kv_request_identity else None
     src_kv = StaticKVCacheModule(src_context, src_model.pg_collection, request_id=request_id)
@@ -1590,17 +1643,17 @@ def run_live_benchmark() -> None:
     # wave isolate source-path selection; additional waves add online feedback.
     planner_kwargs = policy.planner_kwargs() if source_reroute_enabled else {}
     planner_kwargs["source_exclude_local"] = args.live_emulate_noncollocated_sources
-    print_rank_0("Building cached TP2->TP4 live-state plan...")
-    plan_2_to_4 = build_centralized_reshard_plan(
+    print_rank_0(f"Building cached TP{src_tp}->TP{dst_tp} live-state plan...")
+    expansion_plan = build_centralized_reshard_plan(
         src_bundle,
         dst_bundle,
         num_experts=args.num_experts,
         group=reshard_group,
         **planner_kwargs,
     )
-    print_rank_0("Building cached TP4->TP2 live-state plan...")
+    print_rank_0(f"Building cached TP{dst_tp}->TP{src_tp} live-state plan...")
     reverse_planner_kwargs = planner_kwargs if args.live_allow_aware_shrink else {}
-    plan_4_to_2 = build_centralized_reshard_plan(
+    shrink_plan = build_centralized_reshard_plan(
         dst_bundle,
         src_bundle,
         num_experts=args.num_experts,
@@ -1697,7 +1750,7 @@ def run_live_benchmark() -> None:
         args.live_scheduler_mode != "baseline" and args.live_max_waves > 1
     )
     services = {
-        "2->4-candidate": NCCLCopyService(
+        f"{expansion_direction}-candidate": NCCLCopyService(
             group=reshard_group,
             p2p_order=args.live_p2p_order,
             pack_target_bytes=pack_target_bytes,
@@ -1707,7 +1760,7 @@ def run_live_benchmark() -> None:
             unpack_chunk_bytes=args.live_unpack_chunk_bytes,
             ensure_all_ranks_participate=ensure_wave_participation,
         ),
-        "2->4-baseline": NCCLCopyService(
+        f"{expansion_direction}-baseline": NCCLCopyService(
             group=reshard_group,
             p2p_order=args.live_p2p_order,
             unpack_chunk_bytes=args.live_unpack_chunk_bytes,
@@ -1715,7 +1768,7 @@ def run_live_benchmark() -> None:
                 ensure_wave_participation and not args.live_adaptive_hybrid
             ),
         ),
-        "4->2": NCCLCopyService(
+        shrink_direction: NCCLCopyService(
             group=reshard_group,
             p2p_order=args.live_p2p_order,
             pack_target_bytes=(pack_target_bytes if args.live_allow_aware_shrink else 0),
@@ -1735,7 +1788,7 @@ def run_live_benchmark() -> None:
             ),
         ),
     }
-    baseline_plan_2_to_4 = getattr(plan_2_to_4, "baseline_plan", plan_2_to_4)
+    baseline_expansion_plan = getattr(expansion_plan, "baseline_plan", expansion_plan)
 
     def reroute_count(plan) -> int:
         route_stats = getattr(plan, "source_route_stats", {})
@@ -1745,7 +1798,7 @@ def run_live_benchmark() -> None:
         rerouted_task_ids = getattr(plan, "rerouted_task_ids", None)
         return len(rerouted_task_ids) if rerouted_task_ids is not None else 0
 
-    candidate_route_available = reroute_count(plan_2_to_4) > 0
+    candidate_route_available = reroute_count(expansion_plan) > 0
     packing_candidate_available = bool(
         pack_target_bytes > 0 and not args.live_pack_rerouted_only
     )
@@ -1773,15 +1826,15 @@ def run_live_benchmark() -> None:
 
     if args.live_release_standby_weights:
         kv_tensors = {
-            2: tuple(p for _, p in src_kv.named_parameters()),
-            4: tuple(p for _, p in dst_kv.named_parameters()),
+            src_tp: tuple(p for _, p in src_kv.named_parameters()),
+            dst_tp: tuple(p for _, p in dst_kv.named_parameters()),
         }
-        protected_kv = kv_tensors[2] + kv_tensors[4]
+        protected_kv = kv_tensors[src_tp] + kv_tensors[dst_tp]
         weights = {
-            2: StandbyWeights(src_model, protected_tensors=(
+            src_tp: StandbyWeights(src_model, protected_tensors=(
                 tuple(dst_model.parameters()) + tuple(dst_model.buffers()) + protected_kv
             )),
-            4: StandbyWeights(dst_model, protected_tensors=(
+            dst_tp: StandbyWeights(dst_model, protected_tensors=(
                 tuple(src_model.parameters()) + tuple(src_model.buffers()) + protected_kv
             )),
         }
@@ -1794,12 +1847,12 @@ def run_live_benchmark() -> None:
             torch.cuda.current_stream().synchronize()
         local_residency = {
             "rank": rank,
-            "initial_release": release_standby(weights[4], services.values()),
-            "initial_standby_kv_bytes": standby_kv_bytes[4],
+            "initial_release": release_standby(weights[dst_tp], services.values()),
+            "initial_standby_kv_bytes": standby_kv_bytes[dst_tp],
             "switches": [],
         }
 
-    active_tp = 2
+    active_tp = src_tp
     expansion_index = 0
     guard_phase_key = (initial_active_experts, initial_pressure_ranks)
     records = []
@@ -1851,8 +1904,8 @@ def run_live_benchmark() -> None:
         candidate_fallback_reason = None
         adaptive_decision = None
         wave_scheduler_mode = None
-        if active_tp == 2:
-            direction = "2->4"
+        if active_tp == src_tp:
+            direction = expansion_direction
             source_model, target_model = src_model, dst_model
             source_context, target_context = src_context, dst_context
             source_bundle, target_bundle = src_bundle, dst_bundle
@@ -1882,8 +1935,8 @@ def run_live_benchmark() -> None:
                 if pending_replan is not None:
                     replan_wait_start = time.perf_counter()
                     (
-                        plan_2_to_4,
-                        baseline_plan_2_to_4,
+                        expansion_plan,
+                        baseline_expansion_plan,
                         replan_s,
                     ) = pending_replan.result()
                     replan_wait_s = _all_max(
@@ -1892,7 +1945,7 @@ def run_live_benchmark() -> None:
                     replan_trigger_expansion = pending_replan_trigger
                     pending_replan = None
                     pending_replan_trigger = -1
-                    replan_useful = reroute_count(plan_2_to_4) > 0
+                    replan_useful = reroute_count(expansion_plan) > 0
                     plan_controller.mark_replanned(
                         expansion_index, useful=replan_useful
                     )
@@ -1914,32 +1967,32 @@ def run_live_benchmark() -> None:
                 if guard is not None:
                     guard.force_baseline(candidate_fallback_reason)
             full_plan = (
-                baseline_plan_2_to_4
+                baseline_expansion_plan
                 if plan_variant == "baseline"
-                else plan_2_to_4
+                else expansion_plan
             )
-            candidate_full_plan = plan_2_to_4
-            baseline_full_plan = baseline_plan_2_to_4
-            service = services[f"2->4-{plan_variant}"]
-            next_tp = 4
-            source_tp = 2
+            candidate_full_plan = expansion_plan
+            baseline_full_plan = baseline_expansion_plan
+            service = services[f"{expansion_direction}-{plan_variant}"]
+            next_tp = dst_tp
+            source_tp = src_tp
         else:
-            direction = "4->2"
+            direction = shrink_direction
             source_model, target_model = dst_model, src_model
             source_context, target_context = dst_context, src_context
             source_bundle, target_bundle = dst_bundle, src_bundle
-            full_plan = plan_4_to_2
-            candidate_full_plan = plan_4_to_2
-            baseline_full_plan = plan_4_to_2
+            full_plan = shrink_plan
+            candidate_full_plan = shrink_plan
+            baseline_full_plan = shrink_plan
             plan_variant = (
                 "candidate"
                 if args.live_scheduler_mode != "baseline"
                 and args.live_allow_aware_shrink
                 else "baseline"
             )
-            service = services["4->2"]
-            next_tp = 2
-            source_tp = 4
+            service = services[shrink_direction]
+            next_tp = src_tp
+            source_tp = dst_tp
             requested_plan_variant = plan_variant
 
         tracker = trackers[source_tp]
@@ -2009,18 +2062,18 @@ def run_live_benchmark() -> None:
             )
             plan_variant = adaptive_decision.plan_variant
             wave_scheduler_mode = adaptive_decision.scheduler_mode
-            if direction == "2->4":
+            if source_tp < next_tp:
                 full_plan = (
                     candidate_full_plan
                     if plan_variant == "candidate"
                     else baseline_full_plan
                 )
-                service = services[f"2->4-{plan_variant}"]
+                service = services[f"{expansion_direction}-{plan_variant}"]
                 if plan_variant == "baseline" and requested_plan_variant == "candidate":
                     candidate_fallback_reason = adaptive_decision.reason
             else:
                 full_plan = baseline_full_plan
-                service = services["4->2"]
+                service = services[shrink_direction]
             adaptive_decision_s = _all_max(
                 time.perf_counter() - adaptive_start, control_group
             )
@@ -2152,7 +2205,7 @@ def run_live_benchmark() -> None:
         target_context.enable_decode_mode()
         delta_s = _all_max(time.perf_counter() - cutover_start, control_group)
 
-        if guard is not None and direction == "2->4":
+        if guard is not None and source_tp < next_tp:
             remaining_expansions = (args.live_switches - switch_index + 1) // 2
             configured_horizon = args.live_amortization_horizon_expansions
             amortization_horizon = (
@@ -2174,7 +2227,7 @@ def run_live_benchmark() -> None:
                 amortization_horizon=max(amortization_horizon, 1),
             )
         if (
-            direction == "2->4"
+            source_tp < next_tp
             and plan_controller is not None
             and pending_replan is None
             and switch_index + 2 < args.live_switches
@@ -2191,7 +2244,7 @@ def run_live_benchmark() -> None:
                     replan_trigger_expansion = pending_replan_trigger
 
         pointer_start = time.perf_counter()
-        active_tp = 2 if args.live_repeat_forward and direction == "2->4" else next_tp
+        active_tp = src_tp if args.live_repeat_forward and source_tp < next_tp else next_tp
         pointer_switch_s = _all_max(time.perf_counter() - pointer_start, control_group)
         (
             validation_diff,
@@ -2218,10 +2271,10 @@ def run_live_benchmark() -> None:
             + (1.0 - baseline_alpha)
             * foreground_tpot_ms[(next_tp, active_experts, pressure_ranks)]
         )
-        if direction == "2->4":
+        if source_tp < next_tp:
             expansion_index += 1
         if args.live_release_standby_weights:
-            inactive_tp = 4 if active_tp == 2 else 2
+            inactive_tp = dst_tp if active_tp == src_tp else src_tp
             release_start = time.perf_counter()
             release_record = release_standby(weights[inactive_tp], services.values())
             local_residency["switches"].append({
@@ -2409,7 +2462,7 @@ def run_live_benchmark() -> None:
             args.live_scheduler_mode != "baseline" and args.live_allow_aware_shrink
         ),
         "source_route_stats": dict(
-            getattr(plan_2_to_4, "source_route_stats", {})
+            getattr(expansion_plan, "source_route_stats", {})
         ),
         "initial_validation_max_diff": initial_validation_diff,
         "online_replan": plan_controller is not None,
@@ -2457,6 +2510,10 @@ def run_live_benchmark() -> None:
             str(tp): tracker.snapshot() for tp, tracker in trackers.items()
         },
     }
+    if src_tp != 2:
+        result["benchmark"] = f"live-moe-tp{src_tp}-tp{dst_tp}"
+    if model_metadata is not None:
+        result.update(model_metadata)
     if args.live_kv_request_identity:
         result["kv_request_domains"] = kv_request_domains
     if args.live_release_standby_weights:

@@ -21,13 +21,12 @@ else
     DEFAULT_MAX_WAVE_TASKS=0
 fi
 
-if [[ ! -d "$CHECKPOINT" ]]; then
+if [[ "${SKIP_CHECKPOINT:-0}" != "1" && ! -d "$CHECKPOINT" ]]; then
     echo "Converted DeepSeek-V2-Lite checkpoint not found: $CHECKPOINT" >&2
     exit 2
 fi
 
-# SRC_TP, DST_TP, NUM_LAYERS and SKIP_CHECKPOINT are inherited environment
-# variables only here; TP/layer/checkpoint CLI support is a separate step.
+# SRC_TP, DST_TP, NUM_LAYERS and SKIP_CHECKPOINT are inherited by the launcher.
 MODEL_PRESET=deepseek-v2-lite \
 METHOD_VARIANT=${METHOD_VARIANT:-moetp++} \
 LOAD_CHECKPOINT="$CHECKPOINT" \

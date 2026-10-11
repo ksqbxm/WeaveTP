@@ -12,7 +12,7 @@ from tools.resharding import weavetp_observations as obs
 
 ROOT = Path(__file__).resolve().parents[3]
 REPO = ROOT.parents[1]
-BASELINE = "7deac20feaf76ee4e6a0c53b2289271a903dd12c"
+BASELINE = "698703bc344eae53f097bcc86a78096f980ecf80"
 BASH = "C:/Program Files/Git/bin/bash.exe" if os.name == "nt" else "/bin/bash"
 LAUNCHERS = ("run_live_moe_tp_benchmark.sh", "run_deepseek_v2_lite_live_benchmark.sh")
 
@@ -72,16 +72,17 @@ class LauncherTests(unittest.TestCase):
     def test_heterogeneous_override_gate_and_gbs(self):
         with tempfile.TemporaryDirectory() as folder:
             for local in ("8", "2"):
-                result, calls, _ = shell_capture(folder, deepseek=True, extra={
-                    "WORLD_SIZE_OVERRIDE": "10", "NPROC_PER_NODE": local, "NNODES": "2",
-                    "EXPERT_PARALLEL_SIZE": "1",
-                })
-                self.assertEqual(result.returncode, 0, result.stderr)
-                self.assertEqual(len(calls), 1)
-                command = calls[0]
-                self.assertEqual(command[command.index(b"--global-batch-size") + 1], b"5")
-                self.assertEqual(command[command.index(b"--expert-model-parallel-size") + 1], b"1")
-                self.assertIn(f"--nproc_per_node={local}".encode(), command)
+                for src, dst, gbs in (("2", "4", b"5"), ("1", "2", b"10")):
+                    result, calls, _ = shell_capture(folder, deepseek=True, extra={
+                        "WORLD_SIZE_OVERRIDE": "10", "NPROC_PER_NODE": local, "NNODES": "2",
+                        "EXPERT_PARALLEL_SIZE": "1", "SRC_TP": src, "DST_TP": dst,
+                    })
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertEqual(len(calls), 1)
+                    command = calls[0]
+                    self.assertEqual(command[command.index(b"--global-batch-size") + 1], gbs)
+                    self.assertEqual(command[command.index(b"--expert-model-parallel-size") + 1], b"1")
+                    self.assertIn(f"--nproc_per_node={local}".encode(), command)
             result, calls, _ = shell_capture(folder, extra={"WORLD_SIZE_OVERRIDE": "16"})
             self.assertEqual(result.returncode, 0)
             self.assertEqual(len(calls), 2)
@@ -94,20 +95,72 @@ class LauncherTests(unittest.TestCase):
                 self.assertEqual(result.returncode, 2)
                 self.assertFalse(calls)
 
-    def test_environment_only_passthrough_and_opt_in_flag(self):
+    def test_nine_layer_random_init_and_opt_in_flag(self):
         values = {"SRC_TP": "1", "DST_TP": "2", "NUM_LAYERS": "9", "SKIP_CHECKPOINT": "1"}
         with tempfile.TemporaryDirectory() as folder:
-            result, calls, env = shell_capture(folder, deepseek=True, extra={**values, "DP_SWEEP_METRICS": "1"})
+            result, calls, env = shell_capture(folder, deepseek=True, extra={
+                **values, "DP_SWEEP_METRICS": "1", "CHECKPOINT": "./missing-checkpoint",
+            })
             self.assertEqual(result.returncode, 0)
             for key, value in values.items():
                 self.assertIn(f"{key}={value}\n", env)
             args = calls[-1]
             self.assertIn(b"--live-dp-sweep-metrics", args)
-            self.assertNotIn(b"--live-src-tp", args)
-            self.assertNotIn(b"--live-skip-checkpoint", args)
-            self.assertEqual(args[args.index(b"--live-dst-tp") + 1], b"4")
+            for name in (b"--live-src-tp", b"--tensor-model-parallel-size", b"--expert-tensor-parallel-size"):
+                self.assertEqual(args[args.index(name) + 1], b"1")
+            self.assertIn(b"--live-skip-checkpoint", args)
+            self.assertEqual(args[args.index(b"--live-dst-tp") + 1], b"2")
+            self.assertEqual(args[args.index(b"--num-layers") + 1], b"9")
+            self.assertEqual(args[args.index(b"--moe-layer-freq") + 1], b"([0]+[1]*8)")
+            self.assertNotIn(b"--load", args)
+
+    def test_all_sweep_sizes_and_batch_override(self):
+        with tempfile.TemporaryDirectory() as folder:
+            for src, worlds in ((1, range(2, 17, 2)), (2, range(4, 17, 4))):
+                for world in worlds:
+                    with self.subTest(src=src, world=world):
+                        result, calls, _ = shell_capture(folder, extra={
+                            "SRC_TP": str(src), "DST_TP": str(src * 2),
+                            "NPROC_PER_NODE": str(min(world, 8)), "WORLD_SIZE_OVERRIDE": str(world),
+                            "MICRO_BATCH_SIZE": "2",
+                        })
+                        self.assertEqual(result.returncode, 0, result.stderr)
+                        args = calls[-1]
+                        self.assertEqual(args[args.index(b"--global-batch-size") + 1], str(2 * world // src).encode())
+                        self.assertEqual(args[args.index(b"--live-dst-tp") + 1], str(src * 2).encode())
+                        self.assertEqual(args[args.index(b"--tensor-model-parallel-size") + 1], str(src).encode())
+                        self.assertEqual(args[args.index(b"--expert-tensor-parallel-size") + 1], str(src).encode())
+                        self.assertEqual(args[args.index(b"--num-layers") + 1], b"2")
+            result, calls, _ = shell_capture(folder, extra={"SRC_TP": "1", "DST_TP": "2", "GLOBAL_BATCH_SIZE": "12"})
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(calls[-1][calls[-1].index(b"--global-batch-size") + 1], b"12")
+
+    def test_deepseek_defaults_load_27_layers(self):
+        with tempfile.TemporaryDirectory() as folder:
+            result, calls, _ = shell_capture(folder, deepseek=True, extra={"SKIP_CHECKPOINT": "0", "NUM_LAYERS": "27"})
+            self.assertEqual(result.returncode, 0, result.stderr)
+            args = calls[-1]
             self.assertEqual(args[args.index(b"--num-layers") + 1], b"27")
-            self.assertIn(b"--load", args)
+            self.assertEqual(args[args.index(b"--moe-layer-freq") + 1], b"([0]+[1]*26)")
+            self.assertEqual(args[args.index(b"--load") + 1], b"./checkpoint")
+            self.assertNotIn(b"--live-skip-checkpoint", args)
+            for deepseek, extra in ((True, {"CHECKPOINT": "./missing-checkpoint"}),
+                                   (False, {"MODEL_PRESET": "deepseek-v2-lite"})):
+                result, calls, _ = shell_capture(folder, deepseek=deepseek, extra=extra)
+                self.assertEqual(result.returncode, 2)
+                self.assertFalse(calls)
+
+    def test_invalid_tp_pair_layers_and_skip_rejected_before_python(self):
+        with tempfile.TemporaryDirectory() as folder:
+            for src, dst in (("0", "2"), ("1", "4"), ("2", "2"), ("4", "8"), ("a", "4")):
+                result, calls, _ = shell_capture(folder, extra={"SRC_TP": src, "DST_TP": dst})
+                self.assertEqual(result.returncode, 2)
+                self.assertFalse(calls)
+            for extra in ({"NUM_LAYERS": "0"}, {"NUM_LAYERS": "-9"}, {"NUM_LAYERS": "28"}, {"NUM_LAYERS": "9.0"},
+                          {"NUM_LAYERS": "09"}, {"SKIP_CHECKPOINT": "yes"}):
+                result, calls, _ = shell_capture(folder, deepseek=True, extra=extra)
+                self.assertEqual(result.returncode, 2)
+                self.assertFalse(calls)
 
 
 class ObservationTests(unittest.TestCase):

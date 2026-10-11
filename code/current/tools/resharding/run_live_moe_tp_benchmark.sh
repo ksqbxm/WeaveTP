@@ -29,6 +29,12 @@ if (( NNODES > 1 )); then
         --master_addr="$MASTER_ADDR" --master_port="$MASTER_PORT" --rdzv_backend=static)
 fi
 EXPERT_PARALLEL_SIZE=${EXPERT_PARALLEL_SIZE:-1}
+SRC_TP=${SRC_TP:-2}
+DST_TP=${DST_TP:-4}
+if ! [[ "$SRC_TP" =~ ^[12]$ && "$DST_TP" =~ ^[24]$ ]] || (( DST_TP != 2 * SRC_TP )); then
+    echo "Only SRC_TP/DST_TP pairs 1/2 and 2/4 are supported" >&2
+    exit 2
+fi
 MODEL_PRESET=${MODEL_PRESET:-synthetic}
 METHOD_VARIANT=${METHOD_VARIANT:-moetp++}
 LOAD_CHECKPOINT=${LOAD_CHECKPOINT:-}
@@ -100,7 +106,11 @@ FOREGROUND_PRESSURE_CAP=${FOREGROUND_PRESSURE_CAP:-0.90}
 FOREGROUND_BASELINE_EWMA=${FOREGROUND_BASELINE_EWMA:-0.25}
 GUARD_REEVALUATE_EXPANSIONS=${GUARD_REEVALUATE_EXPANSIONS:-0}
 GUARD_HYSTERESIS_PCT=${GUARD_HYSTERESIS_PCT:-0.0}
-NUM_LAYERS=${NUM_LAYERS:-2}
+if [[ "$MODEL_PRESET" == "deepseek-v2-lite" ]]; then
+    NUM_LAYERS=${NUM_LAYERS:-27}
+else
+    NUM_LAYERS=${NUM_LAYERS:-2}
+fi
 HIDDEN_SIZE=${HIDDEN_SIZE:-512}
 NUM_ATTENTION_HEADS=${NUM_ATTENTION_HEADS:-8}
 NUM_QUERY_GROUPS=${NUM_QUERY_GROUPS:-4}
@@ -109,7 +119,7 @@ MOE_FFN_HIDDEN_SIZE=${MOE_FFN_HIDDEN_SIZE:-1024}
 NUM_EXPERTS=${NUM_EXPERTS:-8}
 MOE_ROUTER_TOPK=${MOE_ROUTER_TOPK:-2}
 MICRO_BATCH_SIZE=${MICRO_BATCH_SIZE:-1}
-GLOBAL_BATCH_SIZE=${GLOBAL_BATCH_SIZE:-$((MICRO_BATCH_SIZE * WORLD_SIZE / 2))}
+GLOBAL_BATCH_SIZE=${GLOBAL_BATCH_SIZE:-$((MICRO_BATCH_SIZE * WORLD_SIZE / SRC_TP))}
 SEQ_LENGTH=${SEQ_LENGTH:-256}
 MAX_POSITION_EMBEDDINGS=${MAX_POSITION_EMBEDDINGS:-$SEQ_LENGTH}
 OUT_DIR=${OUT_DIR:-outputs/live_moe_tp_$(date +%Y%m%d_%H%M%S)}
@@ -118,12 +128,16 @@ mkdir -p "$OUT_DIR"
 
 MODEL_ARGS=()
 if [[ "$MODEL_PRESET" == "deepseek-v2-lite" ]]; then
-    if [[ -z "$LOAD_CHECKPOINT" ]]; then
+    if ! [[ "$NUM_LAYERS" =~ ^[1-9][0-9]*$ && "${SKIP_CHECKPOINT:-0}" =~ ^[01]$ ]] || (( NUM_LAYERS > 27 )); then
+        echo "NUM_LAYERS must be an integer in 1..27 and SKIP_CHECKPOINT must be 0 or 1" >&2
+        exit 2
+    fi
+    if [[ "${SKIP_CHECKPOINT:-0}" != "1" && -z "$LOAD_CHECKPOINT" ]]; then
         echo "LOAD_CHECKPOINT is required for MODEL_PRESET=deepseek-v2-lite" >&2
         exit 2
     fi
     MODEL_ARGS+=(
-        --num-layers 27
+        --num-layers "$NUM_LAYERS"
         --hidden-size 2048
         --ffn-hidden-size 10944
         --num-attention-heads 16
@@ -136,7 +150,7 @@ if [[ "$MODEL_PRESET" == "deepseek-v2-lite" ]]; then
         --qk-layernorm
         --qk-pos-emb-head-dim 64
         --num-experts 64
-        --moe-layer-freq '([0]+[1]*26)'
+        --moe-layer-freq "([0]+[1]*$((NUM_LAYERS - 1)))"
         --moe-ffn-hidden-size 1408
         --moe-grouped-gemm
         --moe-router-score-function softmax
@@ -163,9 +177,11 @@ if [[ "$MODEL_PRESET" == "deepseek-v2-lite" ]]; then
         --mscale-all-dim 0.707
         --attention-softmax-in-fp32
         --no-masked-softmax-fusion
-        --load "$LOAD_CHECKPOINT"
-        --ckpt-format torch_dist
     )
+    if [[ "${SKIP_CHECKPOINT:-0}" != "1" ]]; then
+        MODEL_ARGS+=(--load "$LOAD_CHECKPOINT")
+    fi
+    MODEL_ARGS+=(--ckpt-format torch_dist)
 elif [[ "$MODEL_PRESET" == "synthetic" ]]; then
     MODEL_ARGS+=(
         --num-layers "$NUM_LAYERS"
@@ -203,6 +219,12 @@ else
 fi
 
 LIVE_FEATURE_ARGS=()
+if [[ "$SRC_TP" != "2" ]]; then
+    LIVE_FEATURE_ARGS+=(--live-src-tp "$SRC_TP")
+fi
+if [[ "$MODEL_PRESET" == "deepseek-v2-lite" && "${SKIP_CHECKPOINT:-0}" == "1" ]]; then
+    LIVE_FEATURE_ARGS+=(--live-skip-checkpoint)
+fi
 if [[ "${DP_SWEEP_METRICS:-0}" == "1" ]]; then
     LIVE_FEATURE_ARGS+=(--live-dp-sweep-metrics)
 fi
@@ -287,13 +309,13 @@ CUDA_DEVICE_MAX_CONNECTIONS=8 \
     "${DIST_ARGS[@]}" \
     --nproc_per_node="$NPROC_PER_NODE" \
     "$ENTRYPOINT" \
-    --tensor-model-parallel-size 2 \
+    --tensor-model-parallel-size "$SRC_TP" \
     --pipeline-model-parallel-size 1 \
     --expert-model-parallel-size "$EXPERT_PARALLEL_SIZE" \
-    --expert-tensor-parallel-size 2 \
+    --expert-tensor-parallel-size "$SRC_TP" \
     --live-model-preset "$MODEL_PRESET" \
     --live-method-variant "$METHOD_VARIANT" \
-    --live-dst-tp 4 \
+    --live-dst-tp "$DST_TP" \
     --live-switches "$SWITCHES" \
     --live-prompt-tokens "$PROMPT_TOKENS" \
     --live-max-waves "$MAX_WAVES" \

@@ -18,6 +18,7 @@ REPO = HERE.parents[1]
 CODE = REPO / "code/current"
 UNIT = CODE / "tests/unit_tests/resharding"
 BASELINE = "7deac20feaf76ee4e6a0c53b2289271a903dd12c"
+STEP2_BASELINE = "698703bc344eae53f097bcc86a78096f980ecf80"
 BASH = "C:/Program Files/Git/bin/bash.exe" if os.name == "nt" else "/bin/bash"
 REGRESSIONS = [
     "test_standby_weights.py", "test_live_storage_lifecycle.py", "test_live_defaults.py",
@@ -26,6 +27,7 @@ REGRESSIONS = [
     "test_refit_bandwidth_policy.py", "test_delta_stream_lifetime.py", "test_weight_ordering.py",
     "test_weight_bitwise.py", "test_weight_fix2.py",
     "test_dp_sweep.py", "test_summarize_dp_sweep.py", "test_dp_sweep_coordinator.py",
+    "test_dp_sweep_groups.py", "test_dp_sweep_tp.py",
 ]
 
 
@@ -35,6 +37,35 @@ def write_json(path, value):
 
 def sha(raw):
     return hashlib.sha256(raw).hexdigest()
+
+
+def protected_sources_unchanged(baseline):
+    protected = ["code/current/megatron", "documents/16gpu_T09_20261003",
+                 "documents/16gpu_T085_20261001", "documents/16gpu_T08_20261001",
+                 "code/current/tools/resharding/summarize_weavetp_formal.py"]
+    if baseline != STEP2_BASELINE:
+        return not subprocess.check_output(["git", "diff", baseline, "--", *protected], cwd=REPO)
+    # Stage 2 permits exactly one core expression: recognize either supported expansion.
+    path = "code/current/megatron/core/resharding/live.py"
+    before = ast.parse(subprocess.check_output(["git", "show", baseline + ":" + path], cwd=REPO))
+    expression = ast.parse('direction != "2->4"', mode="eval").body
+    replacement = ast.parse(
+        'int(direction.split("->")[0]) >= int(direction.split("->")[1])', mode="eval").body
+
+    class Direction(ast.NodeTransformer):
+        count = 0
+        def visit_Compare(self, node):
+            if ast.dump(node) == ast.dump(expression):
+                self.count += 1
+                return replacement
+            return self.generic_visit(node)
+
+    transform = Direction()
+    expected = transform.visit(before)
+    current = ast.parse((REPO / path).read_bytes())
+    remaining = subprocess.check_output(
+        ["git", "diff", baseline, "--", *protected, ":(exclude)" + path], cwd=REPO)
+    return transform.count == 1 and ast.dump(expected) == ast.dump(current) and not remaining
 
 
 def prior_runner():
@@ -76,6 +107,14 @@ def coordinator_receipts(output, baseline):
             new_console, new_json = coordinator.capture(defaults.CURRENT, folder, release=release)
             for name, old, new in (("console", old_console, new_console), ("json", old_json, new_json)):
                 comparisons.append(pair(output, f"coordinator_release_{int(release)}_{name}", old, new))
+            checkpoint = {
+                "live_overrides": {"live_model_preset": "deepseek-v2-lite", "num_layers": 27},
+                "namespace_overrides": {"load_checkpoint": lambda *_: (17, None)},
+            }
+            old_console, old_json = coordinator.capture(before, folder, release=release, **checkpoint)
+            new_console, new_json = coordinator.capture(defaults.CURRENT, folder, release=release, **checkpoint)
+            for name, old, new in (("console", old_console, new_console), ("json", old_json, new_json)):
+                comparisons.append(pair(output, f"deepseek_release_{int(release)}_{name}", old, new))
     argument_printer = ast.parse((CODE / "megatron/training/arguments.py").read_bytes())
     function = next(n for n in argument_printer.body if getattr(n, "name", "") == "_print_args")
     namespace = {}
@@ -187,7 +226,10 @@ def main():
         CODE / "examples/rl/benchmark_live_moe_tp.py", CODE / "tools/resharding/weavetp_observations.py",
         CODE / "tools/resharding/summarize_dp_sweep.py", Path(__file__).resolve(),
         *[UNIT / name for name in ("test_dp_sweep.py", "test_summarize_dp_sweep.py",
-                                  "test_dp_sweep_coordinator.py", "test_live_storage_lifecycle.py")],
+                                  "test_dp_sweep_coordinator.py", "test_live_storage_lifecycle.py",
+                                  "test_dp_sweep_groups.py", "test_dp_sweep_tp.py",
+                                  "test_live_defaults.py")],
+        CODE / "megatron/core/resharding/live.py",
     ]
     for path in python_files:
         compile(path.read_bytes(), str(path), "exec")
@@ -195,10 +237,7 @@ def main():
         checks.append(command_run([BASH, "-n", str(CODE / "tools/resharding" / name)], CODE, env, out, name))
     checks.append(command_run(["git", "diff", "--check"], REPO, env, out, "diff_check"))
     checks.append(command_run(["git", "diff", "--cached", "--check"], REPO, env, out, "staged_diff_check"))
-    protected = ["code/current/megatron", "documents/16gpu_T09_20261003",
-                 "documents/16gpu_T085_20261001", "documents/16gpu_T08_20261001",
-                 "code/current/tools/resharding/summarize_weavetp_formal.py"]
-    unchanged = not subprocess.check_output(["git", "diff", args.baseline, "--", *protected], cwd=REPO)
+    unchanged = protected_sources_unchanged(args.baseline)
     receipt = {
         "baseline": args.baseline, "t09_tests": sum(r.get("tests", 0) for r in runs),
         "t09_passed": sum(r.get("passed", 0) for r in runs), "t09_suites": runs,

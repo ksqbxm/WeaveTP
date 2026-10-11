@@ -111,7 +111,7 @@ def select_adaptive_hybrid_policy(
 
     checks = [
         ("baseline_scheduler", requested_scheduler_mode == "baseline"),
-        ("direction_without_reroute", direction != "2->4"),
+        ("direction_without_reroute", int(direction.split("->")[0]) >= int(direction.split("->")[1])),
         ("candidate_route_unavailable", not candidate_route_available),
         (
             "foreground_pressure_too_high",

@@ -20,9 +20,11 @@ from tools.resharding import weavetp_observations as obs
 
 
 def capture(tree, folder, **kwargs):
+    namespace = {"json": json, "print_rank_0": print}
+    namespace.update(kwargs.pop("namespace_overrides", {}))
     with redirect_stdout(io.StringIO()) as console:
         result, _, _ = lifecycle.run_coordinator(
-            tree, namespace_overrides={"json": json, "print_rank_0": print}, **kwargs)
+            tree, namespace_overrides=namespace, **kwargs)
         writer = defaults.load(tree, ["_write_results"])
         writer.update(json=json, Path=Path, dist=SimpleNamespace(get_rank=lambda: 0), print_rank_0=print)
         output = Path(folder) / "result.json"
@@ -38,6 +40,12 @@ def test_default_raw_console_json_and_argument_namespace_match_baseline():
             patch("torch.cuda.max_memory_reserved", side_effect=AssertionError("disabled reserved")):
         for release in (False, True):
             assert capture(baseline, folder, release=release) == capture(defaults.CURRENT, folder, release=release)
+            checkpoint = {
+                "live_overrides": {"live_model_preset": "deepseek-v2-lite", "num_layers": 27},
+                "namespace_overrides": {"load_checkpoint": lambda *_: (17, None)},
+            }
+            assert capture(baseline, folder, release=release, **checkpoint) == capture(
+                defaults.CURRENT, folder, release=release, **checkpoint)
     namespaces = []
     for tree in (baseline, defaults.CURRENT):
         parser = argparse.ArgumentParser()
@@ -83,6 +91,7 @@ def test_enabled_metrics_run_real_post_switch_scans_and_reduce_peaks():
         return namespace
 
     with patch.object(defaults, "load", side_effect=load), \
+            patch.object(obs, "observe_parallel_groups", return_value=None), \
             patch("torch.cuda.reset_peak_memory_stats", side_effect=lambda: events.append("reset")), \
             patch("torch.cuda.max_memory_allocated", side_effect=lambda: events.append("allocated") or 100), \
             patch("torch.cuda.max_memory_reserved", side_effect=lambda: events.append("reserved") or 200):
