@@ -13,7 +13,7 @@ CODE = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(CODE))
 sys.path.insert(0, str(CODE / "examples/rl"))
 
-from tools.resharding.nostop.common import capacity_budget, intervals_overlap
+from tools.resharding.nostop.common import MAX_WAVES, capacity_budget, intervals_overlap
 
 
 def clock_identity():
@@ -39,8 +39,9 @@ class Diagnostic:
                 or args.live_prompt_tokens != self.kv - 12
                 or args.live_repeat_forward or args.live_weight_bitwise_audit):
             raise ValueError("diagnostic requires mode-matched switches, KV=2048, extra=10, release=1, audit=0")
-        if args.max_position_embeddings < capacity_budget()["max_position_embeddings"]:
-            raise ValueError("diagnostic cache capacity must cover both cold-start modes")
+        capacity = capacity_budget()["max_position_embeddings"]
+        if args.live_max_waves != MAX_WAVES or args.max_position_embeddings != capacity or args.seq_length != capacity:
+            raise ValueError(f"diagnostic requires MAX_WAVES={MAX_WAVES} and both sequence capacities={capacity}")
         self.rank = self.dist.get_rank()
         self.index, self.phase, self.wave, self.step = -1, "initial_validation", None, 0
         self.decodes, self.transfers, self.marks, self.waves, self.states = [], [], [], [], []
@@ -125,7 +126,6 @@ class Diagnostic:
             self.origin = self.torch.cuda.Event(enable_timing=True)
             self.origin.record()
             self.origin.synchronize()
-            self.control_group = control_group
             local_routes = {}
             for label, plan in (("default", default_plan), ("candidate", candidate_plan)):
                 prefix = self.b.restrict_plan_sequence(plan, start=0, end=self.kv, include_non_kv=True)

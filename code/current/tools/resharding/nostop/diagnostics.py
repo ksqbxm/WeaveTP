@@ -23,7 +23,6 @@ except ImportError:
     from diag_report import make_report
 
 CODE = Path(__file__).resolve().parents[3]
-HERE = Path(__file__).resolve().parent
 BASE = Path("/data/ubuntu/lxh/weavetp/nostop")
 GPU_FIELDS = "index,uuid,name,memory.total,memory.used,utilization.gpu,temperature.gpu,clocks.current.sm,clocks.current.memory,pstate,power.draw,driver_version"
 ENV_NAMES = ("CUDA_VISIBLE_DEVICES", "CUDA_DEVICE_MAX_CONNECTIONS", "NCCL_RUNTIME_CONNECT",
@@ -64,24 +63,25 @@ class Processes:
             os.P_PID, process.pid, os.WEXITED | os.WNOHANG | os.WNOWAIT) is not None
 
     def stop(self, process):
+        if process.returncode is not None:
+            return
         self.required = [p for p in self.required if p is not process]
         # This supervisor owns the unreaped Popen child and its session, which
         # prevents the child PID being reused before we signal its group.
-        if process.returncode is None:
-            try:
-                os.killpg(process.pid, signal.SIGTERM)
-            except ProcessLookupError:
-                pass
-            deadline = time.monotonic() + 10
-            while not self.exited(process) and time.monotonic() < deadline:
-                time.sleep(0.1)
-            # Also terminate any torchrun/stressor descendants after their
-            # leader exits. It is still unreaped, so the group is still ours.
-            try:
-                os.killpg(process.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-            process.wait(timeout=10)
+        try:
+            os.killpg(process.pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+        deadline = time.monotonic() + 10
+        while not self.exited(process) and time.monotonic() < deadline:
+            time.sleep(0.1)
+        # Also terminate any torchrun/stressor descendants after their
+        # leader exits. It is still unreaped, so the group is still ours.
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        process.wait(timeout=10)
         for child, log, record in self.children:
             if child is process:
                 record["exit_code"] = process.returncode
@@ -100,6 +100,8 @@ class Processes:
                 if time.monotonic() >= deadline:
                     raise RuntimeError(f"{name} timed out after {timeout}s")
                 time.sleep(0.2)
+            if any(self.exited(p) for p in self.required):
+                raise RuntimeError("pressure/telemetry process exited; stopping this diagnostic")
         finally:
             self.stop(process)
         code = process.returncode
@@ -134,6 +136,10 @@ def machine_check(root, seconds, python):
     checks["topology"] = capture(["nvidia-smi", "topo", "-m"], root, "topology")
     checks["driver_cuda"] = capture(["nvidia-smi"], root, "driver_cuda")
     checks["toolkit_cuda"] = capture(["nvcc", "--version"], root, "toolkit_cuda")
+    nsys_path = capture(["which", "nsys"], root, "nsys_which")
+    nsys_version = capture(["nsys", "--version"], root, "nsys_version")
+    checks["nsys"] = {"status": "missing" if nsys_path["exit_code"] else "available",
+                      "which": nsys_path, "version": nsys_version}
     checks["runtime"] = capture([python, "-c", "import json,sys,torch; print(json.dumps(dict(python=sys.version,torch=torch.__version__,cuda_build=torch.version.cuda,nccl=torch.cuda.nccl.version())))"], root, "runtime")
     checks["git"] = capture(["git", "rev-parse", "HEAD"], root, "git")
     checks["git_status"] = capture(["git", "status", "--short", "--", "."], root, "git_status")
@@ -150,7 +156,8 @@ def machine_check(root, seconds, python):
     rows = [list(csv.reader(sample["csv"].splitlines())) for sample in samples if not sample["exit_code"]]
     idle = "unknown"
     try:
-        if checks["processes"]["exit_code"] == 0 and rows and all(len(r) == 8 for r in rows):
+        if (checks["processes"]["exit_code"] == 0 and rows
+                and all(sample["exit_code"] == 0 for sample in samples) and all(len(r) == 8 for r in rows)):
             # Existing MPS/other contexts count as busy; never alter them.
             busy = bool(checks["processes"]["output"].strip()) or any(float(r[5]) > 0 for sample in rows for r in sample)
             idle = "busy" if busy else "idle"
@@ -238,7 +245,7 @@ def run_diagnostics(args, root, manager):
     env = isolated_env(root)
     env.update(PYTHON=args.python, CHECKPOINT=args.checkpoint, CUDA_VISIBLE_DEVICES="0,1,2,3,4,5,6,7",
                NCCL_DEBUG="INFO", NCCL_DEBUG_SUBSYS="INIT,GRAPH", NCCL_DEBUG_FILE=str(root / "nccl_%h_%p.log"))
-    manifest = {"stress_links": args.links, "l3_processes": args.processes_per_pair,
+    manifest = {"execution_complete": False, "stress_links": args.links, "l3_processes": args.processes_per_pair,
                 "stress_bytes": args.stress_bytes, "stress_sync_every": args.stress_sync_every,
                 "profile": str(Path(args.profile).resolve()), "checkpoint": args.checkpoint,
                 "profile_source": str(profile_source), "profile_sha256": hashlib.sha256(profile_bytes).hexdigest(),
@@ -258,11 +265,12 @@ def run_diagnostics(args, root, manager):
             raise RuntimeError("pressure process exited before benchmark")
         case = root / name
         case.mkdir()
-        run_env = {**env, **method_env(method, mode, args.profile, case / "run")}
-        write_json(case / "config.json", {k: run_env[k] for k in method_env(method, mode, args.profile, case / "run")})
+        config = method_env(method, mode, args.profile, case / "run")
+        run_env = {**env, **config}
+        write_json(case / "config.json", config)
         write_json(case / "environment.json", {k: run_env[k] for k in ENV_NAMES if k in run_env})
         command = ["bash", "tools/resharding/run_deepseek_v2_lite_live_benchmark.sh"]
-        (case / "command.txt").write_text(shlex.join(["env"] + [f"{k}={v}" for k, v in method_env(method, mode, args.profile, case / "run").items()] + command) + "\n")
+        (case / "command.txt").write_text(shlex.join(["env"] + [f"{k}={v}" for k, v in config.items()] + command) + "\n")
         print(f"START {name}", flush=True)
         try:
             manager.run(command, name, run_env, timeout=args.timeout)
@@ -290,7 +298,7 @@ def run_diagnostics(args, root, manager):
         if level == "L3":
             stress = start_stress(manager, args, env, "probe_pressure")
         command = [args.python, "-B", "-m", "torch.distributed.run", "--standalone", "--nproc_per_node=8",
-                   "tools/resharding/nostop/probe.py", "--routes", str(root / "probe_routes.json"),
+                   "--run-path", str(CODE / "tools/resharding/nostop/probe.py"), "--routes", str(root / "probe_routes.json"),
                    "--out", str(root / f"probe_{level}.json")]
         manager.run(command, f"probe_{level}", env, timeout=args.timeout)
         if any(manager.exited(p) for p in stress):
@@ -298,8 +306,12 @@ def run_diagnostics(args, root, manager):
         for process in stress:
             manager.stop(process)
         stress = []
+    if any(manager.exited(p) for p in manager.required):
+        raise RuntimeError("telemetry process exited before diagnostics completed")
     for process in (gpu_monitor, app_monitor, cpu_monitor):
         manager.stop(process)
+    manifest["execution_complete"] = True
+    write_json(root / "manifest.json", manifest)
     report = make_report(root)
     print(json.dumps(report, indent=2), flush=True)
     return 0 if report["cold_start"]["status"] == report["pressure"]["status"] == "passed" else 4
@@ -328,14 +340,15 @@ def main():
     root = args.out or BASE / f"{args.mode}_{socket.gethostname()}_{stamp}_{os.getpid()}"
     if args.dry_run:
         print(json.dumps({"mode": args.mode, "out": str(root), "capacity": capacity_budget(),
-                          "machine_commands": ["nvidia-smi -q", "nvidia-smi topo -m", "PyTorch/NCCL version query"],
+                          "machine_commands": ["nvidia-smi -q", "nvidia-smi topo -m", "PyTorch/NCCL version query",
+                                               "which nsys", "nsys --version"],
                           "cases": [{"name": n, "level": l, "env": method_env(m, c, args.profile, root / n / "run")}
                                     for n, l, m, c in diagnostic_cases()] if args.mode == "diag" else [],
                           "pressure_commands": stress_commands(args) if args.mode == "diag" else [],
                           "probe_order": ["L0", "L3"] if args.mode == "diag" else [],
                           "automatic_formal_launch": False}, indent=2))
         return 0
-    if os.name != "posix" or not str(root.resolve()).startswith("/data/"):
+    if os.name != "posix" or not root.is_absolute() or not str(root.resolve()).startswith("/data/"):
         parser.error("actual execution requires Linux and a new absolute directory under /data")
     root.mkdir(parents=True, exist_ok=False)
     (root / "pid.txt").write_text(f"{os.getpid()}\n")

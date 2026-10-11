@@ -260,6 +260,12 @@ if [[ "$REPEAT_FORWARD" == "1" ]]; then
 fi
 
 ENTRYPOINT=${ENTRYPOINT_OVERRIDE:-examples/rl/benchmark_live_moe_tp.py}
+if [[ "$ENTRYPOINT" == tools/resharding/nostop/benchmark.py ]]; then
+    # Callable workers inherit the supervisor's process group. The default
+    # torchrun subprocess workers create new sessions and escape group cleanup.
+    DIST_ARGS+=(--run-path)
+    ENTRYPOINT="$PWD/$ENTRYPOINT"
+fi
 if [[ "${WEIGHT_CHECK_AUDIT:-0}" == "1" ]]; then
     if [[ "$MODEL_PRESET" != synthetic || "$RELEASE_STANDBY_WEIGHTS" != 1 || "${WEIGHT_STORAGE_AUDIT:-0}" == 1 ]]; then
         echo "Weight check audit requires synthetic, release enabled, and memory audit disabled" >&2

@@ -125,7 +125,7 @@ def test_probe_variability_preserved_and_flagged():
 
 
 def test_complete_report_has_only_two_decisions_and_frozen_recommendation(tmp_path):
-    diagnostics.write_json(tmp_path / "manifest.json", dict(stress_links="0:2", l3_processes=7,
+    diagnostics.write_json(tmp_path / "manifest.json", dict(execution_complete=True, stress_links="0:2", l3_processes=7,
         stress_bytes=256, stress_sync_every=16, profile="/data/profile.json"))
     for name, _, method, mode in diagnostics.diagnostic_cases():
         case = tmp_path / name
@@ -141,7 +141,15 @@ def test_complete_report_has_only_two_decisions_and_frozen_recommendation(tmp_pa
     assert result["cold_start"]["recommended_mode"] == "cycle"
     frozen = (tmp_path / "frozen.env").read_text()
     assert "export DIAGNOSTICS_READY=1" in frozen and "export SWITCHES=3" in frozen
+    assert "export MAX_WAVES=64" in frozen and "export MAX_POSITION_EMBEDDINGS=5248" in frozen
     assert "export NCCL_RUNTIME_CONNECT=" not in frozen
+    # A completed probe file cannot override a later pressure/monitor failure.
+    manifest = json.loads((tmp_path / "manifest.json").read_text())
+    manifest["execution_complete"] = False
+    diagnostics.write_json(tmp_path / "manifest.json", manifest)
+    result = diag_report.make_report(tmp_path)
+    assert result["pressure"]["status"] == "inconclusive"
+    assert "export DIAGNOSTICS_READY=0" in (tmp_path / "frozen.env").read_text()
     # A failed smoke or absent probe cannot recommend a ready configuration.
     (tmp_path / "smoke_L0_B0/exit_code.txt").write_text("1\n")
     (tmp_path / "probe_L3.json").unlink()
@@ -168,16 +176,39 @@ def test_state_gates(damage):
 
 def test_capacity_accounts_for_two_warmup_switches_and_validation():
     budget = common.capacity_budget()
-    assert budget["warmup_peak_tokens"] == 6178
-    assert budget["measured_peak_tokens"] == 4122
-    assert budget["max_position_embeddings"] == 6272
+    assert budget["warmup_peak_tokens"] == 4130
+    assert budget["measured_peak_tokens"] == 3098
+    assert budget["high_water_tokens"] == 4130
+    assert budget["benchmark_worst_case_tokens"] == 5163
+    assert budget["max_position_embeddings"] == 5248
     envs = [common.method_env(m,c,"p","o") for m in ("W2","B0") for c in ("cycle","independent")]
-    assert {e["MAX_POSITION_EMBEDDINGS"] for e in envs} == {"6272"}
+    assert {e["MAX_POSITION_EMBEDDINGS"] for e in envs} == {"5248"}
     assert {e["PROMPT_TOKENS"] for e in envs} == {"2036"}
     assert all("NCCL_RUNTIME_CONNECT" not in e for e in envs)
     assert envs[0]["ADAPTIVE_MIN_PREDICTED_E2E_GAIN_PCT"] == "5.0"
     assert envs[0]["HYBRID_MAX_FOREGROUND_PRESSURE"] == "0.20"
     assert [e["EXPANSION_MAX_WAVE_TASKS"] for e in envs] == ["4096","4096","2048","2048"]
+
+
+@pytest.mark.parametrize("method", ["W2", "B0"])
+@pytest.mark.parametrize("mode", ["cycle", "independent"])
+def test_capacity_passes_original_benchmark_guard(method, mode):
+    # Execute the production formula AND guard, without importing CUDA/Megatron.
+    tree = ast.parse((CODE / "examples/rl/benchmark_live_moe_tp.py").read_text(encoding="utf-8"))
+    run = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "run_live_benchmark")
+    start = next(i for i, n in enumerate(run.body) if isinstance(n, ast.Assign)
+                 and any(isinstance(t, ast.Name) and t.id == "worst_case_tokens" for t in n.targets))
+    guard = ast.Module(body=run.body[start:start + 3], type_ignores=[])
+    env = common.method_env(method, mode, "p", "o")
+    args = NS(live_prompt_tokens=int(env["PROMPT_TOKENS"]), live_switches=int(env["SWITCHES"]),
+              live_max_waves=int(env["MAX_WAVES"]), live_max_overlap_steps=int(env["MAX_OVERLAP_STEPS"]),
+              live_release_standby_weights=env["RELEASE_STANDBY_WEIGHTS"] == "1",
+              max_position_embeddings=int(env["MAX_POSITION_EMBEDDINGS"]))
+    namespace = dict(args=args)
+    exec(compile(guard, "production_capacity_guard", "exec"), namespace)
+    assert namespace["worst_case_tokens"] < args.max_position_embeddings
+    assert env["SEQ_LENGTH"] == env["MAX_POSITION_EMBEDDINGS"] == "5248"
+    assert args.live_max_waves == 64
 
 
 @pytest.mark.parametrize("links", ["0:0","0:8","-1:2","0","a:b"])
@@ -221,14 +252,14 @@ def fake_diagnostic(monkeypatch, stall=False):
     torch = NS(cuda=cuda, inference_mode=nullcontext, full=lambda *a, **kw: None,
                full_like=lambda *a, **kw: None, device=lambda *a: None, long="long")
     args = NS(live_switches=3, live_prompt_tokens=2036, live_release_standby_weights=True,
-              live_repeat_forward=False, live_weight_bitwise_audit=False, max_position_embeddings=6272,
-              live_max_waves=128, micro_batch_size=4, padded_vocab_size=100, live_kv_request_identity=False)
+              live_repeat_forward=False, live_weight_bitwise_audit=False, max_position_embeddings=5248, seq_length=5248,
+              live_max_waves=64, micro_batch_size=4, padded_vocab_size=100, live_kv_request_identity=False)
     monkeypatch.setenv("NOSTOP_COLD_MODE", "cycle")
     monkeypatch.setenv("STALL_PAUSE", "1" if stall else "0")
     b = NS(torch=torch, dist=NS(get_rank=lambda:0), _apply_hotspot_pressure=lambda *a:None)
     d = benchmark.Diagnostic(b,args)
     d.origin, d.index, d.phase, d.wave = Event(), 2, "base", 0
-    context = NS(sequence_len_offset=2048, max_sequence_length=6272, enable_decode_mode=lambda:None)
+    context = NS(sequence_len_offset=2048, max_sequence_length=5248, enable_decode_mode=lambda:None)
     model = Mock(return_value="logits")
     model.config.tensor_model_parallel_size = 2
     def now():
@@ -289,9 +320,11 @@ def test_cleanup_signals_only_owned_group_before_reaping(monkeypatch, tmp_path):
     manager.children.append((process,log,record))
     manager.records.append(record)
     manager.stop(process)
+    first_end = record["ended_ns"]
     manager.cleanup()  # idempotent; no reused PID signals
     assert events == [(54321,signal.SIGTERM),(54321,signal.SIGKILL),"reap"]
     assert (tmp_path / "child.exit_code.txt").read_text() == "0\n"
+    assert record["ended_ns"] == first_end
 
 
 def test_benchmark_hook_skips_both_wave_and_weight_check_loops():
@@ -301,7 +334,7 @@ def test_benchmark_hook_skips_both_wave_and_weight_check_loops():
     for stall, expected in ((True,False),(False,True)):
         diagnostic = NS(stall_pause=stall,check_wave_count=Mock(),wave_begin=Mock(),wave_end=Mock())
         args = NS(live_max_overlap_steps=16, live_min_overlap_steps=1, live_scheduler_mode="baseline",
-                  live_max_wave_tasks=2, live_max_waves=128,live_active_experts_tuple=(),
+                  live_max_wave_tasks=2, live_max_waves=64,live_active_experts_tuple=(),
                   live_release_standby_weights=True,live_foreground_pressure_cap=.9,_nostop_diagnostic=diagnostic)
         launches = []
         tasks = [NS(task_id=i,num_bytes=100) for i in range(5)]
@@ -337,18 +370,18 @@ def test_benchmark_hook_skips_both_wave_and_weight_check_loops():
 
 def test_wave_budget_refuses_overflow(monkeypatch):
     d,_,_,_ = fake_diagnostic(monkeypatch)
-    d.check_wave_count(127)
+    d.check_wave_count(63)
     with pytest.raises(RuntimeError,match="budget"):
-        d.check_wave_count(128)
+        d.check_wave_count(64)
 
 
 def test_third_switch_restores_real_prefix_and_2048_tokens(monkeypatch):
     d, _, model, _ = fake_diagnostic(monkeypatch)
     d.torch = NS(inference_mode=torch.inference_mode,
                  cuda=NS(current_stream=lambda:NS(synchronize=lambda:None),reset_peak_memory_stats=lambda:None))
-    source = NS(sequence_len_offset=2037, key_value_memory_dict={1:(torch.ones(6272,1),torch.ones(6272,1))},
+    source = NS(sequence_len_offset=2037, key_value_memory_dict={1:(torch.ones(5248,1),torch.ones(5248,1))},
                 enable_decode_mode=lambda:None)
-    target = NS(sequence_len_offset=2037, key_value_memory_dict={1:(torch.ones(6272,1),torch.ones(6272,1))},
+    target = NS(sequence_len_offset=2037, key_value_memory_dict={1:(torch.ones(5248,1),torch.ones(5248,1))},
                 enable_decode_mode=lambda:None)
     weights = {tp:NS(_check_storage=Mock(),num_bytes=900) for tp in (2,4)}
     def decode(_model, context, _args, *, token_value):
@@ -402,3 +435,62 @@ def test_unreaped_status_poll_uses_wnowait(monkeypatch):
     waitid.return_value = NS(si_status=0)
     assert diagnostics.Processes.exited(p)
     assert p.returncode is None
+
+
+@pytest.mark.parametrize("installed,sample_error", [(False, False), (True, False), (False, True)])
+def test_machine_records_optional_nsys_and_requires_all_gpu_samples(monkeypatch, tmp_path, installed, sample_error):
+    commands = []
+    gpu_samples = 0
+    def run(command, **_kwargs):
+        nonlocal gpu_samples
+        commands.append(command)
+        code, output = 0, "ok\n"
+        if command == ["which", "nsys"]:
+            code, output = (0, "/usr/bin/nsys\n") if installed else (1, "")
+        elif command == ["nsys", "--version"]:
+            if not installed:
+                raise FileNotFoundError("nsys")
+            output = "NVIDIA Nsight Systems version test\n"
+        elif any(arg.startswith("--query-compute-apps") for arg in command):
+            output = ""
+        elif any(arg.startswith("--query-gpu") for arg in command):
+            gpu_samples += 1
+            output = "\n".join(f"{i},GPU-{i},RTX 5090,32000,0,0,30,210,405,P8,15,580" for i in range(8))
+            if sample_error and gpu_samples == 2:
+                code, output = 1, "GPU query failed"
+        return subprocess.CompletedProcess(command, code, stdout=output)
+    monkeypatch.setattr(diagnostics.subprocess, "run", run)
+    monkeypatch.setattr(diagnostics.time, "monotonic", lambda: 0)
+    monkeypatch.setattr(diagnostics.time, "sleep", lambda s: None)
+    result = diagnostics.machine_check(tmp_path, 1 if sample_error else 0, "python")
+    assert result["idle_state"] == ("unknown" if sample_error else "idle")
+    assert result["checks"]["runtime"]["exit_code"] == 0
+    assert result["checks"]["nsys"]["status"] == ("available" if installed else "missing")
+    assert ["which", "nsys"] in commands and ["nsys", "--version"] in commands
+    assert (tmp_path / "nsys_which.txt").exists() and (tmp_path / "nsys_version.txt").exists()
+
+
+def test_supervisor_checks_monitors_even_when_child_already_exited(monkeypatch, tmp_path):
+    manager = diagnostics.Processes(tmp_path)
+    process = NS(returncode=None)
+    monitor = NS(returncode=None)
+    manager.required = [monitor]
+    monkeypatch.setattr(manager, "start", lambda *a: process)
+    monkeypatch.setattr(manager, "exited", lambda p: True)
+    stopped = Mock()
+    monkeypatch.setattr(manager, "stop", stopped)
+    with pytest.raises(RuntimeError, match="pressure/telemetry"):
+        manager.run(["benchmark"], "case")
+    stopped.assert_called_once_with(process)
+
+
+def test_diagnostic_workers_use_callable_torchrun_entrypoint():
+    from torch.distributed.run import config_from_args, parse_args, run_script_path
+
+    # Callable entries use multiprocessing workers, not torchrun's subprocess
+    # handler (which calls Popen(start_new_session=True)). No workers are started.
+    for script in ("benchmark.py", "probe.py"):
+        path = CODE / "tools/resharding/nostop" / script
+        _, entrypoint, argv = config_from_args(parse_args([
+            "--standalone", "--nproc-per-node=8", "--run-path", str(path)]))
+        assert entrypoint is run_script_path and argv == [str(path)]

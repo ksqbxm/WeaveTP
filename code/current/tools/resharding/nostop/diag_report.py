@@ -9,9 +9,9 @@ import statistics
 from pathlib import Path
 
 try:
-    from .common import main_links
+    from .common import MAX_WAVES, capacity_budget, main_links
 except ImportError:
-    from common import main_links
+    from common import MAX_WAVES, capacity_budget, main_links
 
 
 def cold_check(traces):
@@ -168,6 +168,9 @@ def make_report(root):
                                   routes["default"], routes["candidate"])
     except (FileNotFoundError, ValueError, KeyError) as error:
         pressure = {"status": "inconclusive", "reason": f"missing/invalid bandwidth evidence: {error}"}
+    if not manifest["execution_complete"]:
+        pressure["status"] = "inconclusive"
+        pressure["reason"] = "diagnostic execution did not complete with live pressure/telemetry"
     cold_status = "passed" if recommended else "not_isolated" if all(
         c["status"] != "inconclusive" for c in checks.values()) and not smoke_errors else "inconclusive"
     report = {"cold_start": {"status": cold_status,
@@ -176,6 +179,8 @@ def make_report(root):
     (root / "diag_report.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
     env = {"DIAGNOSTICS_READY": int(recommended is not None and pressure["status"] == "passed"),
            "NOSTOP_COLD_MODE": recommended or "cycle", "SWITCHES": 1 if recommended == "independent" else 3,
+           "MAX_WAVES": MAX_WAVES, "SEQ_LENGTH": capacity_budget()["max_position_embeddings"],
+           "MAX_POSITION_EMBEDDINGS": capacity_budget()["max_position_embeddings"],
            "STRESS_LINKS": manifest["stress_links"], "L3_PROCESSES_PER_PAIR": manifest["l3_processes"],
            "STRESS_BYTES": manifest["stress_bytes"], "STRESS_SYNC_EVERY": manifest["stress_sync_every"],
            "PRESSURE_REQUIRED_SLOWDOWN": 2.5, "PROBE_CV_FLAG_THRESHOLD": 0.15,

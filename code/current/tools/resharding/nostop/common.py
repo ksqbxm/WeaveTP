@@ -1,20 +1,23 @@
 """CPU-only configuration and arithmetic for the six-run diagnostic (not serving)."""
 
-import math
-import statistics
+MAX_WAVES = 64
 
 
-def capacity_budget(switches=3, kv_tokens=2048, max_waves=128, overlap=16, extra=10):
+def capacity_budget():
+    # One allocation for all four combinations: cycle/W2 has both maxima.
+    switches, kv_tokens, prompt_tokens, overlap, extra = 3, 2048, 2036, 16, 10
     # Both warmup validations advance each context once. Before the measured
     # expansion, the prompt prefix is restored, so earlier growth is NOT live.
-    if switches not in (1, 3):
-        raise ValueError("diagnostic supports one or three switches")
-    per_switch = max_waves * overlap + overlap
+    per_switch = MAX_WAVES * overlap + overlap
     warmup_peak = kv_tokens + (switches - 1) * (per_switch + 1)
     measured_peak = kv_tokens + per_switch + extra
     high_water = max(warmup_peak, measured_peak)
+    # The original run_live_benchmark guard intentionally remains unchanged.
+    worst_case = prompt_tokens + 1 + switches * (MAX_WAVES * overlap + 2) + switches * overlap
+    required = max(high_water, worst_case + 1)
     return {"warmup_peak_tokens": warmup_peak, "measured_peak_tokens": measured_peak,
-            "max_position_embeddings": math.ceil((high_water + 1) / 128) * 128,
+            "high_water_tokens": high_water, "benchmark_worst_case_tokens": worst_case,
+            "max_position_embeddings": ((required + 127) // 128) * 128,
             "switches": switches, "kv_tokens": kv_tokens}
 
 
@@ -32,7 +35,7 @@ def method_env(method, mode, profile, output):
         NPROC_PER_NODE="8", MICRO_BATCH_SIZE="4", GLOBAL_BATCH_SIZE="16",
         EXPERT_PARALLEL_SIZE="2", CYCLE_KV_TOKENS="2048", CYCLE_EXTRA_STEPS="10",
         SWITCHES=str(switches), SEQ_LENGTH=str(capacity), MAX_POSITION_EMBEDDINGS=str(capacity),
-        RELEASE_STANDBY_WEIGHTS="1", MAX_WAVES="128", MAX_WAVE_TASKS="2048",
+        RELEASE_STANDBY_WEIGHTS="1", MAX_WAVES=str(MAX_WAVES), MAX_WAVE_TASKS="2048",
         SHRINK_MAX_WAVE_TASKS="2048", EXPANSION_MAX_WAVE_TASKS="4096" if w2 else "2048",
         METHOD_VARIANT="moetp++-hybrid" if w2 else "baseline",
         SCHEDULER_MODE="residual" if w2 else "baseline", DISABLE_SOURCE_REROUTE="0" if w2 else "1",
@@ -80,10 +83,6 @@ def main_links(rows, coverage=0.8):
     if not selected:
         raise ValueError("default plan has no remote migration traffic")
     return selected
-
-
-def coefficient_of_variation(values):
-    return statistics.pstdev(values) / statistics.mean(values) if len(values) > 1 else 0.0
 
 
 def intervals_overlap(a_start, a_end, b_start, b_end):
