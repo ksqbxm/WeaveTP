@@ -1,5 +1,7 @@
 # 第 2 步：CPU 汇总与回放
 
+实现 SHA：`7511ff32d61ab11cafeb1a5aee19841835a32cee`。130 项 CPU 测试通过（其中新增 27 项）；以下文档提交不改变实现。
+
 三个入口只读诊断文件，不导入 PyTorch、不启动 GPU 作业，不改 `benchmark.py`、`benchmark_live_moe_tp.py`、诊断和压力执行路径。真实 L0 trace 和 L600 长度文件尚未回传时，只能验证合成测试，不能称为实测端到端验证。
 
 ## 输入与统计口径
@@ -62,6 +64,9 @@ KV 重建按 `e2e_sim.py:REPREFILL_RATE[4]`（当前 4400 tokens/s/副本）估�
 ```bash
 source /data/ubuntu/lxh/weavetp/env.sh
 export REPO PYTHON
+export IMPLEMENTATION_SHA=7511ff32d61ab11cafeb1a5aee19841835a32cee
+git -C "$REPO" fetch origin codex/nostop-diagnostics
+git -C "$REPO" checkout --detach "$IMPLEMENTATION_SHA"
 export RUN=/data/ubuntu/lxh/weavetp/nostop/实际诊断目录
 export OUT=/data/ubuntu/lxh/weavetp/nostop/cpu_$(date +%Y%m%d_%H%M%S)
 export ANALYSIS="$REPO/code/current/tools/resharding/nostop"
