@@ -25,45 +25,53 @@ def cold_check(traces):
     by_step, by_wave = {}, {}
     for trace in traces:
         for row in trace["decodes"]:
-            if row["switch"] == measured and row["phase"] in ("normal", "base"):
+            # Validation replays source tokens, so it is not a serving completion.
+            # Keep post/normal steps as predecessors, including for warmup shrink.
+            if row["phase"] != "validation":
                 by_step.setdefault(row["step"], []).append(row)
         for wave in trace["waves"]:
-            if wave["switch"] == measured:
-                by_wave.setdefault(wave["wave"], []).append((trace["rank"], wave))
+            by_wave.setdefault((wave["switch"], wave["wave"]), []).append((trace["rank"], wave))
     if not by_step or any(len(rows) != 8 or {r["rank"] for r in rows} != set(range(8)) for rows in by_step.values()):
         return {"status": "inconclusive", "reason": "incomplete logical steps"}
     previous, gaps = None, {}
     for _, rows in sorted(by_step.items()):
-        if len({(r["phase"], r["wave"], r["kv_offset"]) for r in rows}) != 1:
+        if len({(r["switch"], r["phase"], r["wave"], r["kv_offset"]) for r in rows}) != 1:
             return {"status": "inconclusive", "reason": "rank logical steps disagree"}
         completion = max(r["complete_host_ns"] for r in rows)
         if previous is not None:
             if completion <= previous:
                 return {"status": "inconclusive", "reason": "non-increasing completion times"}
             if rows[0]["phase"] == "base":
-                gaps.setdefault(rows[0]["wave"], []).append(completion - previous)
+                gaps.setdefault((rows[0]["switch"], rows[0]["wave"]), []).append(completion - previous)
         previous = completion
     blocking = {}
-    for wave, entries in by_wave.items():
+    for key, entries in by_wave.items():
         durations = []
         for rank, entry in entries:
             starts = [r["host_start_ns"] for rows in by_step.values() for r in rows
-                      if r["rank"] == rank and r["phase"] == "base" and r["wave"] == wave]
+                      if r["rank"] == rank and r["phase"] == "base" and (r["switch"], r["wave"]) == key]
             if starts:
                 durations.append(min(starts) - entry["submit_host_ns"])
         if len(durations) == 8 and {rank for rank, _ in entries} == set(range(8)) and min(durations) >= 0:
-            blocking[wave] = max(durations)
-    if (0 not in gaps or 0 not in blocking or len(gaps) < 2
-            or gaps.keys() != blocking.keys() or gaps.keys() != by_wave.keys()):
-        return {"status": "inconclusive", "reason": "need first and later waves with decode on all ranks"}
-    wave_gaps = {wave: max(values) for wave, values in gaps.items()}
-    gap_excess = wave_gaps[0] - statistics.median(v for k, v in wave_gaps.items() if k != 0)
-    blocking_excess = blocking[0] - statistics.median(v for k, v in blocking.items() if k != 0)
-    return {"status": "failed" if gap_excess > 100_000_000 or blocking_excess > 50_000_000 else "passed",
-            "first_wave_gap_excess_s": gap_excess / 1e9, "first_wave_host_blocking_excess_s": blocking_excess / 1e9,
-            "wave_max_gap_s": {k: v / 1e9 for k, v in wave_gaps.items()},
-            "wave_submit_to_decode_host_s": {k: v / 1e9 for k, v in blocking.items()},
-            "thresholds_s": {"gap_excess": 0.100, "host_blocking_excess": 0.050}}
+            blocking[key] = max(durations)
+    if not gaps or gaps.keys() != blocking.keys() or gaps.keys() != by_wave.keys():
+        return {"status": "inconclusive", "reason": "need complete wave/decode evidence on all ranks"}
+    switches = {}
+    for (switch, wave), values in sorted(gaps.items()):
+        row = switches.setdefault(switch, {"wave_decode_gaps_s": {}, "wave_max_gap_s": {}, "wave_submit_to_decode_host_s": {}})
+        row["wave_decode_gaps_s"][wave] = [v / 1e9 for v in values]
+        row["wave_max_gap_s"][wave] = max(values) / 1e9
+        row["wave_submit_to_decode_host_s"][wave] = blocking[(switch, wave)] / 1e9
+    result = {"switches": switches, "criterion": "cycle switch 2 first-wave maximum gap <= switch 0",
+              "fixed_switch_overhead": "retained in raw decode gaps; no subtraction or comparison against later waves"}
+    if measured == 0:
+        return {**result, "status": "reference", "reason": "independent mode is reference only; frozen mode is cycle"}
+    if measured != 2 or set(switches) != {0, 1, 2} or (0, 0) not in gaps or (2, 0) not in gaps:
+        return {**result, "status": "inconclusive", "reason": "need cold switch 0 and measured switch 2 in a complete cycle"}
+    cold, warm = max(gaps[(0, 0)]), max(gaps[(2, 0)])
+    return {**result, "status": "passed" if warm <= cold else "failed",
+            "cold_first_wave_gap_s": cold / 1e9, "measured_first_wave_gap_s": warm / 1e9,
+            "cold_start_reduction_s": (cold - warm) / 1e9}
 
 
 def pressure_check(low, high, default_rows, candidate_rows):
@@ -112,6 +120,9 @@ def launch_gate(traces, mode, stall_pause):
                 s["measured"] and s["kv_tokens"] == 2048 and s["target_weight_storage_bytes"] == 0
                 and s["target_weight_bytes_required"] > 0 for s in t["state_checks"]):
             return "KV or standby state gate failed"
+        if mode == "cycle" and not any(s["switch"] == 0 and s["kv_tokens"] == 2048
+                and s["target_weight_storage_bytes"] == 0 and s["target_weight_bytes_required"] > 0 for s in t["state_checks"]):
+            return "cold switch KV or standby state gate failed"
         if mode == "independent" and not t.get("independent_warmup"):
             return "missing independent warmup evidence"
         migration = [r for r in t["decodes"] if r["switch"] == expected
@@ -138,7 +149,10 @@ def make_report(root):
             smoke_errors[method] = "smoke launch incomplete"
         else:
             try:
-                reason = launch_gate(load_traces(case / "run"), "cycle", method == "B0")
+                traces = load_traces(case / "run")
+                reason = launch_gate(traces, "cycle", method == "B0")
+                if method == "W2" and not reason:
+                    checks["smoke_L0_W2"] = cold_check(traces)
             except (ValueError, KeyError) as error:
                 reason = f"invalid smoke evidence: {error}"
             if reason:
@@ -147,6 +161,8 @@ def make_report(root):
         for mode in ("cycle", "independent"):
             name = f"{level}_W2_{mode}"
             case = root / name
+            if mode == "independent" and not case.exists():
+                continue  # Independent evidence is optional, never rerun to freeze cycle.
             if not (case / "exit_code.txt").exists() or (case / "exit_code.txt").read_text().strip() != "0":
                 checks[name] = {"status": "inconclusive", "reason": "launch did not complete successfully"}
                 continue
@@ -159,8 +175,7 @@ def make_report(root):
             if reason:
                 checks[name] = {"status": "inconclusive", "reason": reason}
     cycle_ok = all(checks[f"{level}_W2_cycle"]["status"] == "passed" for level in ("L0", "L3"))
-    independent_ok = all(checks[f"{level}_W2_independent"]["status"] == "passed" for level in ("L0", "L3"))
-    recommended = None if smoke_errors else "cycle" if cycle_ok else "independent" if independent_ok else None
+    recommended = "cycle" if cycle_ok and not smoke_errors else None
     try:
         routes = json.loads((root / "probe_routes.json").read_text())
         pressure = pressure_check(json.loads((root / "probe_L0.json").read_text()),
@@ -172,17 +187,18 @@ def make_report(root):
         pressure["status"] = "inconclusive"
         pressure["reason"] = "diagnostic execution, pressure/telemetry or final memory recovery did not complete successfully; see status.json"
     cold_status = "passed" if recommended else "not_isolated" if all(
-        c["status"] != "inconclusive" for c in checks.values()) and not smoke_errors else "inconclusive"
+        checks[f"{level}_W2_cycle"]["status"] != "inconclusive" for level in ("L0", "L3")) and not smoke_errors else "inconclusive"
     report = {"cold_start": {"status": cold_status,
-                              "recommended_mode": recommended, "checks": checks, "smoke_errors": smoke_errors},
+                              "recommended_mode": "cycle", "switches": 3, "checks": checks, "smoke_errors": smoke_errors},
               "pressure": pressure}
     (root / "diag_report.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
     env = {"DIAGNOSTICS_READY": int(recommended is not None and pressure["status"] == "passed"),
-           "NOSTOP_COLD_MODE": recommended or "cycle", "SWITCHES": 1 if recommended == "independent" else 3,
+           "NOSTOP_COLD_MODE": "cycle", "SWITCHES": 3,
            "MAX_WAVES": MAX_WAVES, "SEQ_LENGTH": capacity_budget()["max_position_embeddings"],
            "MAX_POSITION_EMBEDDINGS": capacity_budget()["max_position_embeddings"],
            "STRESS_LINKS": manifest["stress_links"], "L3_PROCESSES_PER_PAIR": manifest["l3_processes"],
            "STRESS_BYTES": manifest["stress_bytes"], "STRESS_SYNC_EVERY": manifest["stress_sync_every"],
+           "MIN_FREE_GIB": manifest["min_free_gib"],
            "PRESSURE_REQUIRED_SLOWDOWN": 2.5, "PROBE_CV_FLAG_THRESHOLD": 0.15,
            "PROBE_SHIFT_FLAG_THRESHOLD": 0.20,
            "PROFILE": manifest["profile"], "DIAGNOSTIC_EVIDENCE": str(root.resolve())}

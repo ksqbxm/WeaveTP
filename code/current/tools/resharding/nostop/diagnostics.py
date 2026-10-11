@@ -6,6 +6,7 @@ import csv
 import datetime
 import hashlib
 import json
+import math
 import os
 import shlex
 import signal
@@ -16,11 +17,25 @@ import time
 from pathlib import Path
 
 try:
-    from .common import capacity_budget, method_env, parse_links
-    from .diag_report import make_report
+    from .common import (
+        MIN_FREE_GIB,
+        STRESS_BYTES,
+        capacity_budget,
+        diagnostic_cases,
+        method_env,
+        parse_links,
+    )
+    from .diag_report import launch_gate, load_traces, make_report
 except ImportError:
-    from common import capacity_budget, method_env, parse_links
-    from diag_report import make_report
+    from common import (
+        MIN_FREE_GIB,
+        STRESS_BYTES,
+        capacity_budget,
+        diagnostic_cases,
+        method_env,
+        parse_links,
+    )
+    from diag_report import launch_gate, load_traces, make_report
 
 CODE = Path(__file__).resolve().parents[3]
 BASE = Path("/data/ubuntu/lxh/weavetp/nostop")
@@ -46,7 +61,8 @@ class Processes:
         process = subprocess.Popen(command, cwd=CODE, env=env, stdin=subprocess.DEVNULL,
                                    stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
         record = {"name": name, "pid": process.pid, "pgid": process.pid,
-                  "command": command, "started_ns": time.time_ns(), "exit_code": None}
+                  "command": command, "cuda_visible_devices": env.get("CUDA_VISIBLE_DEVICES") if env else None,
+                  "started_ns": time.time_ns(), "exit_code": None}
         self.children.append((process, log, record))
         self.records.append(record)
         self.save()
@@ -245,12 +261,6 @@ def machine_check(root, seconds, python, mps_owner=None):
     return document
 
 
-def diagnostic_cases():
-    return [("smoke_L0_W2", "L0", "W2", "cycle"), ("smoke_L0_B0", "L0", "B0", "cycle"),
-            ("L0_W2_cycle", "L0", "W2", "cycle"), ("L0_W2_independent", "L0", "W2", "independent"),
-            ("L3_W2_cycle", "L3", "W2", "cycle"), ("L3_W2_independent", "L3", "W2", "independent")]
-
-
 def isolated_env(root):
     env = os.environ.copy()
     cache = Path(root) / "cache"
@@ -264,13 +274,52 @@ def isolated_env(root):
 
 
 def stress_commands(args):
-    return [[args.python, "-B", "tools/resharding/p2p_link_stressor.py", "--src", str(src), "--dst", str(dst),
-             "--bytes", str(args.stress_bytes), "--sync-every", str(args.stress_sync_every), "--bidirectional"]
+    return [{"command": [args.python, "-B", "tools/resharding/p2p_link_stressor.py", "--src", "0", "--dst", "1",
+                         "--bytes", str(args.stress_bytes), "--sync-every", str(args.stress_sync_every), "--bidirectional"],
+             "env": {"CUDA_VISIBLE_DEVICES": f"{src},{dst}"}}
             for src, dst in parse_links(args.links) for _ in range(args.processes_per_pair)]
 
 
+def check_pressure_memory(manager, stress, specs, prefix, min_free_gib):
+    gpu = capture(["nvidia-smi", "--query-gpu=index,uuid,memory.total,memory.used,memory.free",
+                   "--format=csv,noheader,nounits"], manager.root, f"{prefix}_gpu_memory")
+    apps = capture(["nvidia-smi", "--query-compute-apps=pid,gpu_uuid,used_memory",
+                    "--format=csv,noheader,nounits"], manager.root, f"{prefix}_process_memory")
+    record = {"host_ns": time.perf_counter_ns(), "min_free_gib": min_free_gib,
+              "status": "failed", "gpus": [], "stressors": [], "errors": []}
+    try:
+        if gpu["exit_code"] or apps["exit_code"]:
+            raise ValueError("nvidia-smi memory query failed")
+        for row in csv.reader(gpu["output"].splitlines(), skipinitialspace=True):
+            index, uuid, total, used, free = (x.strip() for x in row)
+            record["gpus"].append(dict(index=int(index), uuid=uuid, total_mib=int(total), used_mib=int(used), free_mib=int(free)))
+        if (len(record["gpus"]) != 8 or {g["index"] for g in record["gpus"]} != set(range(8))
+                or len({g["uuid"] for g in record["gpus"]}) != 8):
+            raise ValueError("memory gate requires all eight GPUs")
+        usage = {}
+        for row in csv.reader(apps["output"].splitlines(), skipinitialspace=True):
+            pid, uuid, used = (x.strip() for x in row)
+            usage[(int(pid), uuid)] = int(used)
+        for process, spec in zip(stress, specs):
+            record["stressors"].append(dict(pid=process.pid, **spec["env"],
+                memory_mib_by_gpu={g["uuid"]: usage.get((process.pid, g["uuid"])) for g in record["gpus"]}))
+        record["memory_note"] = "null means PID/GPU not reported by nvidia-smi; no per-client memory is inferred from MPS server usage"
+        for g in record["gpus"]:
+            if g["free_mib"] < min_free_gib * 1024:
+                record["errors"].append(f"GPU {g['index']} ({g['uuid']}): free={g['free_mib']} MiB < {min_free_gib} GiB")
+    except ValueError as error:
+        record["errors"].append(str(error))
+    if not record["errors"]:
+        record["status"] = "passed"
+    write_json(manager.root / f"{prefix}_memory.json", record)
+    if record["errors"]:
+        raise RuntimeError(f"pressure memory gate failed: {record['errors']}; no model/probe launched")
+    return record
+
+
 def start_stress(manager, args, env, prefix):
-    stress = [manager.start(command, f"{prefix}_{i}", env) for i, command in enumerate(stress_commands(args))]
+    specs = stress_commands(args)
+    stress = [manager.start(spec["command"], f"{prefix}_{i}", {**env, **spec["env"]}) for i, spec in enumerate(specs)]
     # Every process prints START only after allocations/initialization finish.
     deadline = time.monotonic() + 120
     while True:
@@ -286,7 +335,70 @@ def start_stress(manager, args, env, prefix):
         time.sleep(0.5)
     time.sleep(5)
     manager.required.extend(stress)
+    check_pressure_memory(manager, stress, specs, prefix, args.min_free_gib)
     return stress
+
+
+def reuse_l0_cases(root, source, cases, machine, profile_sha256, checkpoint):
+    """Snapshot completed L0 evidence only; old L3 pressure is not reusable."""
+    source = source.resolve()
+    old_manifest = json.loads((source / "manifest.json").read_text())
+    old_machine = json.loads((source / "machine.json").read_text())
+    if (old_manifest["profile_sha256"] != profile_sha256 or old_manifest["checkpoint"] != checkpoint
+            or old_machine["host"] != machine["host"]
+            or old_machine["memory_used_mib"].keys() != machine["memory_used_mib"].keys()):
+        raise ValueError("--routes-from must use the same host, GPUs, checkpoint and bandwidth profile")
+    reused = {}
+    selected = {c[0] for c in cases}
+    for name, level, method, mode in diagnostic_cases():
+        if level != "L0" or name in selected:
+            continue
+        case = source / name
+        if not (case / "exit_code.txt").is_file() or (case / "exit_code.txt").read_text().strip() != "0":
+            if mode == "independent":
+                continue  # Optional reference, never a prerequisite for cycle.
+            raise ValueError(f"cannot reuse incomplete L0 case: {case}")
+        reason = launch_gate(load_traces(case / "run"), mode, method == "B0")
+        if reason:
+            raise ValueError(f"cannot reuse {case}: {reason}")
+        config = json.loads((case / "config.json").read_text())
+        expected = method_env(method, mode, "", "")
+        if any(config.get(k) != v for k, v in expected.items() if k not in ("PROFILE", "OUT_DIR")):
+            raise ValueError(f"incompatible benchmark configuration: {case}")
+        files = [case / "exit_code.txt", case / "config.json", case / "run/routes.json", *sorted((case / "run").glob("trace_rank*.json"))]
+        files += [case / name for name in ("environment.json", "command.txt", "run/result.json") if (case / name).is_file()]
+        hashes = {}
+        for path in files:
+            data = path.read_bytes()
+            relative = path.relative_to(case)
+            target = root / name / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(data)
+            hashes[str(relative)] = hashlib.sha256(data).hexdigest()
+        reused[name] = {"source": str(case), "files_sha256": hashes}
+    write_json(root / "reuse_source_manifest.json", old_manifest)
+    write_json(root / "reuse_source_machine.json", old_machine)
+    return reused
+
+
+def collect_probe_routes(root):
+    defaults, candidates, sources = [], [], []
+    for name, _, method, _ in diagnostic_cases():
+        case = root / name
+        if not (case / "exit_code.txt").is_file() or (case / "exit_code.txt").read_text().strip() != "0":
+            continue
+        path = case / "run/routes.json"
+        routes = json.loads(path.read_text())
+        sources.append(str(path.relative_to(root)))
+        if method == "B0":
+            defaults = routes["default"]
+        else:
+            candidates.extend(routes["candidate"])
+    if not defaults or not candidates:
+        raise ValueError("probes require completed B0 default and W2 candidate routes; use --routes-from or run both smokes")
+    links = sorted({(r["src"], r["dst"]) for r in defaults + candidates if r["src"] != r["dst"]})
+    write_json(root / "probe_routes.json", {"default": defaults, "candidate": candidates,
+        "sources": sources, "links": [{"src": a, "dst": b} for a, b in links]})
 
 
 def run_diagnostics(args, root, manager):
@@ -305,6 +417,12 @@ def run_diagnostics(args, root, manager):
         raise ValueError("profile must describe eight actual GPUs")
     args.profile = str(root / "bandwidth_profile.json")
     Path(args.profile).write_bytes(profile_bytes)
+    cases = diagnostic_cases(args.cases)
+    profile_sha256 = hashlib.sha256(profile_bytes).hexdigest()
+    reused = reuse_l0_cases(root, args.routes_from, cases, machine, profile_sha256, args.checkpoint) if args.routes_from else {}
+    available = {c[0] for c in cases} | reused.keys()
+    if "smoke_L0_B0" not in available or not any("W2" in name for name in available):
+        raise ValueError("selected cases lack B0/W2 routes; provide --routes-from")
     env = isolated_env(root)
     env.update(PYTHON=args.python, CHECKPOINT=args.checkpoint, CUDA_VISIBLE_DEVICES="0,1,2,3,4,5,6,7",
                MPS_OWNER=args.mps_owner or "",
@@ -312,17 +430,19 @@ def run_diagnostics(args, root, manager):
     manifest = {"execution_complete": False, "stress_links": args.links, "l3_processes": args.processes_per_pair,
                 "mps_owner": args.mps_owner, "cuda_mps_pipe_directory": env.get("CUDA_MPS_PIPE_DIRECTORY"),
                 "stress_bytes": args.stress_bytes, "stress_sync_every": args.stress_sync_every,
+                "min_free_gib": args.min_free_gib, "routes_from": str(args.routes_from) if args.routes_from else None,
+                "reused_cases": reused, "cold_mode": "cycle",
                 "profile": str(Path(args.profile).resolve()), "checkpoint": args.checkpoint,
-                "profile_source": str(profile_source), "profile_sha256": hashlib.sha256(profile_bytes).hexdigest(),
-                "capacity_budget": capacity_budget(), "cases": diagnostic_cases(),
-                "pressure_threshold": 2.5, "cold_gap_threshold_s": 0.100, "cold_host_threshold_s": 0.050,
+                "profile_source": str(profile_source), "profile_sha256": profile_sha256,
+                "capacity_budget": capacity_budget(), "cases": cases,
+                "pressure_threshold": 2.5, "cold_criterion": "cycle switch 2 first-wave maximum gap <= switch 0",
                 "cv_flag_threshold": 0.15, "bandwidth_shift_flag_threshold": 0.20}
     write_json(root / "manifest.json", manifest)
     gpu_monitor = manager.start(["nvidia-smi", f"--query-gpu=timestamp,{GPU_FIELDS}", "--format=csv", "-lms", "200"], "telemetry", env)
     app_monitor = manager.start(["nvidia-smi", "--query-compute-apps=pid,process_name,gpu_uuid,used_memory", "--format=csv", "-l", "1"], "process_memory", env)
     cpu_monitor = manager.start(["bash", "-c", 'while true; do date -u +%FT%TZ; ps -eo pid,ppid,pgid,pcpu,pmem,rss,comm; sleep 1; done'], "process_cpu", env)
     manager.required.extend((gpu_monitor, app_monitor, cpu_monitor))
-    for name, level, method, mode in diagnostic_cases():
+    for name, level, method, mode in cases:
         case = root / name
         case.mkdir()
         require_idle(case / "preflight", args.mps_owner)
@@ -346,17 +466,7 @@ def run_diagnostics(args, root, manager):
         for process in stress:
             manager.stop(process)
         print(f"DONE {name}", flush=True)
-    # Actual default and candidate routes, including any change in later launches.
-    defaults, candidates = [], []
-    for name, _, _, _ in diagnostic_cases():
-        routes = json.loads((root / name / "run/routes.json").read_text())
-        if name == "smoke_L0_B0":
-            defaults = routes["default"]
-        if "W2" in name:
-            candidates.extend(routes["candidate"])
-    links = sorted({(r["src"], r["dst"]) for r in defaults + candidates if r["src"] != r["dst"]})
-    write_json(root / "probe_routes.json", {"default": defaults, "candidate": candidates,
-                                            "links": [{"src": a, "dst": b} for a, b in links]})
+    collect_probe_routes(root)
     for level in ("L0", "L3"):
         require_idle(root / f"probe_{level}_preflight", args.mps_owner)
         stress = start_stress(manager, args, env, "probe_pressure") if level == "L3" else []
@@ -410,16 +520,25 @@ def main():
                         help="allow only this user's nvidia-cuda-mps-server (default: MPS_OWNER; unset forbids all compute processes)")
     parser.add_argument("--checkpoint", default=os.environ.get("CHECKPOINT", "/data/models/DeepSeek-V2-Lite-megatron-v2"))
     parser.add_argument("--profile", default=os.environ.get("PROFILE", "profiles/moe_tp_8gpu_idle_p2p_v21.json"))
+    parser.add_argument("--cases", help="comma-separated benchmark case names; L0/L3 probes always follow (default: all cases)")
+    parser.add_argument("--routes-from", type=Path, help="old run directory; snapshot its completed, unselected L0 cases and migration routes")
     parser.add_argument("--links", default="0:2,1:3,4:6,5:7")
     parser.add_argument("--processes-per-pair", type=int, default=7)
-    parser.add_argument("--stress-bytes", type=int, default=256 * 1024 * 1024)
+    parser.add_argument("--stress-bytes", type=int, default=STRESS_BYTES)
+    parser.add_argument("--min-free-gib", type=float, default=MIN_FREE_GIB,
+                        help="minimum free memory on every GPU after pressure initialization (default: 22 GiB)")
     parser.add_argument("--stress-sync-every", type=int, default=16)
     parser.add_argument("--timeout", type=int, default=2400)
     args = parser.parse_args()
     args.mps_owner = args.mps_owner or None
     args.profile = str((CODE / args.profile).resolve())
     parse_links(args.links)
-    if min(args.processes_per_pair, args.stress_bytes, args.stress_sync_every, args.timeout) <= 0 or args.sample_seconds < 0:
+    try:
+        cases = diagnostic_cases(args.cases)
+    except ValueError as error:
+        parser.error(str(error))
+    if (min(args.processes_per_pair, args.stress_bytes, args.stress_sync_every, args.timeout) <= 0 or args.sample_seconds < 0
+            or not math.isfinite(args.min_free_gib) or args.min_free_gib <= 0):
         parser.error("invalid duration or pressure configuration")
     stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     root = args.out or BASE / f"{args.mode}_{socket.gethostname()}_{stamp}_{os.getpid()}"
@@ -428,10 +547,11 @@ def main():
                           "mps_owner": args.mps_owner, "cuda_mps_pipe_directory": os.environ.get("CUDA_MPS_PIPE_DIRECTORY"),
                           "idle_limits": {"memory_used_mib": 200, "utilization_gpu_pct": 0},
                           "memory_recovery_allowance_mib": 16,
+                          "min_free_gib": args.min_free_gib, "routes_from": str(args.routes_from) if args.routes_from else None,
                           "machine_commands": ["nvidia-smi -q", "nvidia-smi topo -m", "PyTorch/NCCL version query",
                                                "which nsys", "nsys --version"],
                           "cases": [{"name": n, "level": l, "env": method_env(m, c, args.profile, root / n / "run")}
-                                    for n, l, m, c in diagnostic_cases()] if args.mode == "diag" else [],
+                                    for n, l, m, c in cases] if args.mode == "diag" else [],
                           "pressure_commands": stress_commands(args) if args.mode == "diag" else [],
                           "probe_order": ["L0", "L3"] if args.mode == "diag" else [],
                           "automatic_formal_launch": False}, indent=2))

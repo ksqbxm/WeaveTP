@@ -21,41 +21,53 @@ sys.path.insert(0, str(CODE))
 from tools.resharding.nostop import benchmark, common, diag_report, diagnostics
 
 
-def traces(gap_excess=0, host_excess=0, mode="cycle", stw=False):
+def traces(gap_excess=0, host_excess=0, mode="cycle", stw=False, cold_gap=400_000_000):
     result = []
     measured = 2 if mode == "cycle" else 0
     for rank in range(8):
         rows, waves = [], []
         done = 1_000_000_000 + rank * 100
-        rows.append(dict(rank=rank, step=0, switch=measured, phase="normal", wave=None,
-                         kv_offset=2047, host_start_ns=done - 50_000_000, complete_host_ns=done))
-        for wave in range(3):
-            done += 200_000_000 + (gap_excess if wave == 0 else 0)
-            start = done - 50_000_000
-            waves.append(dict(switch=measured, wave=wave,
-                              submit_host_ns=start - 10_000_000 - (host_excess if wave == 0 else 0)))
-            if not stw:
-                rows.append(dict(rank=rank, step=wave+1, switch=measured, phase="base", wave=wave,
-                                 kv_offset=2048+wave, host_start_ns=start, complete_host_ns=done))
-        for i in range(10):
-            rows.append(dict(rank=rank, step=4+i, switch=measured, phase="post", wave=None,
-                             kv_offset=2051+i, host_start_ns=done+i*100_000_000,
-                             complete_host_ns=done+(i+1)*100_000_000))
+        states = []
+        for switch in range(measured + 1):
+            if switch in (0, measured):
+                done += 100_000_000
+                rows.append(dict(rank=rank, step=len(rows), switch=switch, phase="normal", wave=None,
+                                 kv_offset=2047, host_start_ns=done - 50_000_000, complete_host_ns=done))
+            for wave in range(3):
+                gap = cold_gap if switch == 0 and measured == 2 else 200_000_000 + gap_excess
+                done += gap if wave == 0 else 200_000_000
+                start = done - 50_000_000
+                waves.append(dict(switch=switch, wave=wave,
+                                  submit_host_ns=start - 10_000_000 - (host_excess if wave == 0 else 0)))
+                if not stw:
+                    rows.append(dict(rank=rank, step=len(rows), switch=switch, phase="base", wave=wave,
+                                     kv_offset=2048+wave, host_start_ns=start, complete_host_ns=done))
+            for i in range(10 if switch == measured else 1):
+                rows.append(dict(rank=rank, step=len(rows), switch=switch, phase="post", wave=None,
+                                 kv_offset=2051+i, host_start_ns=done, complete_host_ns=done+100_000_000))
+                done += 100_000_000
+            states.append(dict(switch=switch, measured=switch == measured, kv_tokens=2048,
+                               target_weight_storage_bytes=0, target_weight_bytes_required=1000))
         result.append(dict(rank=rank, measured_switch=measured, stall_pause=stw,
                            clock=dict(monotonic=True, boot_id="same", time_namespace="same"),
-                           decodes=rows, waves=waves, state_checks=[dict(measured=True, kv_tokens=2048,
-                           target_weight_storage_bytes=0, target_weight_bytes_required=1000)],
+                           decodes=rows, waves=waves, state_checks=states,
                            independent_warmup=dict(scratch_bytes=128) if mode == "independent" else None))
     return result
 
 
-@pytest.mark.parametrize("gap,host,status", [(0,0,"passed"), (100_000_000,50_000_000,"passed"),
-    (100_000_001,0,"failed"), (0,50_000_001,"failed"), (-50_000_000,0,"passed")])
-def test_cold_thresholds_are_strict_nanosecond_boundaries(gap, host, status):
-    assert diag_report.cold_check(traces(gap, host))["status"] == status
+@pytest.mark.parametrize("cold,warm,status", [(1_186_000_000,781_000_000,"passed"),
+    (781_000_000,781_000_000,"passed"), (781_000_000,781_000_001,"failed")])
+def test_cold_compares_same_first_wave_across_cycle(cold, warm, status):
+    result = diag_report.cold_check(traces(warm - 200_000_000, host_excess=60_000_000, cold_gap=cold))
+    assert result["status"] == status
+    assert result["cold_first_wave_gap_s"] == cold / 1e9
+    assert result["measured_first_wave_gap_s"] == warm / 1e9
+    assert result["cold_start_reduction_s"] == (cold - warm) / 1e9
+    assert set(result["switches"]) == {0, 1, 2}
+    assert "thresholds_s" not in result  # Fixed switch cost is not an isolation failure.
 
 
-@pytest.mark.parametrize("damage", ["missing_rank", "clock", "logical_step", "one_wave", "reverse_time"])
+@pytest.mark.parametrize("damage", ["missing_rank", "clock", "logical_step", "missing_warm_switch", "reverse_time"])
 def test_cold_incomplete_or_incomparable_evidence_never_passes(damage):
     raw = traces()
     if damage == "missing_rank":
@@ -64,10 +76,10 @@ def test_cold_incomplete_or_incomparable_evidence_never_passes(damage):
         raw[3]["clock"]["boot_id"] = "other"
     elif damage == "logical_step":
         raw[3]["decodes"][1]["kv_offset"] += 1
-    elif damage == "one_wave":
+    elif damage == "missing_warm_switch":
         for t in raw:
-            t["decodes"] = t["decodes"][:2]
-            t["waves"] = t["waves"][:1]
+            t["decodes"] = [r for r in t["decodes"] if r["switch"] != 2]
+            t["waves"] = [r for r in t["waves"] if r["switch"] != 2]
     else:
         for t in raw:
             t["decodes"][1]["complete_host_ns"] = 0
@@ -76,11 +88,12 @@ def test_cold_incomplete_or_incomparable_evidence_never_passes(damage):
 
 def test_slowest_rank_completion_and_rank_local_host_blocking():
     raw = traces()
-    raw[7]["decodes"][1]["complete_host_ns"] += 110_000_000
+    row = next(r for r in raw[7]["decodes"] if r["switch"] == 2 and r["phase"] == "base")
+    row["complete_host_ns"] += 110_000_000
     report = diag_report.cold_check(raw)
-    assert report["status"] == "failed"
-    assert report["wave_max_gap_s"][0] == pytest.approx(.310)
-    assert report["wave_submit_to_decode_host_s"][0] == .010
+    assert report["status"] == "passed"
+    assert report["switches"][2]["wave_max_gap_s"][0] == pytest.approx(.310)
+    assert report["switches"][2]["wave_submit_to_decode_host_s"][0] == .010
 
 
 def probe(speed, candidate_speed=100):
@@ -126,7 +139,7 @@ def test_probe_variability_preserved_and_flagged():
 
 def test_complete_report_has_only_two_decisions_and_frozen_recommendation(tmp_path):
     diagnostics.write_json(tmp_path / "manifest.json", dict(execution_complete=True, stress_links="0:2", l3_processes=7,
-        stress_bytes=256, stress_sync_every=16, profile="/data/profile.json"))
+        stress_bytes=256, stress_sync_every=16, min_free_gib=22, profile="/data/profile.json"))
     for name, _, method, mode in diagnostics.diagnostic_cases():
         case = tmp_path / name
         (case / "run").mkdir(parents=True)
@@ -220,7 +233,7 @@ def test_invalid_pressure_links(links):
 def test_stress_parameters_and_launch_order():
     args = NS(python="python3", links="2:0,0:2,1:3", processes_per_pair=3, stress_bytes=256, stress_sync_every=16)
     commands = diagnostics.stress_commands(args)
-    assert len(commands) == 6 and all("--bidirectional" in c for c in commands)
+    assert len(commands) == 6 and all("--bidirectional" in c["command"] for c in commands)
     assert diagnostics.diagnostic_cases() == [
         ("smoke_L0_W2","L0","W2","cycle"), ("smoke_L0_B0","L0","B0","cycle"),
         ("L0_W2_cycle","L0","W2","cycle"), ("L0_W2_independent","L0","W2","independent"),

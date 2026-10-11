@@ -1,6 +1,20 @@
 """CPU-only configuration and arithmetic for the six-run diagnostic (not serving)."""
 
 MAX_WAVES = 64
+STRESS_BYTES = 64 * 1024 * 1024
+MIN_FREE_GIB = 22
+
+
+def diagnostic_cases(spec=None):
+    cases = [("smoke_L0_W2", "L0", "W2", "cycle"), ("smoke_L0_B0", "L0", "B0", "cycle"),
+             ("L0_W2_cycle", "L0", "W2", "cycle"), ("L0_W2_independent", "L0", "W2", "independent"),
+             ("L3_W2_cycle", "L3", "W2", "cycle"), ("L3_W2_independent", "L3", "W2", "independent")]
+    if spec is None:
+        return cases
+    names = spec.split(",")
+    if len(set(names)) != len(names) or not set(names) <= {c[0] for c in cases}:
+        raise ValueError("--cases must contain distinct, known benchmark case names")
+    return [c for c in cases if c[0] in names]
 
 
 def capacity_budget():

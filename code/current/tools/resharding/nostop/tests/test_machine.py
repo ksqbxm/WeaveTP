@@ -139,7 +139,8 @@ def test_every_launch_rechecks_idle_before_own_pressure(monkeypatch, tmp_path, b
     profile = tmp_path / "input_profile.json"
     diagnostics.write_json(profile, dict(world_size=8, matrix_gbps=[[100]*8 for _ in range(8)]))
     args = NS(sample_seconds=0, python="python", mps_owner="yiwei", checkpoint=str(tmp_path),
-              profile=str(profile), links="0:2", processes_per_pair=7, stress_bytes=256, stress_sync_every=16, timeout=60)
+              profile=str(profile), links="0:2", processes_per_pair=7, stress_bytes=256, stress_sync_every=16, timeout=60,
+              cases=None, routes_from=None, min_free_gib=22)
     if blocked_at:
         with pytest.raises(RuntimeError, match="busy"):
             diagnostics.run_diagnostics(args, tmp_path, manager)
@@ -155,7 +156,7 @@ def test_every_launch_rechecks_idle_before_own_pressure(monkeypatch, tmp_path, b
 def test_final_recovery_gates_completion_even_on_failure(monkeypatch, tmp_path, initial_code, restored, expected):
     diagnostics.write_json(tmp_path / "machine.json", {})
     diagnostics.write_json(tmp_path / "manifest.json", dict(execution_complete=False,
-        stress_links="0:2", l3_processes=7, stress_bytes=256, stress_sync_every=16, profile="/data/profile.json"))
+        stress_links="0:2", l3_processes=7, stress_bytes=256, stress_sync_every=16, min_free_gib=22, profile="/data/profile.json"))
     recover = Mock(return_value=restored)
     monkeypatch.setattr(diagnostics, "check_memory_recovery", recover)
     status = {}
