@@ -25,11 +25,14 @@ S 跑三个方法。E 中 weavetp 与 weavetp_2x 的有效扩容配置相同：�
 
 ## 公共配置
 
+`INIT_SYNC_MAX_TASKS=2048` 将初始权重同步按全局 task id 顺序分批；每批 wait、commit 完成并在所有 rank 间同步后再提交下一批，避免 27 层 EP=1 计划一次提交过多 NCCL P2P 操作。初始同步不计入切换时间，完成后仍执行原有输出一致性校验。该上限独立于正式迁移的波数/任务上限；不设置或设为 0 时保留一次性同步及原有默认输出。
+
 以下 Bash 段可保存为 `/data/ubuntu/lxh/weavetp/dp_sweep_20261011/dp_sweep_env.sh`，在每个节点 source。在干净 shell 中运行，PYTHON 指向已有环境；不安装依赖，不更改选源/执行/KV 算法或门槛。配置中的 packing、router、P2P 顺序及验证阈值沿用 T09/W2。
 
 ```bash
 export EXPERT_PARALLEL_SIZE=1 MICRO_BATCH_SIZE=1
 export RELEASE_STANDBY_WEIGHTS=1 DP_SWEEP_METRICS=1
+export INIT_SYNC_MAX_TASKS=2048
 export SEQ_LENGTH=1024 MAX_POSITION_EMBEDDINGS=1024 PROMPT_TOKENS=8
 export MAX_WAVES=128 MAX_OVERLAP_STEPS=1
 export PACK_TARGET_BYTES=0 PACK_MAX_ITEM_BYTES=0

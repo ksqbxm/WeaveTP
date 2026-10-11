@@ -221,6 +221,8 @@ def add_live_args(parser):
     group.add_argument("--live-skip-checkpoint", action="store_true", default=SUPPRESS,
                        help="Use Megatron random initialization for the DeepSeek source model.")
     group.add_argument("--live-dst-tp", type=int, default=4)
+    group.add_argument("--live-init-sync-max-tasks", type=int, default=SUPPRESS,
+                       help="Initial weight sync tasks per batch; default 0 submits the full plan.")
     group.add_argument("--live-switches", type=int, default=4)
     group.add_argument(
         "--live-repeat-forward",
@@ -1345,8 +1347,40 @@ def _write_results(args, result: dict[str, object]) -> None:
     print_rank_0(f"Saved live benchmark results to {path}")
 
 
+def _synchronize_initial_weights(
+    src_model, dst_model, *, args, policy, reshard_group, control_group, max_tasks
+) -> None:
+    """Commit bounded batches of the startup weight plan before calibration."""
+    from megatron.core.resharding.refit import _unwrap_model_cores
+
+    src_core, dst_core, num_experts = _unwrap_model_cores(src_model, dst_model)
+    plan = build_centralized_reshard_plan(
+        src_core, dst_core, num_experts=num_experts, group=reshard_group,
+        **policy.planner_kwargs(),
+    )
+    tasks = collect_transfer_tasks(plan, dst_core, group=reshard_group)
+    # A global batch can leave a rank idle; keep its NCCL sequence in step too.
+    service = NCCLCopyService(
+        group=reshard_group, p2p_order=args.live_p2p_order, ensure_all_ranks_participate=True,
+    )
+    service.producer_stream = torch.cuda.current_stream()
+    for start in range(0, len(tasks), max_tasks):
+        batch = filter_plan_by_task_ids(
+            plan, [task.task_id for task in tasks[start:start + max_tasks]],
+        )
+        transaction = launch_reshard_plan(
+            batch, src_core, dst_core, service, group=reshard_group,
+            synchronize_group=False, synchronize_device=True, release_cache=False,
+        )
+        transaction.wait().commit()
+        dist.barrier(group=control_group)
+
+
 def run_live_benchmark() -> None:
     args = get_args()
+    init_sync_max_tasks = getattr(args, "live_init_sync_max_tasks", 0)
+    if init_sync_max_tasks < 0:
+        raise ValueError("live-init-sync-max-tasks must be non-negative")
     dp_sweep_metrics = getattr(args, "live_dp_sweep_metrics", False)
     rank = dist.get_rank()
     world_size = dist.get_world_size()
@@ -1572,16 +1606,22 @@ def run_live_benchmark() -> None:
     )
 
     print_rank_0(f"Synchronizing initial TP{src_tp} weights into TP{dst_tp}...")
-    swap_model_weights(
-        src_model,
-        dst_model,
-        refit_method=NCCLCopyService(
-            group=reshard_group, p2p_order=args.live_p2p_order
-        ),
-        group=reshard_group,
-        bandwidth_policy=policy,
-        release_cache=False,
-    )
+    if init_sync_max_tasks:
+        _synchronize_initial_weights(
+            src_model, dst_model, args=args, policy=policy, reshard_group=reshard_group,
+            control_group=control_group, max_tasks=init_sync_max_tasks,
+        )
+    else:
+        swap_model_weights(
+            src_model,
+            dst_model,
+            refit_method=NCCLCopyService(
+                group=reshard_group, p2p_order=args.live_p2p_order
+            ),
+            group=reshard_group,
+            bandwidth_policy=policy,
+            release_cache=False,
+        )
 
     model_parallel_cuda_manual_seed(args.seed + 101)
     src_context = StaticInferenceContext(

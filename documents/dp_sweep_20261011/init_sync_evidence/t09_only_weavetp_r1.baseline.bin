@@ -1,0 +1,106 @@
+[
+  {
+    "request": {
+      "case": "weavetp",
+      "repeat": 1,
+      "out_dir": "/data/ubuntu/lxh/weavetp/formal/T09_DRY_ONLY/weavetp/r1",
+      "env": {
+        "NNODES": "2",
+        "NPROC_PER_NODE": "8",
+        "MASTER_ADDR": "10.60.14.1",
+        "CUDA_VISIBLE_DEVICES": "0,1,2,3,4,5,6,7",
+        "NCCL_DEBUG": "WARN",
+        "NCCL_SOCKET_IFNAME": "eno1np0",
+        "GLOO_SOCKET_IFNAME": "eno1np0",
+        "NCCL_IB_HCA": "mlx5_0",
+        "NCCL_IB_DISABLE": "0",
+        "MICRO_BATCH_SIZE": "1",
+        "GLOBAL_BATCH_SIZE": "8",
+        "EXPERT_PARALLEL_SIZE": "2",
+        "ROUTER_MODE": "fixed-hot",
+        "ACTIVE_EXPERTS": "0,1,2,3,4,5",
+        "SEQ_LENGTH": "1024",
+        "MAX_POSITION_EMBEDDINGS": "1024",
+        "SWITCHES": "4",
+        "MAX_WAVE_TASKS": "4096",
+        "SHRINK_MAX_WAVE_TASKS": "4096",
+        "MAX_WAVES": "128",
+        "MAX_OVERLAP_STEPS": "1",
+        "PACK_TARGET_BYTES": "0",
+        "PACK_MAX_ITEM_BYTES": "0",
+        "ONLINE_REPLAN": "0",
+        "ONLINE_MIGRATION_FIRST_GUARD": "0",
+        "ALLOW_AWARE_SHRINK": "1",
+        "HYBRID_FAST_PATH": "0",
+        "REPEAT_FORWARD": "0",
+        "EMULATE_NONCOLLOCATED_SOURCES": "0",
+        "PERSISTENT_PACK_BUFFERS": "0",
+        "PACK_REROUTED_ONLY": "0",
+        "DIAGNOSE_EQUIVALENCE": "0",
+        "PROMPT_TOKENS": "8",
+        "P2P_ORDER": "peer-size-desc",
+        "HOTNESS_WEIGHT": "0.0",
+        "HOTSPOT_PRESSURE_BYTES": "0",
+        "ACTIVE_EXPERT_PHASES": "",
+        "PRESSURE_RANK_PHASES": "",
+        "REROUTE_MIN_GAIN_PCT": "0.0",
+        "REROUTE_MIN_CONTENTION_GAIN_PCT": "0.0",
+        "REROUTE_MIN_GLOBAL_GAIN_PCT": "5.0",
+        "REROUTE_PENALTY_US": "20.0",
+        "REROUTE_MIN_BYTES": "1048576",
+        "LOGIT_VALIDATION_MODE": "bf16-relative",
+        "LOGIT_MAX_NRMSE": "0.4",
+        "LOGIT_MIN_COSINE": "0.93",
+        "LOGIT_MIN_TOP1_AGREEMENT": "0.0",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHONUNBUFFERED": "1",
+        "MASTER_PORT": "29500",
+        "METHOD_VARIANT": "moetp++-hybrid",
+        "SCHEDULER_MODE": "residual",
+        "DISABLE_SOURCE_REROUTE": "0",
+        "ADAPTIVE_HYBRID": "1",
+        "ADAPTIVE_RESIDUAL_MAX_WAVES": "4",
+        "EXPANSION_MAX_WAVE_TASKS": "8192",
+        "PROFILE": "/data/ubuntu/lxh/weavetp/profiles/T08_EXPLICIT/measurement/profile.json",
+        "CHECKPOINT": "/data/models/DeepSeek-V2-Lite-megatron-v2",
+        "OUT_DIR": "/data/ubuntu/lxh/weavetp/formal/T09_DRY_ONLY/weavetp/r1",
+        "RUN_ID": "T09_DRY_ONLY/weavetp/r1"
+      },
+      "nodes": [
+        {
+          "hostname": "SL3060",
+          "code_dir": "/data/ubuntu/lxh/weavetp/WeaveTP/code/current",
+          "python": "/data/ubuntu/lxh/weavetp/envs/megatron/bin/python"
+        },
+        {
+          "hostname": "SL3061",
+          "code_dir": "/data/ubuntu/lxh/weavetp/WeaveTP/code/current",
+          "python": "/data/ubuntu/lxh/weavetp/envs/megatron/bin/python",
+          "ssh": "ubuntu@10.60.14.2"
+        }
+      ]
+    },
+    "node_commands": [
+      [
+        "/data/ubuntu/lxh/weavetp/envs/megatron/bin/python",
+        "-B",
+        "/data/ubuntu/lxh/weavetp/WeaveTP/code/current/tools/resharding/compare_weavetp_16gpu.py",
+        "--node-action",
+        "run",
+        "--node-rank",
+        "0",
+        "--out-dir",
+        "/data/ubuntu/lxh/weavetp/formal/T09_DRY_ONLY/weavetp/r1"
+      ],
+      [
+        "ssh",
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "ConnectTimeout=10",
+        "ubuntu@10.60.14.2",
+        "/data/ubuntu/lxh/weavetp/envs/megatron/bin/python -B /data/ubuntu/lxh/weavetp/WeaveTP/code/current/tools/resharding/compare_weavetp_16gpu.py --node-action run --node-rank 1 --out-dir /data/ubuntu/lxh/weavetp/formal/T09_DRY_ONLY/weavetp/r1"
+      ]
+    ]
+  }
+]

@@ -6,6 +6,8 @@
 
 ## 8+k 示例：S / W10 / weavetp / r1
 
+公共配置已加入 `export INIT_SYNC_MAX_TASKS=2048`；更新已保存的 `dp_sweep_env.sh` 后再 source，S/E 都使用该初始同步批大小，正式迁移波数配置不变。
+
 节点 0 的终端：
 
 ```bash

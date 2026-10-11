@@ -1,0 +1,3 @@
+warning: in the working copy of 'code/current/examples/rl/benchmark_live_moe_tp.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'code/current/tools/resharding/README_dp_sweep.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'documents/dp_sweep_20261011/server_commands.md', LF will be replaced by CRLF the next time Git touches it

@@ -27,7 +27,7 @@ REGRESSIONS = [
     "test_refit_bandwidth_policy.py", "test_delta_stream_lifetime.py", "test_weight_ordering.py",
     "test_weight_bitwise.py", "test_weight_fix2.py",
     "test_dp_sweep.py", "test_summarize_dp_sweep.py", "test_dp_sweep_coordinator.py",
-    "test_dp_sweep_groups.py", "test_dp_sweep_tp.py",
+    "test_dp_sweep_groups.py", "test_dp_sweep_tp.py", "test_init_sync.py",
 ]
 
 
@@ -228,7 +228,7 @@ def main():
         *[UNIT / name for name in ("test_dp_sweep.py", "test_summarize_dp_sweep.py",
                                   "test_dp_sweep_coordinator.py", "test_live_storage_lifecycle.py",
                                   "test_dp_sweep_groups.py", "test_dp_sweep_tp.py",
-                                  "test_live_defaults.py")],
+                                  "test_live_defaults.py", "test_init_sync.py")],
         CODE / "megatron/core/resharding/live.py",
     ]
     for path in python_files:

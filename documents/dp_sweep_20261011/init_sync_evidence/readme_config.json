@@ -1,0 +1,518 @@
+{
+  "passed": 32,
+  "syntax_exit": 0,
+  "rows": [
+    {
+      "experiment": "S",
+      "method": "megatron_default",
+      "world": 2,
+      "values": [
+        2048,
+        1,
+        2,
+        9,
+        1,
+        512,
+        512,
+        512,
+        1
+      ]
+    },
+    {
+      "experiment": "S",
+      "method": "megatron_default",
+      "world": 4,
+      "values": [
+        2048,
+        1,
+        2,
+        9,
+        1,
+        1024,
+        1024,
+        1024,
+        1
+      ]
+    },
+    {
+      "experiment": "S",
+      "method": "megatron_default",
+      "world": 6,
+      "values": [
+        2048,
+        1,
+        2,
+        9,
+        1,
+        1536,
+        1536,
+        1536,
+        1
+      ]
+    },
+    {
+      "experiment": "S",
+      "method": "megatron_default",
+      "world": 8,
+      "values": [
+        2048,
+        1,
+        2,
+        9,
+        1,
+        2048,
+        2048,
+        2048,
+        1
+      ]
+    },
+    {
+      "experiment": "S",
+      "method": "megatron_default",
+      "world": 10,
+      "values": [
+        2048,
+        1,
+        2,
+        9,
+        1,
+        2560,
+        2560,
+        2560,
+        1
+      ]
+    },
+    {
+      "experiment": "S",
+      "method": "megatron_default",
+      "world": 12,
+      "values": [
+        2048,
+        1,
+        2,
+        9,
+        1,
+        3072,
+        3072,
+        3072,
+        1
+      ]
+    },
+    {
+      "experiment": "S",
+      "method": "megatron_default",
+      "world": 14,
+      "values": [
+        2048,
+        1,
+        2,
+        9,
+        1,
+        3584,
+        3584,
+        3584,
+        1
+      ]
+    },
+    {
+      "experiment": "S",
+      "method": "megatron_default",
+      "world": 16,
+      "values": [
+        2048,
+        1,
+        2,
+        9,
+        1,
+        4096,
+        4096,
+        4096,
+        1
+      ]
+    },
+    {
+      "experiment": "S",
+      "method": "weavetp",
+      "world": 2,
+      "values": [
+        2048,
+        1,
+        2,
+        9,
+        1,
+        512,
+        1024,
+        512,
+        1
+      ]
+    },
+    {
+      "experiment": "S",
+      "method": "weavetp",
+      "world": 4,
+      "values": [
+        2048,
+        1,
+        2,
+        9,
+        1,
+        1024,
+        2048,
+        1024,
+        1
+      ]
+    },
+    {
+      "experiment": "S",
+      "method": "weavetp",
+      "world": 6,
+      "values": [
+        2048,
+        1,
+        2,
+        9,
+        1,
+        1536,
+        3072,
+        1536,
+        1
+      ]
+    },
+    {
+      "experiment": "S",
+      "method": "weavetp",
+      "world": 8,
+      "values": [
+        2048,
+        1,
+        2,
+        9,
+        1,
+        2048,
+        4096,
+        2048,
+        1
+      ]
+    },
+    {
+      "experiment": "S",
+      "method": "weavetp",
+      "world": 10,
+      "values": [
+        2048,
+        1,
+        2,
+        9,
+        1,
+        2560,
+        5120,
+        2560,
+        1
+      ]
+    },
+    {
+      "experiment": "S",
+      "method": "weavetp",
+      "world": 12,
+      "values": [
+        2048,
+        1,
+        2,
+        9,
+        1,
+        3072,
+        6144,
+        3072,
+        1
+      ]
+    },
+    {
+      "experiment": "S",
+      "method": "weavetp",
+      "world": 14,
+      "values": [
+        2048,
+        1,
+        2,
+        9,
+        1,
+        3584,
+        7168,
+        3584,
+        1
+      ]
+    },
+    {
+      "experiment": "S",
+      "method": "weavetp",
+      "world": 16,
+      "values": [
+        2048,
+        1,
+        2,
+        9,
+        1,
+        4096,
+        8192,
+        4096,
+        1
+      ]
+    },
+    {
+      "experiment": "S",
+      "method": "weavetp_2x",
+      "world": 2,
+      "values": [
+        2048,
+        1,
+        2,
+        9,
+        1,
+        1024,
+        1024,
+        1024,
+        1
+      ]
+    },
+    {
+      "experiment": "S",
+      "method": "weavetp_2x",
+      "world": 4,
+      "values": [
+        2048,
+        1,
+        2,
+        9,
+        1,
+        2048,
+        2048,
+        2048,
+        1
+      ]
+    },
+    {
+      "experiment": "S",
+      "method": "weavetp_2x",
+      "world": 6,
+      "values": [
+        2048,
+        1,
+        2,
+        9,
+        1,
+        3072,
+        3072,
+        3072,
+        1
+      ]
+    },
+    {
+      "experiment": "S",
+      "method": "weavetp_2x",
+      "world": 8,
+      "values": [
+        2048,
+        1,
+        2,
+        9,
+        1,
+        4096,
+        4096,
+        4096,
+        1
+      ]
+    },
+    {
+      "experiment": "S",
+      "method": "weavetp_2x",
+      "world": 10,
+      "values": [
+        2048,
+        1,
+        2,
+        9,
+        1,
+        5120,
+        5120,
+        5120,
+        1
+      ]
+    },
+    {
+      "experiment": "S",
+      "method": "weavetp_2x",
+      "world": 12,
+      "values": [
+        2048,
+        1,
+        2,
+        9,
+        1,
+        6144,
+        6144,
+        6144,
+        1
+      ]
+    },
+    {
+      "experiment": "S",
+      "method": "weavetp_2x",
+      "world": 14,
+      "values": [
+        2048,
+        1,
+        2,
+        9,
+        1,
+        7168,
+        7168,
+        7168,
+        1
+      ]
+    },
+    {
+      "experiment": "S",
+      "method": "weavetp_2x",
+      "world": 16,
+      "values": [
+        2048,
+        1,
+        2,
+        9,
+        1,
+        8192,
+        8192,
+        8192,
+        1
+      ]
+    },
+    {
+      "experiment": "E",
+      "method": "megatron_default",
+      "world": 4,
+      "values": [
+        2048,
+        2,
+        4,
+        27,
+        0,
+        1024,
+        1024,
+        1024,
+        1
+      ]
+    },
+    {
+      "experiment": "E",
+      "method": "megatron_default",
+      "world": 8,
+      "values": [
+        2048,
+        2,
+        4,
+        27,
+        0,
+        2048,
+        2048,
+        2048,
+        1
+      ]
+    },
+    {
+      "experiment": "E",
+      "method": "megatron_default",
+      "world": 12,
+      "values": [
+        2048,
+        2,
+        4,
+        27,
+        0,
+        3072,
+        3072,
+        3072,
+        1
+      ]
+    },
+    {
+      "experiment": "E",
+      "method": "megatron_default",
+      "world": 16,
+      "values": [
+        2048,
+        2,
+        4,
+        27,
+        0,
+        4096,
+        4096,
+        4096,
+        1
+      ]
+    },
+    {
+      "experiment": "E",
+      "method": "weavetp",
+      "world": 4,
+      "values": [
+        2048,
+        2,
+        4,
+        27,
+        0,
+        1024,
+        2048,
+        1024,
+        1
+      ]
+    },
+    {
+      "experiment": "E",
+      "method": "weavetp",
+      "world": 8,
+      "values": [
+        2048,
+        2,
+        4,
+        27,
+        0,
+        2048,
+        4096,
+        2048,
+        1
+      ]
+    },
+    {
+      "experiment": "E",
+      "method": "weavetp",
+      "world": 12,
+      "values": [
+        2048,
+        2,
+        4,
+        27,
+        0,
+        3072,
+        6144,
+        3072,
+        1
+      ]
+    },
+    {
+      "experiment": "E",
+      "method": "weavetp",
+      "world": 16,
+      "values": [
+        2048,
+        2,
+        4,
+        27,
+        0,
+        4096,
+        8192,
+        4096,
+        1
+      ]
+    }
+  ]
+}

@@ -43,6 +43,11 @@ REPEAT_FORWARD=${REPEAT_FORWARD:-0}
 PROMPT_TOKENS=${PROMPT_TOKENS:-8}
 MAX_WAVES=${MAX_WAVES:-4}
 MAX_WAVE_TASKS=${MAX_WAVE_TASKS:-0}
+INIT_SYNC_MAX_TASKS=${INIT_SYNC_MAX_TASKS:-0}
+if ! [[ "$INIT_SYNC_MAX_TASKS" =~ ^(0|[1-9][0-9]*)$ ]]; then
+    echo "INIT_SYNC_MAX_TASKS must be a non-negative integer" >&2
+    exit 2
+fi
 EXPANSION_MAX_WAVE_TASKS=${EXPANSION_MAX_WAVE_TASKS:-0}
 SHRINK_MAX_WAVE_TASKS=${SHRINK_MAX_WAVE_TASKS:-0}
 MAX_OVERLAP_STEPS=${MAX_OVERLAP_STEPS:-8}
@@ -219,6 +224,9 @@ else
 fi
 
 LIVE_FEATURE_ARGS=()
+if [[ "$INIT_SYNC_MAX_TASKS" != "0" ]]; then
+    LIVE_FEATURE_ARGS+=(--live-init-sync-max-tasks "$INIT_SYNC_MAX_TASKS")
+fi
 if [[ "$SRC_TP" != "2" ]]; then
     LIVE_FEATURE_ARGS+=(--live-src-tp "$SRC_TP")
 fi
