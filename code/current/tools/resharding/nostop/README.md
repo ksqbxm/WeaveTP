@@ -1,6 +1,83 @@
-# TP2→TP4 Decode 连续性：第 1 步诊断
+# TP2→TP4 Decode 连续性实验
 
 第 2 步 CPU 汇总、Restart 估计及 L600 请求回放见 [ANALYSIS.md](ANALYSIS.md)，实现 SHA 为 `7511ff32d61ab11cafeb1a5aee19841835a32cee`。以下保留第 1 步诊断说明；第 2 步不更改 GPU 执行路径。
+
+## 第 3 步：冻结配置后的正式实验入口
+
+`formal.sh` → `formal.py` 复用第 1 步的 `Processes` supervisor、MPS 空闲规则、stressor 设备隔离、显存门槛及 `probe.py`；不修改 benchmark/GPU 执行路径。`benchmark.py`、`benchmark_live_moe_tp.py` 相对 `8ae22e7` 的 git diff 必须为空。本次交付仅完成脚本和 CPU 测试，不代表已执行 24 次 GPU 实验。
+
+`--frozen` 必填。脚本将文件作为字面量键值读取，**不执行 source/eval**，记录 SHA256 并保存原文件。仅 `DIAGNOSTICS_READY=1` 且 `NOSTOP_COLD_MODE=cycle` 允许真实执行，否则只能 `--dry-run`。读取 `STRESS_LINKS`、`L0_PROCESSES_PER_PAIR` 至 `L3_PROCESSES_PER_PAIR`（缺省 0/1/3/7，L0 必须 0）、`STRESS_BYTES`、`MIN_FREE_GIB` 和 `STRESS_SYNC_EVERY`（缺省 16）。`PROFILE` 与 `DIAGNOSTIC_EVIDENCE` 指向诊断画像及证据目录，正式探针使用其中 `probe_routes.json` 的 B0 默认/W2 候选迁移链路并集；背景压力使用冻结的 `STRESS_LINKS`，两者不按正式结果重新选择。checkpoint 必须与诊断相同。画像及路由文件同时保存 hash 和副本。
+
+两种方法直接调用同一 `method_env`，固定 cycle、SWITCHES=3、MAX_WAVES=64、SEQ_LENGTH=MAX_POSITION_EMBEDDINGS=5248、micro batch=4、KV=2048，唯一被测切换索引为 2。不改 W2 门槛，不设置 `NCCL_RUNTIME_CONNECT`，不改锁频。启动前生成全部 24 次顺序并写入不可变 manifest：
+
+| 轮次 | 档位和该档先跑的方法（另一个方法紧接其后） |
+|---|---|
+| 1 | L0 W2 → L1 B0 → L2 W2 → L3 B0 |
+| 2 | L3 W2 → L2 B0 → L1 W2 → L0 B0 |
+| 3 | L0 W2 → L1 B0 → L2 W2 → L3 B0 |
+
+共 12 次进入档位，每次在方法对之前/之后各做一次探针，正常完整运行共 24 次探针。探针也经过空闲、压力初始化/显存门槛和结束显存恢复检查。每条有向链路保留全部原始样本，以样本带宽中位数计算 `(after/before−1)`；绝对值 >20% 只标记，不删除或替换数据。重试或续跑的探针独立保存，不覆盖旧数据；如果仅后置探针失败，续跑只补后置探针，不重复已成功的 Launch。补测的时间间隔可由对应 outcome 时间戳复核。
+
+每个 Launch 单独执行：立即检查空闲 → 启动本档压力并确认 START → 每卡剩余显存门槛 → benchmark → 清理自己创建的进程组 → 确认显存 ≤ 本次启动基线+16 MiB。L0 同样检查剩余显存。空闲不通过立即退出，不后台等候；清理或显存恢复失败也停止后续作业。MPS 只读，不关闭、不 kill；外部进程从不加入清理列表。
+
+Launch 期间每秒查询 compute-apps，保存 PID、属主、进程名、每卡显存和采样时间。只允许本 supervisor 持有的未回收子进程组及 `MPS_OWNER` 属主的精确 `nvidia-cuda-mps-server` 名称；其他进程标记 contaminated，记录首次/末次看到及下一次未看到的时间，**不打断当前 benchmark**。时间段是 1 秒采样的观测边界；MPS 未暴露的客户端显存不推算。查询/监测失败会在本次 GPU 执行结束后报告监测不完整，不把未知状态当作干净数据。
+
+同一 `--out` 的并发 supervisor 被非阻塞文件锁拒绝。续跑要求 frozen hash、配置、环境、机器/GPU 身份和顺序不变。退出 0、结果/路由齐全且 8-rank trace 通过状态与时间对齐检查的 Launch 自动跳过，包括成功但 contaminated 的 Launch。失败最多自动重试一次，重试预算跨 supervisor 重启保留；耗尽后停止。`--rerun-contaminated` 只选被标记的 Launch，不看 raw gap、计划或性能，也不启动从未执行的 Launch；每次显式污染重跑是新的尝试组，仍最多一次失败自动重试。不会在一次命令中因结果再次 contaminated 而无限重跑。
+
+目录约定：`attempts/Rn_Lk_METHOD/attempt_NNN/` 保存每次尝试的配置、环境、命令、退出码、stdout/NCCL 日志、`run/result.json`、8 rank trace、routes、压力进程显存、`compute_apps.jsonl`、`external_processes.json` 和显存恢复结果。根目录 `Rn_Lk_METHOD` 是指向最新尝试的相对符号链接，便于第 2 步工具直接读取；旧尝试一直保留。`intent.json` 保存 generation/retry/污染重跑来源；`outcome.json` 保存成功/失败及污染标记。根目录另外保存不可变 manifest、冻结输入、status、PID、`progress.tsv`、`probes/` 全部探针、`sessions/` 每次启动的版本/时钟/温度检查和 200 ms GPU 采样。每完成一次尝试（含失败）追加 progress 一行，失败无指标时留空，污染和漂移从不用于按性能筛选。
+
+**预计机时：**没有正式 Launch 日志时仅能估算。若每次 Launch 3–6 分钟、每次探针 1–3 分钟，24+24 次加检查与压力初始化约 **2–4 小时单机时间**（8 卡约 16–32 GPU·小时）。这不是实测承诺；可根据诊断真实耗时重算 `24×Launch + 24×Probe + 检查/初始化`。失败重试和显式污染重跑另计；每个 GPU 子任务缺省超时 2400 秒。
+
+服务器命令（先使用交付的实现 SHA 更新代码；冻结文件必须来自通过诊断的 run）：
+
+```bash
+source /data/ubuntu/lxh/weavetp/env.sh
+export REPO PYTHON
+export MPS_OWNER=yiwei
+export NOSTOP="$REPO/code/current/tools/resharding/nostop"
+export FROZEN=/data/ubuntu/lxh/weavetp/nostop/实际诊断目录/frozen.env
+export FORMAL_OUT=/data/ubuntu/lxh/weavetp/nostop/formal_$(date +%Y%m%d_%H%M%S)
+# dry-run 不创建输出目录，不查询 GPU，不启动压力或 benchmark。
+bash "$NOSTOP/formal.sh" --frozen "$FROZEN" --out "$FORMAL_OUT" --dry-run
+mkdir -p "$FORMAL_OUT"
+nohup bash "$NOSTOP/formal.sh" --frozen "$FROZEN" --out "$FORMAL_OUT" \
+  > "$FORMAL_OUT/supervisor_$(date +%Y%m%d_%H%M%S).log" 2>&1 < /dev/null &
+echo "$!" > "$FORMAL_OUT/nohup_pid.txt"
+
+# 查看进度（首次 Launch 完成后 progress.tsv 才出现）。
+cat "$FORMAL_OUT/status.json"
+tail -f "$FORMAL_OUT/progress.tsv"
+```
+
+普通续跑使用相同的 FROZEN、FORMAL_OUT、环境和命令；仅在旧 supervisor 已退出后执行，不删除旧目录。`FORMAL_OUT` 若在新终端中丢失，重新 export 原路径，不生成新的时间戳：
+
+```bash
+source /data/ubuntu/lxh/weavetp/env.sh
+export REPO PYTHON MPS_OWNER=yiwei
+export NOSTOP="$REPO/code/current/tools/resharding/nostop"
+export FROZEN=/data/ubuntu/lxh/weavetp/nostop/实际诊断目录/frozen.env
+export FORMAL_OUT=/data/ubuntu/lxh/weavetp/nostop/原正式实验目录
+nohup bash "$NOSTOP/formal.sh" --frozen "$FROZEN" --out "$FORMAL_OUT" \
+  > "$FORMAL_OUT/resume_$(date +%Y%m%d_%H%M%S).log" 2>&1 < /dev/null &
+echo "$!" > "$FORMAL_OUT/nohup_pid.txt"
+```
+
+需要显式重跑污染结果时，保持上述环境变量，用下面命令**替代**普通续跑命令；不要同时启动：
+
+```bash
+nohup bash "$NOSTOP/formal.sh" --frozen "$FROZEN" --out "$FORMAL_OUT" --rerun-contaminated \
+  > "$FORMAL_OUT/rerun_contaminated_$(date +%Y%m%d_%H%M%S).log" 2>&1 < /dev/null &
+echo "$!" > "$FORMAL_OUT/nohup_pid.txt"
+```
+
+确认 supervisor 退出后打包。tar 保留相对符号链接，实际 attempt 数据也在同一包中；不要使用 `--dereference` 重复打包：
+
+```bash
+tar -C "$(dirname "$FORMAL_OUT")" -czf "${FORMAL_OUT}.tar.gz" "$(basename "$FORMAL_OUT")"
+sha256sum "${FORMAL_OUT}.tar.gz" > "${FORMAL_OUT}.tar.gz.sha256"
+```
+
+下面是历史第 1 步说明，不用于启动第 3 步正式实验。
 
 实现 SHA：`661167faa4dacca7ffc4937409133a507cdff427`（下方命令固定到该实现提交；本 README 随后的文档提交不改变脚本）。本目录只交付诊断，不运行 24 次正式实验，不做请求回放、最终指标汇总或绘图。GPU 尚未实测；CPU 测试不能证明显存足够、NCCL 不死锁或诊断门槛通过。
 

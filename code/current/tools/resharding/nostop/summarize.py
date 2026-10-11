@@ -201,7 +201,8 @@ def collect(runs, cases=None):
                           "profile_sha256": manifest["profile_sha256"], "checkpoint": manifest["checkpoint"],
                           "config": {k: v for k, v in config.items() if k not in
                                      ("PROFILE", "OUT_DIR", "ENTRYPOINT_OVERRIDE", "PYTHONUNBUFFERED", "PYTHONDONTWRITEBYTECODE")},
-                          "pressure": {k: manifest[k] for k in ("stress_links", "l3_processes", "stress_bytes", "stress_sync_every")} if level != "L0" else None}
+                          "pressure": {**{k: manifest[k] for k in ("stress_links", "stress_bytes", "stress_sync_every")},
+                                       "processes_per_pair": manifest["processes_per_pair"][level] if "processes_per_pair" in manifest else manifest["l3_processes"]} if level != "L0" else None}
                 launches.append({"launch_id": digest, "case": name, "source": str(directory.resolve()),
                                  "method": method, "level": level, "cold_mode": mode,
                                  "cohort": hashlib.sha256(json.dumps(cohort, sort_keys=True).encode()).hexdigest()[:16],
