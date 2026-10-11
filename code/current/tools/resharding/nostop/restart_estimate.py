@@ -7,12 +7,12 @@ import math
 import re
 from pathlib import Path
 
-try:
-    from .replay import SIMULATOR, load_simulator
-    from .summarize import GROUP, read_json, write_csv, write_json
-except ImportError:
-    from replay import SIMULATOR, load_simulator
-    from summarize import GROUP, read_json, write_csv, write_json
+if __package__:
+    from . import artifacts, simulator, trace_metrics
+else:
+    import artifacts
+    import simulator
+    import trace_metrics
 
 
 def loading_time(log):
@@ -45,7 +45,7 @@ def estimate(launch, sim, load):
     batch = int(launch["config"]["MICRO_BATCH_SIZE"])
     rebuild = batch * kv_tokens / sim.REPREFILL_RATE[4]
     raw = launch["pre_trigger_s"] + load_s + rebuild + launch["tp4_first_step_s"]
-    return {**{k: launch[k] for k in (*GROUP, "launch_id")}, "reference": "Restart estimate",
+    return {**{k: launch[k] for k in (*trace_metrics.GROUP, "launch_id")}, "reference": "Restart estimate",
             "load_s": load_s, "load_source": source, "kv_rebuild_s": rebuild,
             "kv_source": {"rate_tokens_per_replica_s": sim.REPREFILL_RATE[4],
                           "kind": "simulator REPREFILL_RATE[4] estimate", "batch": batch, "kv_tokens": kv_tokens},
@@ -58,12 +58,12 @@ def estimate(launch, sim, load):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--summary", required=True, type=Path)
-    parser.add_argument("--simulator", default=SIMULATOR, type=Path)
+    parser.add_argument("--simulator", default=simulator.SIMULATOR, type=Path)
     parser.add_argument("--load-log", type=Path, help="explicit target TP4 load log; missing/malformed timer is an error")
     parser.add_argument("--output", required=True, type=Path)
     args = parser.parse_args(argv)
-    sim = load_simulator(args.simulator)
-    report = read_json(args.summary)
+    sim = simulator.load_simulator(args.simulator)
+    report = artifacts.read_json(args.summary)
     rows = []
     for launch in report["launches"]:
         log = args.load_log or Path(launch["source"]).parent / f"{launch['case']}.log"
@@ -72,10 +72,10 @@ def main(argv=None):
             raise ValueError(f"no load-checkpoint timer in explicit log {args.load_log}")
         rows.append(estimate(launch, sim, load or loading_time(None)))
     args.output.mkdir(parents=True, exist_ok=True)
-    write_json(args.output / "restart.json", {"simulator": str(args.simulator.resolve()), "launches": rows,
+    artifacts.write_json(args.output / "restart.json", {"simulator": str(args.simulator.resolve()), "launches": rows,
                                              "input_errors": report["errors"], "label": "estimated reference; not a GPU Restart run"})
-    write_csv(args.output / "restart.csv", rows,
-              [*GROUP, "launch_id", "reference", "load_s", "kv_rebuild_s", "tp4_first_step_s", "pre_trigger_s",
+    artifacts.write_csv(args.output / "restart.csv", rows,
+              [*trace_metrics.GROUP, "launch_id", "reference", "load_s", "kv_rebuild_s", "tp4_first_step_s", "pre_trigger_s",
                "raw_max_gap_s", "normal_tbt_s", "excess_downtime_s", "load_source", "kv_source", "tp4_source"])
     print(json.dumps({"launches": len(rows), "output": str(args.output)}))
     return 1 if report["errors"] or not rows else 0

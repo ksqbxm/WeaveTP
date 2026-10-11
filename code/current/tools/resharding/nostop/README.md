@@ -2,6 +2,39 @@
 
 第 2 步 CPU 汇总、Restart 估计及 L600 请求回放见 [ANALYSIS.md](ANALYSIS.md)，实现 SHA 为 `7511ff32d61ab11cafeb1a5aee19841835a32cee`。以下保留第 1 步诊断说明；第 2 步不更改 GPU 执行路径。
 
+## 模块职责与维护边界
+
+本次重构解决入口脚本兼任公共库、配置准备隐式改写 argparse 参数、压力统计回写原始输入的问题。CLI 参数、实验顺序、冻结协议、结果字段、目录结构和失败处理规则保持不变；原公共函数已迁至所属模块，不保留旧入口的兼容转发。
+
+| 模块 | 职责 |
+|---|---|
+| `diagnostics.py` / `formal.py` | 分别编排诊断与正式实验，处理 CLI、信号和整体退出状态 |
+| `supervisor.py` | 子进程组所有权、日志、超时、回收和独立缓存环境 |
+| `machine.py` | 空闲与 MPS 规则、机器信息、显存恢复、每秒外部计算进程观测；不结束外部进程 |
+| `pressure.py` | stressor 设备隔离、初始化与剩余显存门槛、前后探针漂移比较 |
+| `formal_plan.py` | 解析冻结配置、生成 24 次顺序、校验并保存不可变输入；显式返回 checkpoint，不修改调用者参数 |
+| `attempts.py` | 尝试记录、成功判定、重试/污染重跑决策与幂等进度写入；不启动任务 |
+| `trace_metrics.py` | 共享 trace 状态验证、rank 对齐和单次 Launch 指标；纯 CPU，无 CLI/执行器依赖 |
+| `diag_report.py` / `summarize.py` | 分别输出诊断判定与跨 Launch 汇总，调用共享指标模块 |
+| `simulator.py` | 只读加载已有模拟器；`replay.py` 与 `restart_estimate.py` 独立使用，不互相导入 |
+| `artifacts.py` | JSON/CSV 读写；需要原子替换的 supervisor 状态使用 `save_json` |
+
+依赖方向为入口 → 职责模块。两个执行入口直接使用同一个 supervisor、机器规则和压力模块；正式入口不导入诊断或汇总 CLI。诊断整批执行与正式实验逐 attempt 执行的生命周期不同，因此保留各自编排，不引入通用工作流框架。共享模块不在 import 时查询 GPU 或启动进程。
+
+`benchmark.py`、`benchmark_live_moe_tp.py`、`probe.py`、`p2p_link_stressor.py` 和原 benchmark 启动脚本相对 `8ae22e7` 均无修改。GPU Decode/Transfer、CUDA Event 与同步路径不进入本次重构；200 ms GPU 采样和 1 s compute-apps 采样频率保持不变。`verified_execution_overlap_steps` 仍为 null，kernel 级重叠留待配置冻结后，单独用 1 次 nsys run 验证。
+
+重构后 188 项 CPU 测试通过（重构前 174 项）。另外对照重构前实现，确认 24 次顺序、四档 stressor 命令、四种配置的单 Launch 指标、冷启动/压力判定、288 种重试状态、dry-run JSON、跨 Launch 汇总及 Restart 估计相同。尚未重新执行 GPU 实验，CPU 验证不代表服务器性能实测。
+
+CPU 验证命令（仓库根目录）：
+
+```bash
+source /data/ubuntu/lxh/weavetp/env.sh
+cd "$REPO"
+"$PYTHON" -m pytest -q -o addopts='' --noconftest \
+  code/current/tools/resharding/nostop/tests \
+  code/current/tests/unit_tests/resharding/test_live_defaults.py
+```
+
 ## 第 3 步：冻结配置后的正式实验入口
 
 实现 SHA：`e9348a2e64c18f2ebc5f9efaa82d184bd5d3447a`。174 项 CPU 测试通过，其中第 3 步新增 44 项；后续 README 提交不改变代码实现。

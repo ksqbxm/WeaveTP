@@ -1,6 +1,7 @@
 """CPU-only evidence/ownership tests; never initialize a CUDA context."""
 
 import ast
+import copy
 import json
 import signal
 import statistics
@@ -18,7 +19,16 @@ import torch
 CODE = Path(__file__).resolve().parents[4]
 sys.path.insert(0, str(CODE))
 
-from tools.resharding.nostop import benchmark, common, diag_report, diagnostics
+from tools.resharding.nostop import (
+    artifacts,
+    benchmark,
+    common,
+    diag_report,
+    machine,
+    pressure,
+    supervisor,
+    trace_metrics,
+)
 
 
 def traces(gap_excess=0, host_excess=0, mode="cycle", stw=False, cold_gap=400_000_000):
@@ -107,7 +117,10 @@ CANDIDATE = [dict(src=1,dst=3,kind="weight",bytes=100)]
 
 @pytest.mark.parametrize("speed,status", [(40,"passed"),(40.01,"failed"),(20,"passed")])
 def test_pressure_uses_measured_bandwidth_not_process_count(speed, status):
-    result = diag_report.pressure_check(probe(100), probe(speed), DEFAULT, CANDIDATE)
+    low, high = probe(100), probe(speed)
+    inputs_before = copy.deepcopy((low, high, DEFAULT, CANDIDATE))
+    result = diag_report.pressure_check(low, high, DEFAULT, CANDIDATE)
+    assert (low, high, DEFAULT, CANDIDATE) == inputs_before
     assert result["status"] == status
     assert result["b0_weighted_slowdown"] == pytest.approx(100/speed)
     assert result["links"][1]["slowdown"] == 1  # legal alternative source needn't slow
@@ -138,17 +151,17 @@ def test_probe_variability_preserved_and_flagged():
 
 
 def test_complete_report_has_only_two_decisions_and_frozen_recommendation(tmp_path):
-    diagnostics.write_json(tmp_path / "manifest.json", dict(execution_complete=True, stress_links="0:2", l3_processes=7,
+    artifacts.write_json(tmp_path / "manifest.json", dict(execution_complete=True, stress_links="0:2", l3_processes=7,
         stress_bytes=256, stress_sync_every=16, min_free_gib=22, profile="/data/profile.json"))
-    for name, _, method, mode in diagnostics.diagnostic_cases():
+    for name, _, method, mode in common.diagnostic_cases():
         case = tmp_path / name
         (case / "run").mkdir(parents=True)
         (case / "exit_code.txt").write_text("0\n")
         for t in traces(mode=mode, stw=method == "B0"):
-            diagnostics.write_json(case / f"run/trace_rank{t['rank']}.json", t)
-    diagnostics.write_json(tmp_path / "probe_routes.json", dict(default=DEFAULT, candidate=CANDIDATE))
-    diagnostics.write_json(tmp_path / "probe_L0.json", probe(100))
-    diagnostics.write_json(tmp_path / "probe_L3.json", probe(30))
+            artifacts.write_json(case / f"run/trace_rank{t['rank']}.json", t)
+    artifacts.write_json(tmp_path / "probe_routes.json", dict(default=DEFAULT, candidate=CANDIDATE))
+    artifacts.write_json(tmp_path / "probe_L0.json", probe(100))
+    artifacts.write_json(tmp_path / "probe_L3.json", probe(30))
     result = diag_report.make_report(tmp_path)
     assert set(result) == {"cold_start", "pressure"}
     assert result["cold_start"]["recommended_mode"] == "cycle"
@@ -159,7 +172,7 @@ def test_complete_report_has_only_two_decisions_and_frozen_recommendation(tmp_pa
     # A completed probe file cannot override a later pressure/monitor failure.
     manifest = json.loads((tmp_path / "manifest.json").read_text())
     manifest["execution_complete"] = False
-    diagnostics.write_json(tmp_path / "manifest.json", manifest)
+    artifacts.write_json(tmp_path / "manifest.json", manifest)
     result = diag_report.make_report(tmp_path)
     assert result["pressure"]["status"] == "inconclusive"
     assert "export DIAGNOSTICS_READY=0" in (tmp_path / "frozen.env").read_text()
@@ -184,7 +197,7 @@ def test_state_gates(damage):
         raw[0]["decodes"].pop()
     else:
         raw[0]["independent_warmup"] = None
-    assert diag_report.launch_gate(raw, "independent", False)
+    assert trace_metrics.launch_gate(raw, "independent", False)
 
 
 def test_capacity_accounts_for_two_warmup_switches_and_validation():
@@ -232,9 +245,9 @@ def test_invalid_pressure_links(links):
 
 def test_stress_parameters_and_launch_order():
     args = NS(python="python3", links="2:0,0:2,1:3", processes_per_pair=3, stress_bytes=256, stress_sync_every=16)
-    commands = diagnostics.stress_commands(args)
+    commands = pressure.stress_commands(args)
     assert len(commands) == 6 and all("--bidirectional" in c["command"] for c in commands)
-    assert diagnostics.diagnostic_cases() == [
+    assert common.diagnostic_cases() == [
         ("smoke_L0_W2","L0","W2","cycle"), ("smoke_L0_B0","L0","B0","cycle"),
         ("L0_W2_cycle","L0","W2","cycle"), ("L0_W2_independent","L0","W2","independent"),
         ("L3_W2_cycle","L3","W2","cycle"), ("L3_W2_independent","L3","W2","independent")]
@@ -325,8 +338,8 @@ def test_cleanup_signals_only_owned_group_before_reaping(monkeypatch, tmp_path):
         events.append("reap")
         process.returncode = 0
     process.wait = wait
-    monkeypatch.setattr(diagnostics.os,"killpg",lambda pid,sig: events.append((pid,sig)),raising=False)
-    manager = diagnostics.Processes(tmp_path)
+    monkeypatch.setattr(supervisor.os,"killpg",lambda pid,sig: events.append((pid,sig)),raising=False)
+    manager = supervisor.Processes(tmp_path)
     monkeypatch.setattr(manager,"exited",lambda _p:True)
     log = (tmp_path / "child.log").open("w")
     record = dict(name="child",pid=54321,exit_code=None)
@@ -439,14 +452,14 @@ def test_post_cutover_completes_target_before_numerical_validation(monkeypatch):
 
 def test_unreaped_status_poll_uses_wnowait(monkeypatch):
     for name,value in (("P_PID",1),("WEXITED",4),("WNOHANG",1),("WNOWAIT",0x1000000)):
-        monkeypatch.setattr(diagnostics.os,name,value,raising=False)
+        monkeypatch.setattr(supervisor.os,name,value,raising=False)
     waitid = Mock(return_value=None)
-    monkeypatch.setattr(diagnostics.os,"waitid",waitid,raising=False)
+    monkeypatch.setattr(supervisor.os,"waitid",waitid,raising=False)
     p = NS(pid=99,returncode=None)
-    assert not diagnostics.Processes.exited(p)
+    assert not supervisor.Processes.exited(p)
     assert waitid.call_args.args == (1,99,4|1|0x1000000)
     waitid.return_value = NS(si_status=0)
-    assert diagnostics.Processes.exited(p)
+    assert supervisor.Processes.exited(p)
     assert p.returncode is None
 
 
@@ -472,10 +485,10 @@ def test_machine_records_optional_nsys_and_requires_all_gpu_samples(monkeypatch,
             if sample_error and gpu_samples == 2:
                 code, output = 1, "GPU query failed"
         return subprocess.CompletedProcess(command, code, stdout=output)
-    monkeypatch.setattr(diagnostics.subprocess, "run", run)
-    monkeypatch.setattr(diagnostics.time, "monotonic", lambda: 0)
-    monkeypatch.setattr(diagnostics.time, "sleep", lambda s: None)
-    result = diagnostics.machine_check(tmp_path, 1 if sample_error else 0, "python")
+    monkeypatch.setattr(supervisor.subprocess, "run", run)
+    monkeypatch.setattr(supervisor.time, "monotonic", lambda: 0)
+    monkeypatch.setattr(supervisor.time, "sleep", lambda s: None)
+    result = machine.machine_check(tmp_path, 1 if sample_error else 0, "python")
     assert result["idle_state"] == ("unknown" if sample_error else "idle")
     assert result["checks"]["runtime"]["exit_code"] == 0
     assert result["checks"]["nsys"]["status"] == ("available" if installed else "missing")
@@ -484,7 +497,7 @@ def test_machine_records_optional_nsys_and_requires_all_gpu_samples(monkeypatch,
 
 
 def test_supervisor_checks_monitors_even_when_child_already_exited(monkeypatch, tmp_path):
-    manager = diagnostics.Processes(tmp_path)
+    manager = supervisor.Processes(tmp_path)
     process = NS(returncode=None)
     monitor = NS(returncode=None)
     manager.required = [monitor]

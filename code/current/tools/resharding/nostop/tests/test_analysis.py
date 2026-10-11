@@ -10,7 +10,15 @@ from pathlib import Path
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
-from tools.resharding.nostop import common, replay, restart_estimate, summarize
+from tools.resharding.nostop import (
+    artifacts,
+    common,
+    replay,
+    restart_estimate,
+    simulator,
+    summarize,
+    trace_metrics,
+)
 
 
 def synthetic_traces(stw=False, mode="cycle"):
@@ -64,7 +72,7 @@ def synthetic_traces(stw=False, mode="cycle"):
 def launch(stw=False, mode="cycle"):
     return {"launch_id": "synthetic", "method": "B0" if stw else "W2", "level": "L0", "cold_mode": mode,
             "cohort": "synthetic", "config": common.method_env("B0" if stw else "W2", mode, "profile", "run"),
-            **summarize.summarize_trace(synthetic_traces(stw, mode), "B0" if stw else "W2", mode)}
+            **trace_metrics.summarize_trace(synthetic_traces(stw, mode), "B0" if stw else "W2", mode)}
 
 
 @pytest.mark.parametrize("mode", ["cycle", "independent"])
@@ -111,7 +119,7 @@ def test_incomplete_or_incomparable_evidence_rejected(damage):
         for t in traces:
             t["stall_pause"] = True
     with pytest.raises(ValueError):
-        summarize.summarize_trace(traces, "B0" if damage == "stw" else "W2", "cycle")
+        trace_metrics.summarize_trace(traces, "B0" if damage == "stw" else "W2", "cycle")
 
 
 def test_aggregate_is_launch_weighted_keeps_nulls_and_fallback():
@@ -132,12 +140,12 @@ def test_aggregate_is_launch_weighted_keeps_nulls_and_fallback():
 def write_run(root, name="smoke_L0_W2", bad=False):
     case = root / name
     (case / "run").mkdir(parents=True)
-    summarize.write_json(root / "manifest.json", {"cases": [[name, "L0", "W2", "cycle"]],
+    artifacts.write_json(root / "manifest.json", {"cases": [[name, "L0", "W2", "cycle"]],
                                                  "profile_sha256": "test", "checkpoint": "test"})
-    summarize.write_json(case / "config.json", common.method_env("W2", "cycle", "profile", "run"))
+    artifacts.write_json(case / "config.json", common.method_env("W2", "cycle", "profile", "run"))
     (case / "exit_code.txt").write_text("1" if bad else "0")
     for trace in synthetic_traces():
-        summarize.write_json(case / "run" / f"trace_rank{trace['rank']}.json", trace)
+        artifacts.write_json(case / "run" / f"trace_rank{trace['rank']}.json", trace)
     return case
 
 
@@ -157,16 +165,16 @@ def test_summary_cli_outputs_and_reused_launch_dedup(tmp_path):
     assert summarize.collect([first], ["smoke_L0_W2", "typo"])["errors"]
     (first / "smoke_L0_W2/exit_code.txt").write_text("1")
     assert summarize.main([str(first), "--output", str(output)]) == 1
-    assert summarize.read_json(output / "summary.json")["launches"] == []
+    assert artifacts.read_json(output / "summary.json")["launches"] == []
 
 
 def test_reused_manifest_is_read_and_result_transport_preserved(tmp_path):
     root = tmp_path / "resumed"
     case = write_run(root)
-    manifest = summarize.read_json(root / "manifest.json")
+    manifest = artifacts.read_json(root / "manifest.json")
     manifest.update(cases=[], reused_cases={"smoke_L0_W2": {"source": "old/run"}})
-    summarize.write_json(root / "manifest.json", manifest)
-    summarize.write_json(case / "run/result.json", {"switches": [{"index": 2, "direction": "2->4",
+    artifacts.write_json(root / "manifest.json", manifest)
+    artifacts.write_json(case / "run/result.json", {"switches": [{"index": 2, "direction": "2->4",
                                                                   "base": {"wave_records": [{"transport_s": .3}, {"transport_s": .4}]}}]})
     result = summarize.collect([root])
     assert not result["errors"] and result["launches"][0]["transport_s"] == pytest.approx(.7)
@@ -182,7 +190,7 @@ def test_excess_clamps_at_zero():
                 row["host_start_ns"] = row["complete_host_ns"] - 40_000_000
         for mark, value in zip(trace["milestones"], (.51, .52, .53, .55, .6)):
             mark["host_ns"] = round(value * 1e9) + rank * 100
-    metrics = summarize.summarize_trace(traces, "B0", "cycle")
+    metrics = trace_metrics.summarize_trace(traces, "B0", "cycle")
     assert metrics["raw_max_gap_s"] == pytest.approx(.1)
     assert metrics["excess_downtime_s"] == 0
 
@@ -196,12 +204,12 @@ def test_bad_load_timer_is_not_replaced_by_recorded_35s(tmp_path, value):
 
 
 def test_all_slo_thresholds_are_inclusive():
-    result = summarize.slo(list(summarize.THRESHOLDS))
+    result = trace_metrics.slo(list(trace_metrics.THRESHOLDS))
     assert list(result.values()) == pytest.approx([1 / 6, 2 / 6, 3 / 6, 4 / 6, 5 / 6, 1])
 
 
 def test_restart_sources_and_formula(tmp_path):
-    sim = replay.load_simulator()
+    sim = simulator.load_simulator()
     estimated = restart_estimate.estimate(launch(), sim, restart_estimate.loading_time(None))
     assert estimated["load_s"] == 35
     assert estimated["kv_rebuild_s"] == pytest.approx(4 * 2048 / 4400)
@@ -218,10 +226,29 @@ def test_restart_sources_and_formula(tmp_path):
         restart_estimate.loading_time(log)
 
 
-def test_cpu_entrypoints_do_not_import_torch():
-    directory = str(Path(summarize.__file__).parent)
-    code = f"import sys; sys.path.insert(0, {directory!r}); import summarize, replay, restart_estimate; assert 'torch' not in sys.modules"
-    subprocess.run([sys.executable, "-c", code], check=True)
+@pytest.mark.parametrize("entry,forbidden", [
+    ("formal", ["diagnostics", "diag_report", "summarize", "replay"]),
+    ("diagnostics", ["formal", "summarize", "replay"]),
+    ("diag_report", ["diagnostics", "formal", "summarize"]),
+    ("summarize", ["diag_report", "diagnostics", "formal"]),
+    ("replay", ["summarize", "restart_estimate"]),
+    ("restart_estimate", ["replay", "summarize"]),
+])
+@pytest.mark.parametrize("package", [False, True])
+def test_cpu_entrypoints_have_no_gpu_or_unrelated_cli_dependencies(entry, forbidden, package):
+    directory = Path(summarize.__file__).parent
+    prefix = "tools.resharding.nostop." if package else ""
+    code = f"""
+import importlib, subprocess, sys
+sys.path.insert(0, {str(directory.parents[2] if package else directory)!r})
+def no_child(*args, **kwargs):
+    raise AssertionError('import started a subprocess')
+subprocess.Popen = no_child
+importlib.import_module({prefix + entry!r})
+assert 'torch' not in sys.modules
+assert all({prefix!r} + name not in sys.modules for name in {forbidden!r})
+"""
+    subprocess.run([sys.executable, "-B", "-c", code], check=True)
 
 
 def test_replay_missing_inputs_does_not_write_replacement(tmp_path, capsys):
@@ -233,7 +260,7 @@ def test_replay_missing_inputs_does_not_write_replacement(tmp_path, capsys):
 
 
 def test_replay_keeps_each_measured_completion_and_token_count():
-    sim = replay.load_simulator()
+    sim = simulator.load_simulator()
     reqs = [sim.Req(i, 8, 80, "short" if i < 6 else "long", 0 if i < 6 else 1) for i in range(8)]
     a, b = launch(), launch(True)
     w2, stw = [replay.replay_launch(sim, reqs, row) for row in (a, b)]
@@ -251,7 +278,7 @@ def test_replay_keeps_each_measured_completion_and_token_count():
 
 
 def test_replay_departures_inside_window_and_single_token_requests():
-    sim = replay.load_simulator()
+    sim = simulator.load_simulator()
     reqs = [sim.Req(i, 8, 2 if i < 4 else 1, "short" if i < 4 else "long", i // 4) for i in range(6)]
     result = replay.replay_launch(sim, reqs, launch())
     assert result["eligible_requests"] == 4
@@ -270,7 +297,7 @@ def test_synthetic_end_to_end_cli(tmp_path):
     longout.write_text("source,input_tokens,ref_output_tokens\n" + "sky_t1_17k,8,64\n" * 600)
     assert replay.main(["--summary", str(output / "summary.json"), "--lengths", str(lengths),
                         "--longout", str(longout), "--output", str(tmp_path / "replay")]) == 0
-    row = summarize.read_json(tmp_path / "replay/replay.json")["launches"][0]
+    row = artifacts.read_json(tmp_path / "replay/replay.json")["launches"][0]
     assert row["request_count"] == 8600 and row["eligible_requests"] == 8600
     assert row["switch"]["dir"] == "2->4"
     assert len(list(csv.DictReader(Path(row["requests_csv"]).open()))) == 8600

@@ -13,7 +13,15 @@ import pytest
 CODE = Path(__file__).resolve().parents[4]
 sys.path.insert(0, str(CODE))
 
-from tools.resharding.nostop import common, diag_report, diagnostics
+from tools.resharding.nostop import (
+    artifacts,
+    common,
+    diag_report,
+    diagnostics,
+    machine,
+    pressure,
+    supervisor,
+)
 from tools.resharding.nostop.tests.test_diagnostics import CANDIDATE, DEFAULT, probe, traces
 
 
@@ -30,12 +38,12 @@ def memory_queries(monkeypatch, free=22 * 1024, missing_gpu=False):
         else:
             output = "\n".join(f"{100+i}, GPU-{gpu}, {600+i}" for i, pair in enumerate(((0,2), (0,2), (1,3), (1,3))) for gpu in pair)
         return subprocess.CompletedProcess(command, 0, stdout=output)
-    monkeypatch.setattr(diagnostics.subprocess, "run", run)
+    monkeypatch.setattr(supervisor.subprocess, "run", run)
 
 
 def test_stressors_receive_only_their_pair_before_cuda_initialization(monkeypatch, tmp_path):
     memory_queries(monkeypatch)
-    monkeypatch.setattr(diagnostics.time, "sleep", lambda _: None)
+    monkeypatch.setattr(supervisor.time, "sleep", lambda _: None)
     manager = NS(root=tmp_path, required=[], exited=lambda p: False)
     launched = []
     def start(command, name, env):
@@ -44,7 +52,7 @@ def test_stressors_receive_only_their_pair_before_cuda_initialization(monkeypatc
         return NS(pid=99 + len(launched))
     manager.start = start
     parent_env = dict(CUDA_VISIBLE_DEVICES="0,1,2,3,4,5,6,7", CUDA_MPS_PIPE_DIRECTORY="/tmp/mps", MPS_OWNER="yiwei")
-    stress = diagnostics.start_stress(manager, pressure_args(), parent_env, "test_pressure")
+    stress = pressure.start_stress(manager, pressure_args(), parent_env, "test_pressure")
     assert len(stress) == len(manager.required) == 4
     assert [env["CUDA_VISIBLE_DEVICES"] for _, env in launched] == ["0,2", "0,2", "1,3", "1,3"]
     assert parent_env["CUDA_VISIBLE_DEVICES"] == "0,1,2,3,4,5,6,7"
@@ -66,8 +74,8 @@ def test_stressors_receive_only_their_pair_before_cuda_initialization(monkeypatc
 def test_pressure_memory_threshold_and_per_process_evidence(monkeypatch, tmp_path, free, minimum, missing, passed):
     memory_queries(monkeypatch, free, missing)
     args = pressure_args(min_free_gib=minimum)
-    call = lambda: diagnostics.check_pressure_memory(NS(root=tmp_path), [NS(pid=100+i) for i in range(4)],
-        diagnostics.stress_commands(args), "pressure", minimum)
+    call = lambda: pressure.check_pressure_memory(NS(root=tmp_path), [NS(pid=100+i) for i in range(4)],
+        pressure.stress_commands(args), "pressure", minimum)
     if passed:
         assert call()["status"] == "passed"
     else:
@@ -85,11 +93,11 @@ def write_case(root, name, method, mode, profile, candidate=CANDIDATE):
     case = root / name
     (case / "run").mkdir(parents=True)
     (case / "exit_code.txt").write_text("0\n")
-    diagnostics.write_json(case / "config.json", common.method_env(method, mode, profile, case / "run"))
+    artifacts.write_json(case / "config.json", common.method_env(method, mode, profile, case / "run"))
     for t in traces(gap_excess=581_000_000 if mode == "cycle" else 799_000_000,
                     cold_gap=1_186_000_000, mode=mode, stw=method == "B0"):
-        diagnostics.write_json(case / f"run/trace_rank{t['rank']}.json", t)
-    diagnostics.write_json(case / "run/routes.json", dict(default=DEFAULT, candidate=candidate))
+        artifacts.write_json(case / f"run/trace_rank{t['rank']}.json", t)
+    artifacts.write_json(case / "run/routes.json", dict(default=DEFAULT, candidate=candidate))
 
 
 @pytest.fixture
@@ -97,22 +105,22 @@ def old_run(tmp_path):
     source = tmp_path / "old_run"
     source.mkdir()
     profile = source / "bandwidth_profile.json"
-    diagnostics.write_json(profile, dict(world_size=8, matrix_gbps=[[100]*8 for _ in range(8)]))
+    artifacts.write_json(profile, dict(world_size=8, matrix_gbps=[[100]*8 for _ in range(8)]))
     checkpoint = tmp_path / "checkpoint"
     checkpoint.mkdir()
     machine = dict(host="SL3060", memory_used_mib={f"GPU-{i}": 137 for i in range(8)},
                    idle_state="idle", idle_errors=[], checks=dict(runtime=dict(exit_code=0)))
-    diagnostics.write_json(source / "machine.json", machine)
+    artifacts.write_json(source / "machine.json", machine)
     manifest = dict(execution_complete=False, checkpoint=str(checkpoint),
                     profile_sha256=hashlib.sha256(profile.read_bytes()).hexdigest())
-    diagnostics.write_json(source / "manifest.json", manifest)
+    artifacts.write_json(source / "manifest.json", manifest)
     for name, level, method, mode in common.diagnostic_cases():
         if level == "L0":
             write_case(source, name, method, mode, profile)
     failed = source / "L3_W2_cycle"
     (failed / "run").mkdir(parents=True)
     (failed / "exit_code.txt").write_text("1\n")
-    diagnostics.write_json(failed / "run/routes.json", dict(default=DEFAULT, candidate=[dict(src=7,dst=6,kind="weight",bytes=100)]))
+    artifacts.write_json(failed / "run/routes.json", dict(default=DEFAULT, candidate=[dict(src=7,dst=6,kind="weight",bytes=100)]))
     return source, profile, checkpoint, machine, manifest
 
 
@@ -131,7 +139,7 @@ def test_reuse_rejects_incompatible_or_failed_evidence(tmp_path, old_run, damage
         path = source / "L0_W2_cycle/config.json"
         config = json.loads(path.read_text())
         config["MICRO_BATCH_SIZE"] = "1"
-        diagnostics.write_json(path, config)
+        artifacts.write_json(path, config)
     else:
         (source / "smoke_L0_B0/exit_code.txt").write_text("1\n")
     with pytest.raises(ValueError):
@@ -141,43 +149,43 @@ def test_reuse_rejects_incompatible_or_failed_evidence(tmp_path, old_run, damage
 
 @pytest.mark.parametrize("memory_failure", [False, True])
 def test_resume_runs_only_l3_cycle_and_two_probes(monkeypatch, tmp_path, old_run, memory_failure):
-    source, profile, checkpoint, machine, _ = old_run
+    source, profile, checkpoint, machine_info, _ = old_run
     before = {str(p): p.read_bytes() for p in source.rglob("*") if p.is_file()}
     root = tmp_path / "new_run"
     root.mkdir()
     def machine_check(out, *_):
-        diagnostics.write_json(out / "machine.json", machine)
-        return machine
-    monkeypatch.setattr(diagnostics, "machine_check", machine_check)
-    checked, launched, pressure = [], [], []
+        artifacts.write_json(out / "machine.json", machine_info)
+        return machine_info
+    monkeypatch.setattr(machine, "machine_check", machine_check)
+    checked, launched, active_stressors = [], [], []
     def require_idle(path, owner):
-        assert not pressure and owner == "yiwei"
+        assert not active_stressors and owner == "yiwei"
         checked.append(path.parent.name if path.name == "preflight" else path.name.removesuffix("_preflight"))
-    monkeypatch.setattr(diagnostics, "require_idle", require_idle)
+    monkeypatch.setattr(machine, "require_idle", require_idle)
     def start_stress(manager, args, env, prefix):
         assert args.min_free_gib == 22 and args.stress_bytes == 64*1024*1024
         if memory_failure:
             raise RuntimeError("pressure memory gate failed")
-        pressure.append(NS(pid=100))
-        return list(pressure)
-    monkeypatch.setattr(diagnostics, "start_stress", start_stress)
+        active_stressors.append(NS(pid=100))
+        return list(active_stressors)
+    monkeypatch.setattr(pressure, "start_stress", start_stress)
     manager = NS(root=root, required=[], records=[], start=lambda *a: NS(name=a[1]),
-                 exited=lambda p: False, stop=lambda p: pressure.remove(p))
+                 exited=lambda p: False, stop=lambda p: active_stressors.remove(p))
     new_candidate = dict(src=3, dst=5, kind="weight", bytes=100)
     def run(command, name, env, **kwargs):
-        assert checked[-1] == name and bool(pressure) == ("L3" in name)
+        assert checked[-1] == name and bool(active_stressors) == ("L3" in name)
         launched.append(name)
         manager.records.append(dict(exit_code=0))
         if name == "L3_W2_cycle":
             out = Path(env["OUT_DIR"])
             out.mkdir()
             for t in traces(gap_excess=581_000_000, cold_gap=1_186_000_000):
-                diagnostics.write_json(out / f"trace_rank{t['rank']}.json", t)
-            diagnostics.write_json(out / "routes.json", dict(default=DEFAULT, candidate=[new_candidate]))
+                artifacts.write_json(out / f"trace_rank{t['rank']}.json", t)
+            artifacts.write_json(out / "routes.json", dict(default=DEFAULT, candidate=[new_candidate]))
         else:
             result = probe(100 if name == "probe_L0" else 30)
             result["links"].append(dict(src=3, dst=5, samples=[dict(gbps=100)]*5))
-            diagnostics.write_json(root / f"{name}.json", result)
+            artifacts.write_json(root / f"{name}.json", result)
     manager.run = run
     args = pressure_args(mps_owner="yiwei", sample_seconds=0, checkpoint=str(checkpoint), profile=str(profile),
                          cases="L3_W2_cycle", routes_from=source, timeout=60)
@@ -196,7 +204,7 @@ def test_resume_runs_only_l3_cycle_and_two_probes(monkeypatch, tmp_path, old_run
     for name, evidence in manifest["reused_cases"].items():
         for filename, digest in evidence["files_sha256"].items():
             assert hashlib.sha256((root / name / filename).read_bytes()).hexdigest() == digest
-    monkeypatch.setattr(diagnostics, "check_memory_recovery", Mock(return_value=True))
+    monkeypatch.setattr(machine, "check_memory_recovery", Mock(return_value=True))
     assert diagnostics.finish_diagnostics(root, "yiwei", {}, int(memory_failure)) == int(memory_failure)
     report = json.loads((root / "diag_report.json").read_text())
     assert report["cold_start"]["recommended_mode"] == "cycle"

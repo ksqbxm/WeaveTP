@@ -3,34 +3,19 @@
 
 import argparse
 import hashlib
-import importlib.util
 import json
 import math
-import sys
 from pathlib import Path
 
-try:
-    from .summarize import GROUP, distribution, read_json, slo, write_csv, write_json
-except ImportError:
-    from summarize import GROUP, distribution, read_json, slo, write_csv, write_json
+if __package__:
+    from . import artifacts, simulator, trace_metrics
+else:
+    import artifacts
+    import simulator
+    import trace_metrics
 
-SIMULATOR = Path(__file__).resolve().parents[5] / "documents/e2e_prep_20261008/sim/e2e_sim.py"
-PROFILE_DATA = Path("/tmp/claude-0/-home-user-WeaveTP/37dfa7bc-e9fa-5a64-bc42-6012d0eeb203/scratchpad/data_in/profile")
+
 LABEL = "模拟请求时间线 + 实测切换轨迹"
-
-
-def load_simulator(path=SIMULATOR):
-    spec = importlib.util.spec_from_file_location("nostop_e2e_sim", path)
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module  # dataclasses resolves the defining module.
-    previous = sys.dont_write_bytecode
-    try:
-        sys.dont_write_bytecode = True  # Analysis must not alter the simulator inputs.
-        spec.loader.exec_module(module)
-    finally:
-        sys.dont_write_bytecode = previous
-    module.set_world(8)
-    return module
 
 
 def replay_launch(sim, requests, launch, b_max=256):
@@ -122,18 +107,18 @@ def replay_launch(sim, requests, launch, b_max=256):
              "active_at_switch": q.rid in runner.affected,
              "first_token_s": q.t_first, "last_token_s": q.t_done} for q in result.reqs]
     values = [r["max_tbt_s"] for r in rows if r["max_tbt_s"] is not None]
-    return {**{k: launch[k] for k in (*GROUP, "launch_id")}, "label": LABEL,
+    return {**{k: launch[k] for k in (*trace_metrics.GROUP, "launch_id")}, "label": LABEL,
             "requests": rows, "request_count": len(rows), "eligible_requests": len(values),
-            "affected_requests": len(runner.affected), "request_max_tbt_s": distribution(values),
-            "request_slo": slo(values), "switch": result.switches[0], "time_s": result.time_s}
+            "affected_requests": len(runner.affected), "request_max_tbt_s": trace_metrics.distribution(values),
+            "request_slo": trace_metrics.slo(values), "switch": result.switches[0], "time_s": result.time_s}
 
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--summary", required=True, type=Path)
-    parser.add_argument("--simulator", default=SIMULATOR, type=Path)
-    parser.add_argument("--lengths", default=PROFILE_DATA / "lengths.csv", type=Path)
-    parser.add_argument("--longout", default=PROFILE_DATA / "lengths_longout.csv", type=Path)
+    parser.add_argument("--simulator", default=simulator.SIMULATOR, type=Path)
+    parser.add_argument("--lengths", default=simulator.PROFILE_DATA / "lengths.csv", type=Path)
+    parser.add_argument("--longout", default=simulator.PROFILE_DATA / "lengths_longout.csv", type=Path)
     parser.add_argument("--output", required=True, type=Path)
     args = parser.parse_args(argv)
     inputs = {k: getattr(args, k) for k in ("summary", "simulator", "lengths", "longout")}
@@ -141,10 +126,10 @@ def main(argv=None):
     if missing:
         print(json.dumps({"status": "missing_inputs", "required_paths": missing, "label": LABEL}, ensure_ascii=False))
         return 2
-    sim = load_simulator(args.simulator)
+    sim = simulator.load_simulator(args.simulator)
     short, longs = sim.load_pools(str(args.lengths), str(args.longout))
     requests = sim.build_workload(short, longs["sky_t1_17k"], cycles=1, n_short=4000, n_long=600, seed=7)
-    summary = read_json(args.summary)
+    summary = artifacts.read_json(args.summary)
     report = {"label": LABEL, "world": 8, "b_max": 256,
               "workload": {"cycles": 1, "n_short": 4000, "n_long": 600, "seed": 7, "source": "sky_t1_17k"},
               "sources": {k: {"path": str(p.resolve()), "sha256": hashlib.sha256(p.read_bytes()).hexdigest()} for k, p in inputs.items()},
@@ -158,16 +143,16 @@ def main(argv=None):
     for launch in summary["launches"]:
         row = replay_launch(sim, requests, launch)
         requests_path = args.output / f"requests_{launch['launch_id']}.csv"
-        write_csv(requests_path, row.pop("requests"),
+        artifacts.write_csv(requests_path, row.pop("requests"),
                   ["rid", "kind", "out_tokens", "completed_tokens", "max_tbt_s", "active_at_switch", "first_token_s", "last_token_s"])
         row["requests_csv"] = str(requests_path.resolve())
         report["launches"].append(row)
-    write_json(args.output / "replay.json", report)
-    flat = [{**{k: r[k] for k in (*GROUP, "launch_id", "label", "eligible_requests", "affected_requests")},
+    artifacts.write_json(args.output / "replay.json", report)
+    flat = [{**{k: r[k] for k in (*trace_metrics.GROUP, "launch_id", "label", "eligible_requests", "affected_requests")},
              "p50_s": r["request_max_tbt_s"]["p50"], "p99_s": r["request_max_tbt_s"]["p99"],
              **{f"slo_{t}s": v for t, v in r["request_slo"].items()}} for r in report["launches"]]
-    write_csv(args.output / "replay.csv", flat, [*GROUP, "launch_id", "label", "eligible_requests", "affected_requests",
-                                                "p50_s", "p99_s", *[f"slo_{t}s" for t in slo([])]])
+    artifacts.write_csv(args.output / "replay.csv", flat, [*trace_metrics.GROUP, "launch_id", "label", "eligible_requests", "affected_requests",
+                                                "p50_s", "p99_s", *[f"slo_{t}s" for t in trace_metrics.slo([])]])
     print(json.dumps({"launches": len(flat), "label": LABEL, "output": str(args.output)}, ensure_ascii=False))
     return 1 if summary["errors"] or not flat else 0
 

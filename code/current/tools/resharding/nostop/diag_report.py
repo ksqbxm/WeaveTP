@@ -8,10 +8,11 @@ import shlex
 import statistics
 from pathlib import Path
 
-try:
-    from .common import MAX_WAVES, capacity_budget, main_links
-except ImportError:
-    from common import MAX_WAVES, capacity_budget, main_links
+if __package__:
+    from . import common, trace_metrics
+else:
+    import common
+    import trace_metrics
 
 
 def cold_check(traces):
@@ -77,7 +78,7 @@ def cold_check(traces):
 def pressure_check(low, high, default_rows, candidate_rows):
     if not low.get("complete") or not high.get("complete"):
         return {"status": "inconclusive", "reason": "incomplete bandwidth probe"}
-    maps = [{(r["src"], r["dst"]): r for r in p["links"]} for p in (low, high)]
+    maps = [{(r["src"], r["dst"]): dict(r) for r in p["links"]} for p in (low, high)]
     details = []
     union = {(r["src"], r["dst"]) for r in default_rows + candidate_rows if r["src"] != r["dst"]}
     for pair in sorted(union):
@@ -99,7 +100,7 @@ def pressure_check(low, high, default_rows, candidate_rows):
                         "l0_end_to_start_change": a["end_to_start_change"],
                         "l3_end_to_start_change": b["end_to_start_change"],
                         "variability_flag": any(r["cv"] > 0.15 or abs(r["end_to_start_change"]) > 0.20 for r in (a, b))})
-    selected = main_links(default_rows)
+    selected = common.main_links(default_rows)
     costs = [sum(r["bytes"] / m[(r["src"], r["dst"])]["median_gbps"] for r in selected) for m in maps]
     ratio = costs[1] / costs[0]
     total_bytes = sum(r["bytes"] for r in selected)
@@ -108,34 +109,6 @@ def pressure_check(low, high, default_rows, candidate_rows):
             "b0_weighted_slowdown": ratio, "b0_primary_links": selected, "links": details,
             "aggregation": "fixed B0 byte-weighted harmonic bandwidth, >=80% of remote Base bytes",
             "note": "W2 candidate links are reported, not required to meet 2.5x individually"}
-
-
-def launch_gate(traces, mode, stall_pause):
-    """Validate diagnostic evidence without imposing any candidate-plan win."""
-    expected = 2 if mode == "cycle" else 0
-    if len(traces) != 8 or {t["rank"] for t in traces} != set(range(8)):
-        return "missing rank traces"
-    for t in traces:
-        if t["measured_switch"] != expected or t["stall_pause"] != stall_pause or not any(
-                s["measured"] and s["kv_tokens"] == 2048 and s["target_weight_storage_bytes"] == 0
-                and s["target_weight_bytes_required"] > 0 for s in t["state_checks"]):
-            return "KV or standby state gate failed"
-        if mode == "cycle" and not any(s["switch"] == 0 and s["kv_tokens"] == 2048
-                and s["target_weight_storage_bytes"] == 0 and s["target_weight_bytes_required"] > 0 for s in t["state_checks"]):
-            return "cold switch KV or standby state gate failed"
-        if mode == "independent" and not t.get("independent_warmup"):
-            return "missing independent warmup evidence"
-        migration = [r for r in t["decodes"] if r["switch"] == expected
-                     and r["phase"] in ("base", "weight_check", "delta", "prepare")]
-        if (stall_pause and migration) or (not stall_pause and not migration):
-            return "STW/no-stop decode invariant failed"
-        if len([r for r in t["decodes"] if r["switch"] == expected and r["phase"] == "post"]) != 10:
-            return "missing ten completed target steps"
-    return None
-
-
-def load_traces(directory):
-    return [json.loads(p.read_text()) for p in sorted(Path(directory).glob("trace_rank*.json"))]
 
 
 def make_report(root):
@@ -149,8 +122,8 @@ def make_report(root):
             smoke_errors[method] = "smoke launch incomplete"
         else:
             try:
-                traces = load_traces(case / "run")
-                reason = launch_gate(traces, "cycle", method == "B0")
+                traces = trace_metrics.load_traces(case / "run")
+                reason = trace_metrics.launch_gate(traces, "cycle", method == "B0")
                 if method == "W2" and not reason:
                     checks["smoke_L0_W2"] = cold_check(traces)
             except (ValueError, KeyError) as error:
@@ -167,9 +140,9 @@ def make_report(root):
                 checks[name] = {"status": "inconclusive", "reason": "launch did not complete successfully"}
                 continue
             try:
-                traces = load_traces(case / "run")
+                traces = trace_metrics.load_traces(case / "run")
                 checks[name] = cold_check(traces)
-                reason = launch_gate(traces, mode, False)
+                reason = trace_metrics.launch_gate(traces, mode, False)
             except (ValueError, KeyError) as error:
                 reason = f"invalid launch evidence: {error}"
             if reason:
@@ -194,8 +167,8 @@ def make_report(root):
     (root / "diag_report.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
     env = {"DIAGNOSTICS_READY": int(recommended is not None and pressure["status"] == "passed"),
            "NOSTOP_COLD_MODE": "cycle", "SWITCHES": 3,
-           "MAX_WAVES": MAX_WAVES, "SEQ_LENGTH": capacity_budget()["max_position_embeddings"],
-           "MAX_POSITION_EMBEDDINGS": capacity_budget()["max_position_embeddings"],
+           "MAX_WAVES": common.MAX_WAVES, "SEQ_LENGTH": common.capacity_budget()["max_position_embeddings"],
+           "MAX_POSITION_EMBEDDINGS": common.capacity_budget()["max_position_embeddings"],
            "STRESS_LINKS": manifest["stress_links"], "L3_PROCESSES_PER_PAIR": manifest["l3_processes"],
            "STRESS_BYTES": manifest["stress_bytes"], "STRESS_SYNC_EVERY": manifest["stress_sync_every"],
            "MIN_FREE_GIB": manifest["min_free_gib"],
