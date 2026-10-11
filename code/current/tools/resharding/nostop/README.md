@@ -4,6 +4,8 @@
 
 ## 第 3 步：冻结配置后的正式实验入口
 
+实现 SHA：`e9348a2e64c18f2ebc5f9efaa82d184bd5d3447a`。174 项 CPU 测试通过，其中第 3 步新增 44 项；后续 README 提交不改变代码实现。
+
 `formal.sh` → `formal.py` 复用第 1 步的 `Processes` supervisor、MPS 空闲规则、stressor 设备隔离、显存门槛及 `probe.py`；不修改 benchmark/GPU 执行路径。`benchmark.py`、`benchmark_live_moe_tp.py` 相对 `8ae22e7` 的 git diff 必须为空。本次交付仅完成脚本和 CPU 测试，不代表已执行 24 次 GPU 实验。
 
 `--frozen` 必填。脚本将文件作为字面量键值读取，**不执行 source/eval**，记录 SHA256 并保存原文件。仅 `DIAGNOSTICS_READY=1` 且 `NOSTOP_COLD_MODE=cycle` 允许真实执行，否则只能 `--dry-run`。读取 `STRESS_LINKS`、`L0_PROCESSES_PER_PAIR` 至 `L3_PROCESSES_PER_PAIR`（缺省 0/1/3/7，L0 必须 0）、`STRESS_BYTES`、`MIN_FREE_GIB` 和 `STRESS_SYNC_EVERY`（缺省 16）。`PROFILE` 与 `DIAGNOSTIC_EVIDENCE` 指向诊断画像及证据目录，正式探针使用其中 `probe_routes.json` 的 B0 默认/W2 候选迁移链路并集；背景压力使用冻结的 `STRESS_LINKS`，两者不按正式结果重新选择。checkpoint 必须与诊断相同。画像及路由文件同时保存 hash 和副本。
@@ -34,6 +36,9 @@ Launch 期间每秒查询 compute-apps，保存 PID、属主、进程名、每�
 source /data/ubuntu/lxh/weavetp/env.sh
 export REPO PYTHON
 export MPS_OWNER=yiwei
+export FORMAL_IMPLEMENTATION_SHA=e9348a2e64c18f2ebc5f9efaa82d184bd5d3447a
+git -C "$REPO" fetch origin codex/nostop-diagnostics
+git -C "$REPO" checkout --detach "$FORMAL_IMPLEMENTATION_SHA"
 export NOSTOP="$REPO/code/current/tools/resharding/nostop"
 export FROZEN=/data/ubuntu/lxh/weavetp/nostop/实际诊断目录/frozen.env
 export FORMAL_OUT=/data/ubuntu/lxh/weavetp/nostop/formal_$(date +%Y%m%d_%H%M%S)
