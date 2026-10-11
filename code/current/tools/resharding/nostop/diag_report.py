@@ -9,9 +9,10 @@ import statistics
 from pathlib import Path
 
 if __package__:
-    from . import common, trace_metrics
+    from . import common, memory_budget, trace_metrics
 else:
     import common
+    import memory_budget
     import trace_metrics
 
 
@@ -159,6 +160,10 @@ def make_report(root):
     if not manifest["execution_complete"]:
         pressure["status"] = "inconclusive"
         pressure["reason"] = "diagnostic execution, pressure/telemetry or final memory recovery did not complete successfully; see status.json"
+    budget = manifest["memory_budget"]
+    pressure["memory_budget"] = budget
+    if not budget["feasible"]:
+        pressure.update(status="failed", reason="measured model peak leaves no positive L3 count with 2 GiB headroom")
     cold_status = "passed" if recommended else "not_isolated" if all(
         checks[f"{level}_W2_cycle"]["status"] != "inconclusive" for level in ("L0", "L3")) and not smoke_errors else "inconclusive"
     report = {"cold_start": {"status": cold_status,
@@ -169,9 +174,9 @@ def make_report(root):
            "NOSTOP_COLD_MODE": "cycle", "SWITCHES": 3,
            "MAX_WAVES": common.MAX_WAVES, "SEQ_LENGTH": common.capacity_budget()["max_position_embeddings"],
            "MAX_POSITION_EMBEDDINGS": common.capacity_budget()["max_position_embeddings"],
-           "STRESS_LINKS": manifest["stress_links"], "L3_PROCESSES_PER_PAIR": manifest["l3_processes"],
+           "STRESS_LINKS": manifest["stress_links"], **memory_budget.frozen_values(budget),
+           **{f"{level}_PROCESSES_PER_PAIR": count for level, count in memory_budget.scaled_counts(manifest["l3_processes"]).items()},
            "STRESS_BYTES": manifest["stress_bytes"], "STRESS_SYNC_EVERY": manifest["stress_sync_every"],
-           "MIN_FREE_GIB": manifest["min_free_gib"],
            "PRESSURE_REQUIRED_SLOWDOWN": 2.5, "PROBE_CV_FLAG_THRESHOLD": 0.15,
            "PROBE_SHIFT_FLAG_THRESHOLD": 0.20,
            "PROFILE": manifest["profile"], "DIAGNOSTIC_EVIDENCE": str(root.resolve())}

@@ -2,7 +2,6 @@
 
 MAX_WAVES = 64
 STRESS_BYTES = 64 * 1024 * 1024
-MIN_FREE_GIB = 22
 
 
 def diagnostic_cases(spec=None):

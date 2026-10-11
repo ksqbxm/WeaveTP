@@ -9,11 +9,12 @@ import shlex
 from pathlib import Path
 
 if __package__:
-    from . import artifacts, common, machine
+    from . import artifacts, common, machine, memory_budget
 else:
     import artifacts
     import common
     import machine
+    import memory_budget
 
 
 FIXED = dict(SWITCHES="3", MAX_WAVES="64", SEQ_LENGTH="5248", MAX_POSITION_EMBEDDINGS="5248",
@@ -43,15 +44,24 @@ def frozen_config(path):
         if values.get(key, expected) != expected:
             raise ValueError(f"frozen {key} must remain {expected}")
     links = common.parse_links(values["STRESS_LINKS"])
-    counts = {f"L{i}": int(values.get(f"L{i}_PROCESSES_PER_PAIR", default)) for i, default in enumerate((0, 1, 3, 7))}
+    budget = memory_budget.estimate(float(values["MODEL_PEAK_GIB"]), values["STRESS_LINKS"],
+                                   float(values["MPS_MEMORY_MIB"]), float(values["MEMORY_CAPACITY_GIB"]))
+    counts = {level: int(values.get(f"{level}_PROCESSES_PER_PAIR", default)) for level, default in budget["counts"].items()}
     pressure = dict(links=",".join(f"{a}:{b}" for a, b in links), counts=counts,
                     stress_bytes=int(values["STRESS_BYTES"]), min_free_gib=float(values["MIN_FREE_GIB"]),
                     stress_sync_every=int(values.get("STRESS_SYNC_EVERY", "16")))
     if (counts["L0"] != 0 or min(counts.values()) < 0 or min(pressure["stress_bytes"], pressure["stress_sync_every"]) <= 0
             or not math.isfinite(pressure["min_free_gib"]) or pressure["min_free_gib"] <= 0):
         raise ValueError("invalid frozen pressure configuration (L0 must have zero stressors)")
-    return dict(sha256=sha(raw), values=values, pressure=pressure,
-                ready=values.get("DIAGNOSTICS_READY") == "1" and values.get("NOSTOP_COLD_MODE") == "cycle")
+    if pressure["min_free_gib"] != budget["min_free_gib"]:
+        raise ValueError("MIN_FREE_GIB must equal measured MODEL_PEAK_GIB + 1.5")
+    if pressure["stress_bytes"] != common.STRESS_BYTES:
+        raise ValueError("806 MiB stressor memory evidence requires 64 MiB stress buffers")
+    if max(counts.values()) > (budget["max_l3_processes"] or 0):
+        raise ValueError("frozen stressor count exceeds measured memory budget")
+    return dict(sha256=sha(raw), values=values, pressure=pressure, memory_budget=budget,
+                ready=values.get("DIAGNOSTICS_READY") == "1" and values.get("NOSTOP_COLD_MODE") == "cycle"
+                and budget["feasible"] and 0 < counts["L1"] <= counts["L2"] <= counts["L3"])
 
 
 def matrix():
@@ -69,6 +79,9 @@ def prepare_manifest(root, frozen_path, frozen, *, checkpoint, mps_owner, python
     values = frozen["values"]
     evidence = Path(values["DIAGNOSTIC_EVIDENCE"])
     source = artifacts.read_json(evidence / "manifest.json")
+    if any(frozen["memory_budget"][key] != source["memory_budget"][key]
+           for key in ("model_peak_gib", "min_free_gib", "capacity_gib", "mps_mib")):
+        raise ValueError("frozen memory budget differs from diagnostic evidence")
     machine_info = artifacts.read_json(evidence / "machine.json")
     profile = Path(values["PROFILE"]).read_bytes()
     routes = (evidence / "probe_routes.json").read_bytes()
@@ -91,6 +104,7 @@ def prepare_manifest(root, frozen_path, frozen, *, checkpoint, mps_owner, python
                     stress_links=pressure["links"], l3_processes=pressure["counts"]["L3"],
                     processes_per_pair=pressure["counts"], stress_bytes=pressure["stress_bytes"],
                     stress_sync_every=pressure["stress_sync_every"], min_free_gib=pressure["min_free_gib"],
+                    memory_budget=source["memory_budget"],
                     order=matrix(), cases=[[r["name"], r["level"], r["method"], "cycle"] for r in matrix()],
                     drift_flag_threshold=.20, measured_switch=2)
     if (root / "manifest.json").exists():

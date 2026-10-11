@@ -25,6 +25,7 @@ from tools.resharding.nostop import (
     common,
     diag_report,
     machine,
+    memory_budget,
     pressure,
     supervisor,
     trace_metrics,
@@ -152,7 +153,8 @@ def test_probe_variability_preserved_and_flagged():
 
 def test_complete_report_has_only_two_decisions_and_frozen_recommendation(tmp_path):
     artifacts.write_json(tmp_path / "manifest.json", dict(execution_complete=True, stress_links="0:2", l3_processes=7,
-        stress_bytes=256, stress_sync_every=16, min_free_gib=22, profile="/data/profile.json"))
+        stress_bytes=256, stress_sync_every=16, min_free_gib=22, profile="/data/profile.json",
+        memory_budget=memory_budget.estimate(20.5, "0:2", 56)))
     for name, _, method, mode in common.diagnostic_cases():
         case = tmp_path / name
         (case / "run").mkdir(parents=True)

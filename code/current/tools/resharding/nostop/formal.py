@@ -185,7 +185,7 @@ def main(argv=None):
                               configs={m: common.method_env(m, "cycle", frozen["values"].get("PROFILE", ""), "ATTEMPT/run") for m in ("W2", "B0")}), indent=2))
         return 0
     if not frozen["ready"]:
-        parser.error("execution requires DIAGNOSTICS_READY=1 and NOSTOP_COLD_MODE=cycle; only --dry-run allowed")
+        parser.error("execution requires DIAGNOSTICS_READY=1, NOSTOP_COLD_MODE=cycle and a feasible measured memory budget; only --dry-run allowed")
     if os.name != "posix" or not args.out.is_relative_to(Path("/data")) or args.out == Path("/data"):
         parser.error("execution requires Linux and --out under /data")
     import fcntl

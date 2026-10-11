@@ -1,5 +1,50 @@
 # TP2→TP4 Decode 连续性实验
 
+## 2026-10-11 OOM 复核与显存准入修正
+
+**当前证据不支持继续 L3 GPU 实验。** 本次修复显存预算、冻结校验与启动前拒绝，不声称已降低模型显存或解决 MoE prefill 的 OOM。`benchmark.py` 和 `benchmark_live_moe_tp.py` 相对 `bb60cf9`（以及 `8ae22e7`）均为零 diff；Decode、迁移、cutover、CUDA Event/同步路径不变，不启用 `expandable_segments`。
+
+调用栈定位在初始目标 TP4 的 `_prefill(dst_model, dst_context, args)`：`TransformerLayer._forward_mlp → MoELayer.routed_experts_compute → MoEAlltoAllTokenDispatcher.combine_preprocess → reduce_scatter_to_sequence_parallel_region → torch.distributed.reduce_scatter`。通信输入是专家输出 `hidden_states.to(self.probs.dtype)`，属于 MoE token 合并阶段。1.49 GiB 分配失败发生在 collective 调用内部，已经越过 `torch.empty_like(input_tensor_list[rank])`；它不是 GPT output logits。现有 traceback 没有具体 transformer 层序号、张量 shape 或 C++ 分配栈，不能把内部临时 buffer 的形状写成已验证事实。
+
+`StaticInferenceContext` 已设置 `materialize_only_last_token_logits=True`，eval 下的 `GPTModel._postprocess` 已在 output layer **之前**切成 `hidden_states[-1:, :, :]`。因此不重复添加无效的 prefill 包装。CPU 测试执行现有 context 构造与 GPT postprocess，确认 output layer 只接收一个位置，返回 `[4, 1, 51200]`（CPU 测试使用的词表大小），KV 内容、存储地址及 offset 不变；这不能代替 GPU 数值验证。
+
+已用回传的 `oom_evidence/l0/process_memory.log` 与 `telemetry.log` 实际运行 CPU 预算工具。结果及输入 SHA256 见 [memory_budget.json](evidence/oom_20261011/memory_budget.json)，仅预算用途的 [frozen.env](evidence/oom_20261011/frozen.env) 明确设置 `DIAGNOSTICS_READY=0`。日志中每卡最大单个非 MPS 进程是模型；不累加跨 launch 的 PID 峰值，也不把失败时的 24.88 GiB 当作成功运行峰值。1 s 进程采样可能漏掉瞬时峰值，CUDA reset 后的 peak counters 不能覆盖初始 prefill。
+
+| 项目 | GiB |
+|---|---:|
+| L0 模型单卡最大采样（31,922 MiB，GPU 0，PID 2871113） | 31.173828125 |
+| 新启动门槛：模型峰值 + 1.5 | 32.673828125 |
+| 按 OOM 信息使用的单卡可用容量 | 31.36 |
+| 零 stressor：模型峰值 + MPS 56 MiB | 31.228515625 |
+| L3 七进程：模型峰值 + 7×806 MiB + MPS | 36.73828125 |
+
+NVML 物理总量为 32,607 MiB（31.8427734375 GiB），也低于新门槛；即使改用它，零 stressor 仍不能预留 2 GiB。本次未改 GPU 执行，预计模型峰值仍按 **31.174 GiB** 预算，不能宣称优化后下降。满足 2 GiB 余量的进程数不存在，不能合法推荐 1/2/4 或 1/2/5。冻结建议的 L1/L2/L3 全零表示**禁用压力且禁止正式执行**，不代表一个有效的三档压力实验。
+
+`memory_budget.py` 按固定链路集合统计每卡涉及的链路数，计算满足 2 GiB 余量的最大 L3 进程数（不超过 7），L1/L2 按 1:3:7 比例四舍五入且正档至少 1 个进程。例如模型峰值若实测降低到 24.88 GiB，则预算给出 1/2/5；这只是 CPU 算例，不是本次推荐。806 MiB 是隔离设备、64 MiB buffer 的实测进程开销估计，因此两个入口拒绝把该预算用于其他 buffer 大小；更改 buffer 必须先取得新的进程显存证据。降低进程数预计减弱压力，但带宽影响必须重新探针校准，不能沿用旧的 2.5× 结论。
+
+诊断新增 `--memory-from <L0 原始日志目录>`，真实执行必填；移除旧的固定 22 GiB/`--min-free-gib` 路径。L0 与 L3 的 benchmark/探针均检查同一个“实测峰值 + 1.5 GiB”门槛，默认 L3 数量从预算计算，可显式降低但不能超预算。报告在原有 `pressure` 判定中保留完整显存预算；正式入口验证 `MODEL_PEAK_GIB`、`MIN_FREE_GIB`、`MEMORY_CAPACITY_GIB`、`MPS_MEMORY_MIB` 与诊断证据一致。无法满足余量时，即使手改 `DIAGNOSTICS_READY=1` 也不能执行。未提供显存证据的诊断 dry-run 显示未解析门槛，不猜测 22 GiB。
+
+以下命令只做 CPU 预算和 dry-run，不采集 nsys、不启动 stressor 或模型。长任务仍使用原 supervisor 的 nohup/PID/退出码流程；在本次预算不满足时不要启动 GPU 任务。现有回传数据已经足够完成本次预算，不需要完整 rank trace。后续若要真正降低显存，需要单独处理 MoE prefill 执行/临时缓冲，并重新测量 L0 峰值。
+
+验证：204 项 CPU 测试通过，覆盖原实验测试与新增预算/显存拒绝/日志解析/最后位置 logits 回归；`uv run isort`、shell 脚本和 README bash 命令块的语法检查通过。没有运行 GPU benchmark。测试初跑遇到 Windows 默认 GBK 读取 GPT 源码失败，改为显式 UTF-8 后通过。
+
+```bash
+source /data/ubuntu/lxh/weavetp/env.sh
+export REPO PYTHON MPS_OWNER=yiwei
+git -C "$REPO" fetch origin codex/nostop-diagnostics
+git -C "$REPO" checkout --detach origin/codex/nostop-diagnostics
+export NOSTOP="$REPO/code/current/tools/resharding/nostop"
+# 661167f 那次完整 run，含 process_memory.log / telemetry.log。
+export L0_RUN=/data/ubuntu/lxh/weavetp/nostop/diag_SL3060_20261011T102349Z/run
+export BUDGET_OUT=/data/ubuntu/lxh/weavetp/nostop/memory_budget_$(date +%Y%m%d_%H%M%S)
+"$PYTHON" "$NOSTOP/memory_budget.py" "$L0_RUN" --out "$BUDGET_OUT"
+cat "$BUDGET_OUT/frozen.env"
+bash "$NOSTOP/diag.sh" --dry-run --memory-from "$L0_RUN" \
+  --cases L3_W2_cycle --routes-from "$L0_RUN"
+bash "$NOSTOP/formal.sh" --dry-run --frozen "$BUDGET_OUT/frozen.env" \
+  --out /data/ubuntu/lxh/weavetp/nostop/formal_memory_blocked
+```
+
 第 2 步 CPU 汇总、Restart 估计及 L600 请求回放见 [ANALYSIS.md](ANALYSIS.md)，实现 SHA 为 `7511ff32d61ab11cafeb1a5aee19841835a32cee`。以下保留第 1 步诊断说明；第 2 步不更改 GPU 执行路径。
 
 ## 模块职责与维护边界
@@ -12,6 +57,7 @@
 | `supervisor.py` | 子进程组所有权、日志、超时、回收和独立缓存环境 |
 | `machine.py` | 空闲与 MPS 规则、机器信息、显存恢复、每秒外部计算进程观测；不结束外部进程 |
 | `pressure.py` | stressor 设备隔离、初始化与剩余显存门槛、前后探针漂移比较 |
+| `memory_budget.py` | 纯 CPU 解析 NVML 日志、计算峰值与压力档位预算；不修改 GPU 执行或生成替代测量数据 |
 | `formal_plan.py` | 解析冻结配置、生成 24 次顺序、校验并保存不可变输入；显式返回 checkpoint，不修改调用者参数 |
 | `attempts.py` | 尝试记录、成功判定、重试/污染重跑决策与幂等进度写入；不启动任务 |
 | `trace_metrics.py` | 共享 trace 状态验证、rank 对齐和单次 Launch 指标；纯 CPU，无 CLI/执行器依赖 |
@@ -41,7 +87,7 @@ cd "$REPO"
 
 `formal.sh` → `formal.py` 复用第 1 步的 `Processes` supervisor、MPS 空闲规则、stressor 设备隔离、显存门槛及 `probe.py`；不修改 benchmark/GPU 执行路径。`benchmark.py`、`benchmark_live_moe_tp.py` 相对 `8ae22e7` 的 git diff 必须为空。本次交付仅完成脚本和 CPU 测试，不代表已执行 24 次 GPU 实验。
 
-`--frozen` 必填。脚本将文件作为字面量键值读取，**不执行 source/eval**，记录 SHA256 并保存原文件。仅 `DIAGNOSTICS_READY=1` 且 `NOSTOP_COLD_MODE=cycle` 允许真实执行，否则只能 `--dry-run`。读取 `STRESS_LINKS`、`L0_PROCESSES_PER_PAIR` 至 `L3_PROCESSES_PER_PAIR`（缺省 0/1/3/7，L0 必须 0）、`STRESS_BYTES`、`MIN_FREE_GIB` 和 `STRESS_SYNC_EVERY`（缺省 16）。`PROFILE` 与 `DIAGNOSTIC_EVIDENCE` 指向诊断画像及证据目录，正式探针使用其中 `probe_routes.json` 的 B0 默认/W2 候选迁移链路并集；背景压力使用冻结的 `STRESS_LINKS`，两者不按正式结果重新选择。checkpoint 必须与诊断相同。画像及路由文件同时保存 hash 和副本。
+`--frozen` 必填。脚本将文件作为字面量键值读取，**不执行 source/eval**，记录 SHA256 并保存原文件。`DIAGNOSTICS_READY=1`、`NOSTOP_COLD_MODE=cycle` 及可行的实测显存预算都满足才允许真实执行，否则只能 `--dry-run`。读取 `STRESS_LINKS`、`L0_PROCESSES_PER_PAIR` 至 `L3_PROCESSES_PER_PAIR`（缺省按实测预算计算，L0 必须 0）、`STRESS_BYTES`、`MIN_FREE_GIB` 和 `STRESS_SYNC_EVERY`（缺省 16）；新的显存字段见上文，旧的固定 22 GiB 冻结文件不再兼容。`PROFILE` 与 `DIAGNOSTIC_EVIDENCE` 指向诊断画像及证据目录，正式探针使用其中 `probe_routes.json` 的 B0 默认/W2 候选迁移链路并集；背景压力使用冻结的 `STRESS_LINKS`，两者不按正式结果重新选择。checkpoint 必须与诊断相同。画像及路由文件同时保存 hash 和副本。
 
 两种方法直接调用同一 `method_env`，固定 cycle、SWITCHES=3、MAX_WAVES=64、SEQ_LENGTH=MAX_POSITION_EMBEDDINGS=5248、micro batch=4、KV=2048，唯一被测切换索引为 2。不改 W2 门槛，不设置 `NCCL_RUNTIME_CONNECT`，不改锁频。启动前生成全部 24 次顺序并写入不可变 manifest：
 

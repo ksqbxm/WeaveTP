@@ -1,0 +1,126 @@
+{
+  "model_peak_gib": 31.173828125,
+  "min_free_gib": 32.673828125,
+  "model_margin_gib": 1.5,
+  "capacity_gib": 31.36,
+  "mps_mib": 56,
+  "stressor_mib": 806,
+  "max_pairs_per_gpu": 1,
+  "required_headroom_gib": 2.0,
+  "max_l3_processes": null,
+  "feasible": false,
+  "counts": {
+    "L0": 0,
+    "L1": 0,
+    "L2": 0,
+    "L3": 0
+  },
+  "estimated_total_gib": {
+    "0": 31.228515625,
+    "1": 32.015625,
+    "2": 32.802734375,
+    "3": 33.58984375,
+    "4": 34.376953125,
+    "5": 35.1640625,
+    "6": 35.951171875,
+    "7": 36.73828125
+  },
+  "note": "Counts are disabled (all zero) if no positive L3 count fits. Not a calibrated pressure profile.",
+  "source": "E:\\\u8bfe\u9898\u7ec4\\WeaveTP_\u4ee3\u7801\u4e0e\u5b9e\u9a8c\u8d44\u6599_20260920\\oom_evidence\\l0",
+  "files_sha256": {
+    "process_memory.log": "5a404f1f72effe2a86382b16dfdbf312f1f2d957026bf34c7a82ea19952d03a8",
+    "telemetry.log": "b19e235966b29bf5017c06304957777b470412e6f401ddb6d74ff1af29f37dc5"
+  },
+  "gpus": {
+    "0": {
+      "uuid": "GPU-8821459f-2e9c-7abe-cb19-0f34795e52c2",
+      "total_mib": 32607,
+      "peak": {
+        "pid": 2871113,
+        "process_name": "/home/ubuntu/miniconda3/envs/megatron/bin/python",
+        "used_mib": 31922,
+        "line": 1128
+      },
+      "mps_mib": 56
+    },
+    "1": {
+      "uuid": "GPU-44cfdc76-9dc0-0f1f-cb4f-bc8f4ccfd0da",
+      "total_mib": 32607,
+      "peak": {
+        "pid": 2871114,
+        "process_name": "/home/ubuntu/miniconda3/envs/megatron/bin/python",
+        "used_mib": 31590,
+        "line": 1130
+      },
+      "mps_mib": 56
+    },
+    "2": {
+      "uuid": "GPU-01353343-54aa-25f3-79ef-3ddb242fedc4",
+      "total_mib": 32607,
+      "peak": {
+        "pid": 2871115,
+        "process_name": "/home/ubuntu/miniconda3/envs/megatron/bin/python",
+        "used_mib": 30334,
+        "line": 1132
+      },
+      "mps_mib": 56
+    },
+    "3": {
+      "uuid": "GPU-72c4d907-1d65-2ed5-e856-bb3933631695",
+      "total_mib": 32607,
+      "peak": {
+        "pid": 2871116,
+        "process_name": "/home/ubuntu/miniconda3/envs/megatron/bin/python",
+        "used_mib": 30984,
+        "line": 1134
+      },
+      "mps_mib": 56
+    },
+    "4": {
+      "uuid": "GPU-7ac91b20-519c-8a7d-a983-5ae1d1ac4790",
+      "total_mib": 32607,
+      "peak": {
+        "pid": 2871117,
+        "process_name": "/home/ubuntu/miniconda3/envs/megatron/bin/python",
+        "used_mib": 25638,
+        "line": 1136
+      },
+      "mps_mib": 56
+    },
+    "5": {
+      "uuid": "GPU-1ed6b59b-d882-5cd9-c540-f71177abf326",
+      "total_mib": 32607,
+      "peak": {
+        "pid": 2871118,
+        "process_name": "/home/ubuntu/miniconda3/envs/megatron/bin/python",
+        "used_mib": 25420,
+        "line": 1138
+      },
+      "mps_mib": 56
+    },
+    "6": {
+      "uuid": "GPU-d4e8f72a-044b-a24e-818f-0560f0b97483",
+      "total_mib": 32607,
+      "peak": {
+        "pid": 2871119,
+        "process_name": "/home/ubuntu/miniconda3/envs/megatron/bin/python",
+        "used_mib": 23398,
+        "line": 1140
+      },
+      "mps_mib": 56
+    },
+    "7": {
+      "uuid": "GPU-dbbd3446-128e-286b-1c04-0aa14c474949",
+      "total_mib": 32607,
+      "peak": {
+        "pid": 2871120,
+        "process_name": "/home/ubuntu/miniconda3/envs/megatron/bin/python",
+        "used_mib": 24100,
+        "line": 1142
+      },
+      "mps_mib": 56
+    }
+  },
+  "peak_definition": "maximum single non-MPS process sample, never sum of historical PID peaks",
+  "limitation": "1 s NVML samples can miss transient peaks; supplied L0 idle-run maxima belong to model PIDs. Includes initialization, unlike reset CUDA peak counters."
+}

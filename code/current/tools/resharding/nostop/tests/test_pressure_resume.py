@@ -23,6 +23,7 @@ from tools.resharding.nostop import (
     supervisor,
 )
 from tools.resharding.nostop.tests.test_diagnostics import CANDIDATE, DEFAULT, probe, traces
+from tools.resharding.nostop.tests.test_memory_budget import write_memory_logs
 
 
 def pressure_args(**overrides):
@@ -169,6 +170,7 @@ def test_resume_runs_only_l3_cycle_and_two_probes(monkeypatch, tmp_path, old_run
         active_stressors.append(NS(pid=100))
         return list(active_stressors)
     monkeypatch.setattr(pressure, "start_stress", start_stress)
+    monkeypatch.setattr(pressure, "check_pressure_memory", Mock())
     manager = NS(root=root, required=[], records=[], start=lambda *a: NS(name=a[1]),
                  exited=lambda p: False, stop=lambda p: active_stressors.remove(p))
     new_candidate = dict(src=3, dst=5, kind="weight", bytes=100)
@@ -188,7 +190,8 @@ def test_resume_runs_only_l3_cycle_and_two_probes(monkeypatch, tmp_path, old_run
             artifacts.write_json(root / f"{name}.json", result)
     manager.run = run
     args = pressure_args(mps_owner="yiwei", sample_seconds=0, checkpoint=str(checkpoint), profile=str(profile),
-                         cases="L3_W2_cycle", routes_from=source, timeout=60)
+                         cases="L3_W2_cycle", routes_from=source, timeout=60,
+                         memory_from=write_memory_logs(tmp_path / "l0_memory"))
     if memory_failure:
         with pytest.raises(RuntimeError, match="memory gate failed"):
             diagnostics.run_diagnostics(args, root, manager)
@@ -226,9 +229,41 @@ def test_partial_dry_run_uses_new_defaults_and_does_not_read_old_run(tmp_path):
     plan = json.loads(result.stdout)
     assert [r["name"] for r in plan["cases"]] == ["L3_W2_cycle"]
     assert plan["probe_order"] == ["L0", "L3"] and plan["routes_from"] == str(source)
-    assert plan["min_free_gib"] == 22
-    assert len(plan["pressure_commands"]) == 28
+    assert plan["min_free_gib"] is None  # No guessed admission threshold without L0 evidence.
+    assert plan["pressure_commands"] == []
     assert not out.exists()
+
+
+def test_impossible_observed_budget_stops_before_starting_gpu_tasks(monkeypatch, tmp_path, old_run):
+    source, profile, checkpoint, machine_info, _ = old_run
+    root = tmp_path / "blocked"
+    root.mkdir()
+    monkeypatch.setattr(machine, "machine_check", Mock(return_value=machine_info))
+    manager = Mock()
+    args = pressure_args(mps_owner="yiwei", sample_seconds=0, checkpoint=str(checkpoint), profile=str(profile),
+                         cases="L3_W2_cycle", routes_from=source, timeout=60, processes_per_pair=None,
+                         memory_from=write_memory_logs(tmp_path / "memory", 31922))
+    with pytest.raises(RuntimeError, match="no GPU task launched"):
+        diagnostics.run_diagnostics(args, root, manager)
+    manager.start.assert_not_called()
+    manager.run.assert_not_called()
+    report = diag_report.make_report(root)
+    budget = report["pressure"]["memory_budget"]
+    assert report["pressure"]["status"] == "failed"
+    assert budget["min_free_gib"] == 32.673828125 and budget["max_l3_processes"] is None
+    frozen = (root / "frozen.env").read_text()
+    assert "DIAGNOSTICS_READY=0" in frozen and "L3_PROCESSES_PER_PAIR=0" in frozen
+
+
+def test_dry_run_with_measured_evidence_is_cpu_only_and_resolves_budget(tmp_path):
+    source = write_memory_logs(tmp_path / "memory", 31922)
+    out = tmp_path / "unused"
+    result = subprocess.run([sys.executable, str(CODE / "tools/resharding/nostop/diagnostics.py"),
+        "diag", "--dry-run", "--memory-from", str(source), "--out", str(out)],
+        text=True, capture_output=True, check=True)
+    plan = json.loads(result.stdout)
+    assert plan["min_free_gib"] == 32.673828125 and not plan["memory_budget"]["feasible"]
+    assert plan["pressure_commands"] == [] and not out.exists()
 
 
 @pytest.mark.parametrize("spec", ["L3_W2_cycle,L3_W2_cycle", "typo", ""])

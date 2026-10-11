@@ -13,7 +13,16 @@ import pytest
 CODE = Path(__file__).resolve().parents[4]
 sys.path.insert(0, str(CODE))
 
-from tools.resharding.nostop import artifacts, common, diagnostics, machine, pressure, supervisor
+from tools.resharding.nostop import (
+    artifacts,
+    common,
+    diagnostics,
+    machine,
+    memory_budget,
+    pressure,
+    supervisor,
+)
+from tools.resharding.nostop.tests.test_memory_budget import write_memory_logs
 
 
 def gpu_queries(monkeypatch, *, memory=137, utilization=0, owner="yiwei", name="/usr/bin/nvidia-cuda-mps-server"):
@@ -124,6 +133,7 @@ def test_every_launch_rechecks_idle_before_own_pressure(monkeypatch, tmp_path, b
         active_stressors.append(process)
         return [process]
     monkeypatch.setattr(pressure, "start_stress", start_stress)
+    monkeypatch.setattr(pressure, "check_pressure_memory", Mock())
     manager = NS(required=[], records=[], start=lambda *a: NS(name=a[1]), exited=lambda p: False,
                  stop=lambda p: active_stressors.remove(p))
     def run(command, name, env, **kwargs):
@@ -139,8 +149,8 @@ def test_every_launch_rechecks_idle_before_own_pressure(monkeypatch, tmp_path, b
     profile = tmp_path / "input_profile.json"
     artifacts.write_json(profile, dict(world_size=8, matrix_gbps=[[100]*8 for _ in range(8)]))
     args = NS(sample_seconds=0, python="python", mps_owner="yiwei", checkpoint=str(tmp_path),
-              profile=str(profile), links="0:2", processes_per_pair=7, stress_bytes=256, stress_sync_every=16, timeout=60,
-              cases=None, routes_from=None, min_free_gib=22)
+              profile=str(profile), links="0:2", processes_per_pair=7, stress_bytes=common.STRESS_BYTES, stress_sync_every=16, timeout=60,
+              cases=None, routes_from=None, memory_from=write_memory_logs(tmp_path / "l0_memory"))
     if blocked_at:
         with pytest.raises(RuntimeError, match="busy"):
             diagnostics.run_diagnostics(args, tmp_path, manager)
@@ -156,7 +166,8 @@ def test_every_launch_rechecks_idle_before_own_pressure(monkeypatch, tmp_path, b
 def test_final_recovery_gates_completion_even_on_failure(monkeypatch, tmp_path, initial_code, restored, expected):
     artifacts.write_json(tmp_path / "machine.json", {})
     artifacts.write_json(tmp_path / "manifest.json", dict(execution_complete=False,
-        stress_links="0:2", l3_processes=7, stress_bytes=256, stress_sync_every=16, min_free_gib=22, profile="/data/profile.json"))
+        stress_links="0:2", l3_processes=7, stress_bytes=256, stress_sync_every=16, min_free_gib=22, profile="/data/profile.json",
+        memory_budget=memory_budget.estimate(20.5, "0:2", 56)))
     recover = Mock(return_value=restored)
     monkeypatch.setattr(machine, "check_memory_recovery", recover)
     status = {}
