@@ -170,7 +170,7 @@ def make_report(root):
         pressure = {"status": "inconclusive", "reason": f"missing/invalid bandwidth evidence: {error}"}
     if not manifest["execution_complete"]:
         pressure["status"] = "inconclusive"
-        pressure["reason"] = "diagnostic execution did not complete with live pressure/telemetry"
+        pressure["reason"] = "diagnostic execution, pressure/telemetry or final memory recovery did not complete successfully; see status.json"
     cold_status = "passed" if recommended else "not_isolated" if all(
         c["status"] != "inconclusive" for c in checks.values()) and not smoke_errors else "inconclusive"
     report = {"cold_start": {"status": cold_status,
