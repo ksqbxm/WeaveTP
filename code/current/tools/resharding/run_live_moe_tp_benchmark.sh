@@ -259,7 +259,7 @@ if [[ "$REPEAT_FORWARD" == "1" ]]; then
     LIVE_FEATURE_ARGS+=(--live-repeat-forward)
 fi
 
-ENTRYPOINT=examples/rl/benchmark_live_moe_tp.py
+ENTRYPOINT=${ENTRYPOINT_OVERRIDE:-examples/rl/benchmark_live_moe_tp.py}
 if [[ "${WEIGHT_CHECK_AUDIT:-0}" == "1" ]]; then
     if [[ "$MODEL_PRESET" != synthetic || "$RELEASE_STANDBY_WEIGHTS" != 1 || "${WEIGHT_STORAGE_AUDIT:-0}" == 1 ]]; then
         echo "Weight check audit requires synthetic, release enabled, and memory audit disabled" >&2

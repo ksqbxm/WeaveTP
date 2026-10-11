@@ -1085,6 +1085,9 @@ def _run_async_waves(
     completed_waves = 0
 
     while remaining:
+        diagnostic = getattr(args, "_nostop_diagnostic", None)
+        if diagnostic is not None:
+            diagnostic.check_wave_count(completed_waves)
         if hybrid_fast_path and completed_waves == 0:
             # The candidate route has already passed the residual-bandwidth
             # and foreground-pressure gate. Keep the fast path bounded by the
@@ -1120,12 +1123,16 @@ def _run_async_waves(
         scheduled_ids = [list(task_ids) if dist.get_rank() == 0 else None]
         dist.broadcast_object_list(scheduled_ids, src=0, group=control_group)
         task_ids = [int(task_id) for task_id in (scheduled_ids[0] or [])]
+        if diagnostic is not None and wave_task_limit:
+            task_ids = task_ids[:wave_task_limit]
         if not task_ids:
             break
         wave_tasks = _tasks_for_ids(tasks, task_ids)
         wave_plan = filter_plan_by_task_ids(plan, task_ids)
         wave_start = time.perf_counter()
         pressure_start = len(foreground_pressure)
+        if diagnostic is not None:
+            diagnostic.wave_begin(completed_waves, len(task_ids))
         with torch.cuda.stream(service.producer_stream) if args.live_release_standby_weights else nullcontext():
             transaction = launch_reshard_plan(
                 wave_plan,
@@ -1143,7 +1150,7 @@ def _run_async_waves(
         dist.barrier(group=control_group)
         copy_stats = dict(transaction.metadata.get("copy_service", {}))
         overlap_steps = 0
-        while True:
+        while not (diagnostic is not None and diagnostic.stall_pause):
             _, step_ms = _decode(
                 active_model,
                 active_context,
@@ -1212,6 +1219,8 @@ def _run_async_waves(
         for task_id in task_ids:
             remaining.pop(task_id, None)
         completed_waves += 1
+        if diagnostic is not None:
+            diagnostic.wave_end()
 
     wall_s = _all_max(time.perf_counter() - wall_start, control_group)
     tpot_mean_ms = sum(tpot_ms) / len(tpot_ms) if tpot_ms else 0.0
@@ -1856,7 +1865,16 @@ def run_live_benchmark() -> None:
             foreground_tpot_ms[(dst_tp, active_experts, pressure_ranks)] = (
                 phase_dst_tpot_ms
             )
+        diagnostic = getattr(args, "_nostop_diagnostic", None)
+        if diagnostic is not None:
+            token_counter = diagnostic.before_switch(
+                switch_index, active_tp, src_model, src_context, dst_model, dst_context,
+                weights, services, control_group, baseline_plan_2_to_4, plan_2_to_4,
+                dst_bundle, token_counter,
+            )
         switch_start = time.perf_counter()
+        if diagnostic is not None:
+            diagnostic.mark("switch_trigger")
         replan_s = 0.0
         replan_wait_s = 0.0
         replanned = False
@@ -2095,6 +2113,9 @@ def run_live_benchmark() -> None:
             hybrid_fast_path=bool(hybrid_decision["enabled"]),
             hybrid_fast_path_reason=hybrid_decision,
         )
+        if diagnostic is not None:
+            diagnostic.mark("base_done")
+            diagnostic.phase = "weight_check"
 
         if args.live_release_standby_weights:
             check_start = time.perf_counter()
@@ -2105,7 +2126,8 @@ def run_live_benchmark() -> None:
                 weight_checked = torch.cuda.Event()
                 weight_checked.record()
             check_tpot_ms = []
-            for _ in range(args.live_max_overlap_steps):
+            for _ in range(0 if diagnostic is not None and diagnostic.stall_pause
+                           else args.live_max_overlap_steps):
                 if _all_ready(weight_checked.query(), control_group):
                     break
                 _, step_ms = _decode(source_model, source_context, args, token_value=token_counter)
@@ -2114,6 +2136,8 @@ def run_live_benchmark() -> None:
             weight_check_overlap_s = time.perf_counter() - check_start
 
         delta_end = source_context.sequence_len_offset
+        if diagnostic is not None:
+            diagnostic.phase = "delta"
         delta_plan = restrict_plan_sequence(
             full_plan,
             start=snapshot_end,
@@ -2152,6 +2176,8 @@ def run_live_benchmark() -> None:
                     )
                     delta_transaction.wait().commit()
                 torch.cuda.current_stream().synchronize()
+        if diagnostic is not None:
+            diagnostic.mark("delta_done")
         if args.live_release_standby_weights:
             check_wait_start = time.perf_counter()
             weight_checked.synchronize()
@@ -2208,6 +2234,8 @@ def run_live_benchmark() -> None:
         pointer_start = time.perf_counter()
         active_tp = 2 if args.live_repeat_forward and direction == "2->4" else next_tp
         pointer_switch_s = _all_max(time.perf_counter() - pointer_start, control_group)
+        if diagnostic is not None:
+            diagnostic.mark("target_ready")
         (
             validation_diff,
             token_counter,
@@ -2304,6 +2332,8 @@ def run_live_benchmark() -> None:
             ),
         }
         records.append(record)
+        if diagnostic is not None:
+            diagnostic.remember_plan(base_plan, delta_plan, target_bundle)
         if parallel_groups is not None:
             # Save existing immutable plan references only, after switch_wall_s.
             # All metadata scans and communication happen after the final switch.
