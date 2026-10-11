@@ -1,0 +1,18 @@
+
+## 重启：重载 35s，重新 prefill 速度 ×1.0
+  weavetp   总  183.1 min | decode=99.1 prefill=21.8 decode_throttled=60.4 drain_before_expand=1.5 switch_decode=0.2 stall_weights=0.2 | 切换 [('2->4', 6, 22), ('4->2', 16, 154)]
+  restart   总  185.3 min | decode=103.9 prefill=25.2 decode_throttled=53.9 stall_reload=1.2 stall_reprefill=1.1 | 切换 [('2->4', 78, 21), ('4->2', 57, 150)]
+  fixed_tp2 总  218.3 min | decode=189.7 prefill=28.6 | 切换 []
+  WeaveTP ÷ 重启 = 1.012
+
+## 重启：重载 120s，重新 prefill 速度 ×0.5
+  weavetp   总  183.1 min | decode=99.1 prefill=21.8 decode_throttled=60.4 drain_before_expand=1.5 switch_decode=0.2 stall_weights=0.2 | 切换 [('2->4', 6, 22), ('4->2', 16, 154)]
+  restart   总  189.2 min | decode=103.9 prefill=25.2 decode_throttled=53.9 stall_reload=4.0 stall_reprefill=2.2 | 切换 [('2->4', 206, 21), ('4->2', 164, 152)]
+  fixed_tp2 总  218.3 min | decode=189.7 prefill=28.6 | 切换 []
+  WeaveTP ÷ 重启 = 1.034
+
+## 重启：重载 300s，重新 prefill 速度 ×0.25
+  weavetp   总  183.1 min | decode=99.1 prefill=21.8 decode_throttled=60.4 drain_before_expand=1.5 switch_decode=0.2 stall_weights=0.2 | 切换 [('2->4', 6, 22), ('4->2', 16, 154)]
+  restart   总  197.4 min | decode=103.9 prefill=25.2 decode_throttled=53.9 stall_reload=10.0 stall_reprefill=4.3 | 切换 [('2->4', 472, 21), ('4->2', 389, 156)]
+  fixed_tp2 总  218.3 min | decode=189.7 prefill=28.6 | 切换 []
+  WeaveTP ÷ 重启 = 1.078
