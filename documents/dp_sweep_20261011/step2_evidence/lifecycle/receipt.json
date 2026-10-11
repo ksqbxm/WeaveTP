@@ -1,0 +1,29 @@
+{
+  "command": [
+    "C:\\Users\\ksqbx\\miniforge3\\python.exe",
+    "-B",
+    "-m",
+    "pytest",
+    "-q",
+    "-o",
+    "addopts=",
+    "-p",
+    "no:cacheprovider",
+    "--confcutdir=tests/unit_tests/resharding",
+    "--tb=short",
+    "--junitxml=C:\\data\\weavetp-dp-sweep-s2-lifecycle-20261011\\lifecycle.xml",
+    "tests/unit_tests/resharding/test_dp_sweep_tp.py",
+    "tests/unit_tests/resharding/test_live_storage_lifecycle.py"
+  ],
+  "cwd": "C:\\Users\\ksqbx\\.codex\\worktrees\\dp-sweep\\WeaveTP_\u4ee3\u7801\u4e0e\u5b9e\u9a8c\u8d44\u6599_20260920\\code\\current",
+  "exit_code": 0,
+  "source_sha256": {
+    "tests/unit_tests/resharding/test_dp_sweep_tp.py": "35855e5a1e28d82ab787ded123b89cea46ad5f153c70fbd534851282033d0408",
+    "tests/unit_tests/resharding/test_live_storage_lifecycle.py": "a5a4f126f3f51f6d8224f86b1e02d9b0cca6965001327d5f94cc7447732df1d8"
+  },
+  "output_sha256": {
+    "lifecycle.xml": "a3b68bba254fde663c91eacca962cf11405a4975158bd0244b2bc4868c2238f7",
+    "stderr.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stdout.log": "05ef91ac3d5379072807b62acd989d671bffbbbd06322453814cc8bfdaa1284e"
+  }
+}

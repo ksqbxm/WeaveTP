@@ -1,0 +1,2 @@
+WARN No valid certificates found in `SSL_CERT_DIR`: C:\Users\ksqbx\miniforge3\Library\ssl\certs. No default certificates will be trusted.
+WARN `--no-project` was provided, but no project was found

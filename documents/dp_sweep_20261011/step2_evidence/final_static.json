@@ -1,0 +1,120 @@
+{
+  "code_commit": "014d35c5c4afeae2e93e101ad42b7326fc6f6bac",
+  "baseline": "698703bc344eae53f097bcc86a78096f980ecf80",
+  "main": "f7d555998b45756998465924d733fd70e553d6b4",
+  "commands": [
+    {
+      "command": [
+        "C:/Users/ksqbx/AppData/Local/Temp/weavetp-storage-tools/bin/uv.exe",
+        "run",
+        "--no-project",
+        "--python",
+        "C:/Users/ksqbx/miniforge3/python.exe",
+        "--no-python-downloads",
+        "python",
+        "-m",
+        "isort",
+        "--settings-path",
+        "code/current/pyproject.toml",
+        "--src-path",
+        "code/current",
+        "-p",
+        "megatron",
+        "-p",
+        "tools",
+        "--check-only",
+        "code/current/examples/rl/benchmark_live_moe_tp.py",
+        "code/current/megatron/core/resharding/live.py",
+        "code/current/tests/unit_tests/resharding/test_dp_sweep.py",
+        "code/current/tests/unit_tests/resharding/test_dp_sweep_coordinator.py",
+        "code/current/tests/unit_tests/resharding/test_dp_sweep_groups.py",
+        "code/current/tests/unit_tests/resharding/test_dp_sweep_tp.py",
+        "code/current/tests/unit_tests/resharding/test_live_defaults.py",
+        "code/current/tests/unit_tests/resharding/test_live_storage_lifecycle.py",
+        "code/current/tools/resharding/weavetp_observations.py",
+        "documents/dp_sweep_20261011/check_cpu.py"
+      ],
+      "exit_code": 0
+    },
+    {
+      "command": [
+        "git",
+        "diff",
+        "--check"
+      ],
+      "exit_code": 0
+    },
+    {
+      "command": [
+        "git",
+        "diff",
+        "--cached",
+        "--check"
+      ],
+      "exit_code": 0
+    }
+  ],
+  "sources": {
+    "code/current/examples/rl/benchmark_live_moe_tp.py": {
+      "worktree_sha256": "5580c9401bc073d08da31e85718701216928c5c642a32dbbfd9a234a25c6da82",
+      "commit_blob_sha256": "98381f606278a8e199b27b457f1f1e934230858e26d74099df6f05abf9f3cf03"
+    },
+    "code/current/megatron/core/resharding/live.py": {
+      "worktree_sha256": "61bed73826a58eb5411584b4bbcbd8a03aed780e1731c703dbbb81ef64c07c74",
+      "commit_blob_sha256": "375b119e50fdec6f999bf9377ff2cc9118c4e28f333dda196b8dbe9d689ea334"
+    },
+    "code/current/tests/unit_tests/resharding/test_dp_sweep.py": {
+      "worktree_sha256": "c7874c3c901dd255cecac497dd6e952dc2b58564993639fef2a3a13dc87f34ba",
+      "commit_blob_sha256": "c7874c3c901dd255cecac497dd6e952dc2b58564993639fef2a3a13dc87f34ba"
+    },
+    "code/current/tests/unit_tests/resharding/test_dp_sweep_coordinator.py": {
+      "worktree_sha256": "a0e0d4f30b496cc1fb1ff57c30329be9a2b053e9068e6936814486af7872bc86",
+      "commit_blob_sha256": "a0e0d4f30b496cc1fb1ff57c30329be9a2b053e9068e6936814486af7872bc86"
+    },
+    "code/current/tests/unit_tests/resharding/test_dp_sweep_groups.py": {
+      "worktree_sha256": "450c11a3928ab2f97182cf3f2da926f33d810559c1ee4dac4f7c7e0e982558bf",
+      "commit_blob_sha256": "450c11a3928ab2f97182cf3f2da926f33d810559c1ee4dac4f7c7e0e982558bf"
+    },
+    "code/current/tests/unit_tests/resharding/test_dp_sweep_tp.py": {
+      "worktree_sha256": "35855e5a1e28d82ab787ded123b89cea46ad5f153c70fbd534851282033d0408",
+      "commit_blob_sha256": "35855e5a1e28d82ab787ded123b89cea46ad5f153c70fbd534851282033d0408"
+    },
+    "code/current/tests/unit_tests/resharding/test_live_defaults.py": {
+      "worktree_sha256": "9b3ac227e4d846e7523d74235e839e4811c32777239c4a3b8735bedadb84ff74",
+      "commit_blob_sha256": "17b707a3132aac499c699fe6930c76337077c81f2462aa61221eeda2368647db"
+    },
+    "code/current/tests/unit_tests/resharding/test_live_storage_lifecycle.py": {
+      "worktree_sha256": "a5a4f126f3f51f6d8224f86b1e02d9b0cca6965001327d5f94cc7447732df1d8",
+      "commit_blob_sha256": "a5a4f126f3f51f6d8224f86b1e02d9b0cca6965001327d5f94cc7447732df1d8"
+    },
+    "code/current/tools/resharding/README_dp_sweep.md": {
+      "worktree_sha256": "f675dd650566d523703c1190dbd41a50784d9e0f586aa31aebfb83bb48d11eea",
+      "commit_blob_sha256": "f675dd650566d523703c1190dbd41a50784d9e0f586aa31aebfb83bb48d11eea"
+    },
+    "code/current/tools/resharding/run_deepseek_v2_lite_live_benchmark.sh": {
+      "worktree_sha256": "22dbd2d17b07c26025140cf99cbdcaa2d7b2cf77bfc0826dfa3dd924cb50f0eb",
+      "commit_blob_sha256": "22dbd2d17b07c26025140cf99cbdcaa2d7b2cf77bfc0826dfa3dd924cb50f0eb"
+    },
+    "code/current/tools/resharding/run_live_moe_tp_benchmark.sh": {
+      "worktree_sha256": "8bffb65d9e5d26aa8bb07def605e64c8d6c126cf0698d9c42ba3d02eaca225c8",
+      "commit_blob_sha256": "8bffb65d9e5d26aa8bb07def605e64c8d6c126cf0698d9c42ba3d02eaca225c8"
+    },
+    "code/current/tools/resharding/weavetp_observations.py": {
+      "worktree_sha256": "00e0f7f9161f21883ba53658638f23d43d3515f8f64dd2815713976a48392043",
+      "commit_blob_sha256": "00e0f7f9161f21883ba53658638f23d43d3515f8f64dd2815713976a48392043"
+    },
+    "documents/dp_sweep_20261011/check_cpu.py": {
+      "worktree_sha256": "b0950cf9d575a5014421bde27c1f93bb7862370dd5c39082dd471298112e4f25",
+      "commit_blob_sha256": "b0950cf9d575a5014421bde27c1f93bb7862370dd5c39082dd471298112e4f25"
+    },
+    "documents/dp_sweep_20261011/server_commands.md": {
+      "worktree_sha256": "90430b7d7a6293c012d597f9d868018b3c1cc515a60846312622f18e60bab3a9",
+      "commit_blob_sha256": "90430b7d7a6293c012d597f9d868018b3c1cc515a60846312622f18e60bab3a9"
+    },
+    "documents/dp_sweep_20261011/task.md": {
+      "worktree_sha256": "932c85d467ea015c0fcf41f1234281e4ea3d91c6047302d2c80fe468219330de",
+      "commit_blob_sha256": "932c85d467ea015c0fcf41f1234281e4ea3d91c6047302d2c80fe468219330de"
+    }
+  },
+  "ok": true
+}

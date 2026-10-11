@@ -1,0 +1,8 @@
+{
+  "baseline": "698703bc344eae53f097bcc86a78096f980ecf80",
+  "equal": true,
+  "bytes": 277964,
+  "current_sha256": "54f79a7b5142059ac459c35f395d94a952dd9eb3f94f3ef2d9b9eb08bc77fbab",
+  "baseline_sha256": "54f79a7b5142059ac459c35f395d94a952dd9eb3f94f3ef2d9b9eb08bc77fbab",
+  "fixture": "W16 complete parallel_groups plus four switches with all-rank merged observations; json.dumps(indent=2), UTF-8, no normalization"
+}
