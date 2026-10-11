@@ -2,6 +2,8 @@
 
 ## 2026-10-11 OOM 复核与显存准入修正
 
+实现 SHA：`30772adaf35a2e83fde7098d9b0eb50930014df2`。后续 README SHA 固定提交不改变实现。
+
 **当前证据不支持继续 L3 GPU 实验。** 本次修复显存预算、冻结校验与启动前拒绝，不声称已降低模型显存或解决 MoE prefill 的 OOM。`benchmark.py` 和 `benchmark_live_moe_tp.py` 相对 `bb60cf9`（以及 `8ae22e7`）均为零 diff；Decode、迁移、cutover、CUDA Event/同步路径不变，不启用 `expandable_segments`。
 
 调用栈定位在初始目标 TP4 的 `_prefill(dst_model, dst_context, args)`：`TransformerLayer._forward_mlp → MoELayer.routed_experts_compute → MoEAlltoAllTokenDispatcher.combine_preprocess → reduce_scatter_to_sequence_parallel_region → torch.distributed.reduce_scatter`。通信输入是专家输出 `hidden_states.to(self.probs.dtype)`，属于 MoE token 合并阶段。1.49 GiB 分配失败发生在 collective 调用内部，已经越过 `torch.empty_like(input_tensor_list[rank])`；它不是 GPT output logits。现有 traceback 没有具体 transformer 层序号、张量 shape 或 C++ 分配栈，不能把内部临时 buffer 的形状写成已验证事实。
@@ -31,8 +33,9 @@ NVML 物理总量为 32,607 MiB（31.8427734375 GiB），也低于新门槛；�
 ```bash
 source /data/ubuntu/lxh/weavetp/env.sh
 export REPO PYTHON MPS_OWNER=yiwei
+export NOSTOP_IMPLEMENTATION_SHA=30772adaf35a2e83fde7098d9b0eb50930014df2
 git -C "$REPO" fetch origin codex/nostop-diagnostics
-git -C "$REPO" checkout --detach origin/codex/nostop-diagnostics
+git -C "$REPO" checkout --detach "$NOSTOP_IMPLEMENTATION_SHA"
 export NOSTOP="$REPO/code/current/tools/resharding/nostop"
 # 661167f 那次完整 run，含 process_memory.log / telemetry.log。
 export L0_RUN=/data/ubuntu/lxh/weavetp/nostop/diag_SL3060_20261011T102349Z/run
@@ -83,7 +86,7 @@ cd "$REPO"
 
 ## 第 3 步：冻结配置后的正式实验入口
 
-当前重构实现 SHA：`bb60cf9e4eaa52a944aab93b3d43b95994eb231a`，188 项 CPU 测试通过；后续 README 提交不改变代码实现。第 3 步最初实现为 `e9348a2e64c18f2ebc5f9efaa82d184bd5d3447a`，其冻结协议与运行行为保持不变。
+前一版重构实现 SHA：`bb60cf9e4eaa52a944aab93b3d43b95994eb231a`，当时 188 项 CPU 测试通过。当前实现见上方显存准入修正，第 3 步最初实现为 `e9348a2e64c18f2ebc5f9efaa82d184bd5d3447a`。
 
 `formal.sh` → `formal.py` 复用第 1 步的 `Processes` supervisor、MPS 空闲规则、stressor 设备隔离、显存门槛及 `probe.py`；不修改 benchmark/GPU 执行路径。`benchmark.py`、`benchmark_live_moe_tp.py` 相对 `8ae22e7` 的 git diff 必须为空。本次交付仅完成脚本和 CPU 测试，不代表已执行 24 次 GPU 实验。
 
@@ -115,7 +118,7 @@ Launch 期间每秒查询 compute-apps，保存 PID、属主、进程名、每�
 source /data/ubuntu/lxh/weavetp/env.sh
 export REPO PYTHON
 export MPS_OWNER=yiwei
-export FORMAL_IMPLEMENTATION_SHA=bb60cf9e4eaa52a944aab93b3d43b95994eb231a
+export FORMAL_IMPLEMENTATION_SHA=30772adaf35a2e83fde7098d9b0eb50930014df2
 git -C "$REPO" fetch origin codex/nostop-diagnostics
 git -C "$REPO" checkout --detach "$FORMAL_IMPLEMENTATION_SHA"
 export NOSTOP="$REPO/code/current/tools/resharding/nostop"
