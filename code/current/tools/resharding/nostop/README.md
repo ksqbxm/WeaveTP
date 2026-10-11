@@ -37,7 +37,7 @@ cd "$REPO"
 
 ## 第 3 步：冻结配置后的正式实验入口
 
-实现 SHA：`e9348a2e64c18f2ebc5f9efaa82d184bd5d3447a`。174 项 CPU 测试通过，其中第 3 步新增 44 项；后续 README 提交不改变代码实现。
+当前重构实现 SHA：`bb60cf9e4eaa52a944aab93b3d43b95994eb231a`，188 项 CPU 测试通过；后续 README 提交不改变代码实现。第 3 步最初实现为 `e9348a2e64c18f2ebc5f9efaa82d184bd5d3447a`，其冻结协议与运行行为保持不变。
 
 `formal.sh` → `formal.py` 复用第 1 步的 `Processes` supervisor、MPS 空闲规则、stressor 设备隔离、显存门槛及 `probe.py`；不修改 benchmark/GPU 执行路径。`benchmark.py`、`benchmark_live_moe_tp.py` 相对 `8ae22e7` 的 git diff 必须为空。本次交付仅完成脚本和 CPU 测试，不代表已执行 24 次 GPU 实验。
 
@@ -69,7 +69,7 @@ Launch 期间每秒查询 compute-apps，保存 PID、属主、进程名、每�
 source /data/ubuntu/lxh/weavetp/env.sh
 export REPO PYTHON
 export MPS_OWNER=yiwei
-export FORMAL_IMPLEMENTATION_SHA=e9348a2e64c18f2ebc5f9efaa82d184bd5d3447a
+export FORMAL_IMPLEMENTATION_SHA=bb60cf9e4eaa52a944aab93b3d43b95994eb231a
 git -C "$REPO" fetch origin codex/nostop-diagnostics
 git -C "$REPO" checkout --detach "$FORMAL_IMPLEMENTATION_SHA"
 export NOSTOP="$REPO/code/current/tools/resharding/nostop"
