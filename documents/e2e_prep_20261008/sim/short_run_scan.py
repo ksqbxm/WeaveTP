@@ -26,18 +26,19 @@ def build(T, m, k, seed=7):
     return reqs
 
 
-print("显存 | T | m | k | 对TP2 对TP4 较小值 对Llumnix | WeaveTP 时长")
-for mem in (34.19, 24.0):
-    E.HW['M'] = mem * 1e9
-    for T in (3000, 4000, 5000, 6000, 8000):
-        for m in (1.0, 1.5, 2.0):
-            for k in (2, 3.3, 5):
-                reqs = build(T, m, k)
-                best = None
-                for mode in ('throttle', 'after_long'):
-                    res, _, _ = E.run_all(reqs, b_max=256, methods=BARS, shrink_mode=mode, plan_mode='own')
-                    w = res['weavetp']
-                    r = [w.thr / res['fixed_tp2'].thr, w.thr / res['fixed_tp4'].thr, w.thr / res['llumnix'].thr, w.time_s / 3600]
-                    if best is None or min(r[0], r[1]) > min(best[0], best[1]):
-                        best = r
-                print(f"{mem:5.2f} | {T//1000}k | {m} | {k} | {best[0]:.3f} {best[1]:.3f} {min(best[0], best[1]):.3f} {best[2]:.3f} | {best[3]:.2f} h", flush=True)
+if __name__ == "__main__":
+  print("显存 | T | m | k | 对TP2 对TP4 较小值 对Llumnix | WeaveTP 时长")
+  for mem in (34.19, 24.0):
+      E.HW['M'] = mem * 1e9
+      for T in (3000, 4000, 5000, 6000, 8000):
+          for m in (1.0, 1.5, 2.0):
+              for k in (2, 3.3, 5):
+                  reqs = build(T, m, k)
+                  best = None
+                  for mode in ('throttle', 'after_long'):
+                      res, _, _ = E.run_all(reqs, b_max=256, methods=BARS, shrink_mode=mode, plan_mode='own')
+                      w = res['weavetp']
+                      r = [w.thr / res['fixed_tp2'].thr, w.thr / res['fixed_tp4'].thr, w.thr / res['llumnix'].thr, w.time_s / 3600]
+                      if best is None or min(r[0], r[1]) > min(best[0], best[1]):
+                          best = r
+                  print(f"{mem:5.2f} | {T//1000}k | {m} | {k} | {best[0]:.3f} {best[1]:.3f} {min(best[0], best[1]):.3f} {best[2]:.3f} | {best[3]:.2f} h", flush=True)
