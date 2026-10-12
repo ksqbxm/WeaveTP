@@ -2,6 +2,8 @@
 
 ## 2026-10-12：8-token prefill、合成 KV 与 torch 显存预算
 
+实现 SHA：`8d22890be3e4639165571e15382c2eff656202a5`。
+
 撤回 30772ad 中从 NVML 进程峰值推导的“无合法 L3 进程数”结论，并删除对应冻结建议。NVML 包含 caching allocator 保留的缓存，旧 L0 的 31.17 GiB 不能作为实际需求。本次不推算新的实测峰值；必须重新跑新工作负载的 L0。
 
 本次 **213 项 CPU 测试通过**，README 的 12 段 Bash 命令通过语法检查。覆盖 TP2/TP4 内容逐 bit 一致、初始验证输入、cycle 恢复、全局 RNG 不变、各阶段 torch 峰值/context 预算、拒绝旧工作负载证据、无旧文件的 L0 启动及后续 L3 准入。未执行新的 GPU 测量。
@@ -35,7 +37,7 @@
 source /data/ubuntu/lxh/weavetp/env.sh
 export REPO PYTHON MPS_OWNER=yiwei
 git -C "$REPO" fetch origin codex/nostop-diagnostics
-git -C "$REPO" checkout --detach origin/codex/nostop-diagnostics
+git -C "$REPO" checkout --detach 8d22890be3e4639165571e15382c2eff656202a5
 export NOSTOP="$REPO/code/current/tools/resharding/nostop"
 export DIAG_OUT=/data/ubuntu/lxh/weavetp/nostop/diag_synthetic_$(date +%Y%m%d_%H%M%S)
 bash "$NOSTOP/check_machine.sh" --dry-run
@@ -130,7 +132,7 @@ Launch 期间每秒查询 compute-apps，保存 PID、属主、进程名、每�
 source /data/ubuntu/lxh/weavetp/env.sh
 export REPO PYTHON
 export MPS_OWNER=yiwei
-export FORMAL_IMPLEMENTATION_SHA=origin/codex/nostop-diagnostics
+export FORMAL_IMPLEMENTATION_SHA=8d22890be3e4639165571e15382c2eff656202a5
 git -C "$REPO" fetch origin codex/nostop-diagnostics
 git -C "$REPO" checkout --detach "$FORMAL_IMPLEMENTATION_SHA"
 export NOSTOP="$REPO/code/current/tools/resharding/nostop"
