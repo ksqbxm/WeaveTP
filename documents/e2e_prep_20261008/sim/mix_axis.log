@@ -3,3 +3,16 @@
 k= 0.5 长请求 token 占比 39% | 对TP2 1.31 对TP4 1.04 对Llumnix 1.51 | 固定TP2时长/固定TP4时长 1.27 | W 3.9 h
 k= 1.0 长请求 token 占比 24% | 对TP2 1.30 对TP4 1.07 对Llumnix 1.50 | 固定TP2时长/固定TP4时长 1.22 | W 4.1 h
 k= 2.0 长请求 token 占比 14% | 对TP2 1.27 对TP4 1.13 对Llumnix 1.46 | 固定TP2时长/固定TP4时长 1.12 | W 4.5 h
+k= 3.3 长请求 token 占比 9% | 对TP2 1.23 对TP4 1.21 对Llumnix 1.32 | 固定TP2时长/固定TP4时长 1.01 | W 5.0 h
+k= 5.0 长请求 token 占比 6% | 对TP2 1.20 对TP4 1.30 对Llumnix 1.45 | 固定TP2时长/固定TP4时长 0.92 | W 5.6 h
+k= 8.0 长请求 token 占比 4% | 对TP2 1.15 对TP4 1.41 对Llumnix 1.33 | 固定TP2时长/固定TP4时长 0.81 | W 6.8 h
+k=12.0 长请求 token 占比 3% | 对TP2 1.12 对TP4 1.51 对Llumnix 1.28 | 固定TP2时长/固定TP4时长 0.74 | W 8.4 h
+
+## 长段 26k
+k= 0.5 长请求 token 占比 33% | 对TP2 1.34 对TP4 1.04 对Llumnix 1.75 | 固定TP2时长/固定TP4时长 1.29 | W 5.0 h
+k= 1.0 长请求 token 占比 20% | 对TP2 1.33 对TP4 1.07 对Llumnix 1.73 | 固定TP2时长/固定TP4时长 1.24 | W 5.3 h
+k= 2.0 长请求 token 占比 11% | 对TP2 1.31 对TP4 1.14 对Llumnix 1.67 | 固定TP2时长/固定TP4时长 1.15 | W 5.8 h
+k= 3.3 长请求 token 占比 7% | 对TP2 1.26 对TP4 1.21 对Llumnix 1.59 | 固定TP2时长/固定TP4时长 1.04 | W 6.5 h
+k= 5.0 长请求 token 占比 5% | 对TP2 1.23 对TP4 1.30 对Llumnix 1.53 | 固定TP2时长/固定TP4时长 0.94 | W 7.3 h
+k= 8.0 长请求 token 占比 3% | 对TP2 1.19 对TP4 1.41 对Llumnix 1.45 | 固定TP2时长/固定TP4时长 0.84 | W 8.9 h
+k=12.0 长请求 token 占比 2% | 对TP2 1.16 对TP4 1.51 对Llumnix 1.40 | 固定TP2时长/固定TP4时长 0.77 | W 10.9 h
