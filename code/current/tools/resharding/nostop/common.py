@@ -1,7 +1,14 @@
-"""CPU-only configuration and arithmetic for the six-run diagnostic (not serving)."""
+"""CPU-only configuration and arithmetic for the diagnostic (not serving)."""
 
 MAX_WAVES = 64
 STRESS_BYTES = 64 * 1024 * 1024
+WORKLOAD_ID = "short8-synthetic2048-v1"
+KV_SEED = 20261012
+
+
+def kv_workload():
+    return dict(id=WORKLOAD_ID, real_prefill_tokens=8, kv_tokens=2048, seed=KV_SEED,
+                synthetic_distribution="N(0, 0.02), bf16", description="合成 KV 内容，长度 2048 真实")
 
 
 def diagnostic_cases(spec=None):
@@ -9,7 +16,7 @@ def diagnostic_cases(spec=None):
              ("L0_W2_cycle", "L0", "W2", "cycle"), ("L0_W2_independent", "L0", "W2", "independent"),
              ("L3_W2_cycle", "L3", "W2", "cycle"), ("L3_W2_independent", "L3", "W2", "independent")]
     if spec is None:
-        return cases
+        return [c for c in cases if c[3] == "cycle"]
     names = spec.split(",")
     if len(set(names)) != len(names) or not set(names) <= {c[0] for c in cases}:
         raise ValueError("--cases must contain distinct, known benchmark case names")
@@ -18,7 +25,7 @@ def diagnostic_cases(spec=None):
 
 def capacity_budget():
     # One allocation for all four combinations: cycle/W2 has both maxima.
-    switches, kv_tokens, prompt_tokens, overlap, extra = 3, 2048, 2036, 16, 10
+    switches, kv_tokens, prompt_tokens, overlap, extra = 3, 2048, 8, 16, 10
     # Both warmup validations advance each context once. Before the measured
     # expansion, the prompt prefix is restored, so earlier growth is NOT live.
     per_switch = MAX_WAVES * overlap + overlap
@@ -30,7 +37,7 @@ def capacity_budget():
     required = max(high_water, worst_case + 1)
     return {"warmup_peak_tokens": warmup_peak, "measured_peak_tokens": measured_peak,
             "high_water_tokens": high_water, "benchmark_worst_case_tokens": worst_case,
-            "max_position_embeddings": ((required + 127) // 128) * 128,
+            "max_position_embeddings": max(5248, ((required + 127) // 128) * 128),
             "switches": switches, "kv_tokens": kv_tokens}
 
 
@@ -43,6 +50,7 @@ def method_env(method, mode, profile, output):
     capacity = capacity_budget()["max_position_embeddings"]
     result = dict(
         ENTRYPOINT_OVERRIDE="tools/resharding/nostop/benchmark.py",
+        NOSTOP_WORKLOAD=WORKLOAD_ID,
         NOSTOP_COLD_MODE=mode, STALL_PAUSE="0" if w2 else "1",
         CUDA_VISIBLE_DEVICES="0,1,2,3,4,5,6,7", NNODES="1", NODE_RANK="0",
         NPROC_PER_NODE="8", MICRO_BATCH_SIZE="4", GLOBAL_BATCH_SIZE="16",
@@ -62,7 +70,7 @@ def method_env(method, mode, profile, output):
         PACK_REROUTED_ONLY="0", EMULATE_NONCOLLOCATED_SOURCES="0", KV_REQUEST_IDENTITY="1",
         WEIGHT_STORAGE_AUDIT="0", WEIGHT_CHECK_AUDIT="0", WEIGHT_BITWISE_AUDIT="0",
         ROUTER_MODE="fixed-hot", ACTIVE_EXPERTS="0,1,2,3,4,5", ACTIVE_EXPERT_PHASES="",
-        PRESSURE_RANK_PHASES="", HOTSPOT_PRESSURE_BYTES="0", PROMPT_TOKENS="2036",
+        PRESSURE_RANK_PHASES="", HOTSPOT_PRESSURE_BYTES="0", PROMPT_TOKENS="8",
         DIAGNOSE_EQUIVALENCE="0",
         P2P_ORDER="peer-size-desc", LOGIT_VALIDATION_MODE="bf16-relative",
         LOGIT_MAX_NRMSE="0.4", LOGIT_MIN_COSINE="0.93", LOGIT_MIN_TOP1_AGREEMENT="0.0",

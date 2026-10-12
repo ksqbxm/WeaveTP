@@ -114,12 +114,12 @@ def pressure_check(low, high, default_rows, candidate_rows):
 
 def make_report(root):
     root = Path(root)
-    manifest = json.loads((root / "manifest.json").read_text())
+    manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
     checks = {}
     smoke_errors = {}
     for method in ("W2", "B0"):
         case = root / f"smoke_L0_{method}"
-        if not (case / "exit_code.txt").exists() or (case / "exit_code.txt").read_text().strip() != "0":
+        if not (case / "exit_code.txt").exists() or (case / "exit_code.txt").read_text(encoding="utf-8").strip() != "0":
             smoke_errors[method] = "smoke launch incomplete"
         else:
             try:
@@ -137,7 +137,7 @@ def make_report(root):
             case = root / name
             if mode == "independent" and not case.exists():
                 continue  # Independent evidence is optional, never rerun to freeze cycle.
-            if not (case / "exit_code.txt").exists() or (case / "exit_code.txt").read_text().strip() != "0":
+            if not (case / "exit_code.txt").exists() or (case / "exit_code.txt").read_text(encoding="utf-8").strip() != "0":
                 checks[name] = {"status": "inconclusive", "reason": "launch did not complete successfully"}
                 continue
             try:
@@ -151,9 +151,9 @@ def make_report(root):
     cycle_ok = all(checks[f"{level}_W2_cycle"]["status"] == "passed" for level in ("L0", "L3"))
     recommended = "cycle" if cycle_ok and not smoke_errors else None
     try:
-        routes = json.loads((root / "probe_routes.json").read_text())
-        pressure = pressure_check(json.loads((root / "probe_L0.json").read_text()),
-                                  json.loads((root / "probe_L3.json").read_text()),
+        routes = json.loads((root / "probe_routes.json").read_text(encoding="utf-8"))
+        pressure = pressure_check(json.loads((root / "probe_L0.json").read_text(encoding="utf-8")),
+                                  json.loads((root / "probe_L3.json").read_text(encoding="utf-8")),
                                   routes["default"], routes["candidate"])
     except (FileNotFoundError, ValueError, KeyError) as error:
         pressure = {"status": "inconclusive", "reason": f"missing/invalid bandwidth evidence: {error}"}
@@ -162,7 +162,9 @@ def make_report(root):
         pressure["reason"] = "diagnostic execution, pressure/telemetry or final memory recovery did not complete successfully; see status.json"
     budget = manifest["memory_budget"]
     pressure["memory_budget"] = budget
-    if not budget["feasible"]:
+    if budget is None:
+        pressure.update(status="inconclusive", reason="new L0 torch memory measurements not yet available")
+    elif not budget["feasible"]:
         pressure.update(status="failed", reason="measured model peak leaves no positive L3 count with 2 GiB headroom")
     cold_status = "passed" if recommended else "not_isolated" if all(
         checks[f"{level}_W2_cycle"]["status"] != "inconclusive" for level in ("L0", "L3")) and not smoke_errors else "inconclusive"
@@ -174,12 +176,15 @@ def make_report(root):
            "NOSTOP_COLD_MODE": "cycle", "SWITCHES": 3,
            "MAX_WAVES": common.MAX_WAVES, "SEQ_LENGTH": common.capacity_budget()["max_position_embeddings"],
            "MAX_POSITION_EMBEDDINGS": common.capacity_budget()["max_position_embeddings"],
-           "STRESS_LINKS": manifest["stress_links"], **memory_budget.frozen_values(budget),
-           **{f"{level}_PROCESSES_PER_PAIR": count for level, count in memory_budget.scaled_counts(manifest["l3_processes"]).items()},
+           "STRESS_LINKS": manifest["stress_links"],
            "STRESS_BYTES": manifest["stress_bytes"], "STRESS_SYNC_EVERY": manifest["stress_sync_every"],
            "PRESSURE_REQUIRED_SLOWDOWN": 2.5, "PROBE_CV_FLAG_THRESHOLD": 0.15,
            "PROBE_SHIFT_FLAG_THRESHOLD": 0.20,
            "PROFILE": manifest["profile"], "DIAGNOSTIC_EVIDENCE": str(root.resolve())}
+    if budget is not None:
+        env.update(memory_budget.frozen_values(budget))
+        count = manifest["l3_processes"] if manifest["l3_processes"] is not None else budget["counts"]["L3"]
+        env.update({f"{level}_PROCESSES_PER_PAIR": n for level, n in memory_budget.scaled_counts(count).items()})
     lines = ["# Recommendation only. Does not launch formal experiments.",
              "# NCCL_RUNTIME_CONNECT is intentionally not modified."]
     lines += [f"export {k}={shlex.quote(str(v))}" for k, v in env.items()]

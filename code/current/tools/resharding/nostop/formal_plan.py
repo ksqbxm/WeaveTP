@@ -18,7 +18,7 @@ else:
 
 
 FIXED = dict(SWITCHES="3", MAX_WAVES="64", SEQ_LENGTH="5248", MAX_POSITION_EMBEDDINGS="5248",
-             MICRO_BATCH_SIZE="4", CYCLE_KV_TOKENS="2048")
+             MICRO_BATCH_SIZE="4", CYCLE_KV_TOKENS="2048", PROMPT_TOKENS="8")
 
 
 def sha(data):
@@ -44,7 +44,9 @@ def frozen_config(path):
         if values.get(key, expected) != expected:
             raise ValueError(f"frozen {key} must remain {expected}")
     links = common.parse_links(values["STRESS_LINKS"])
-    budget = memory_budget.estimate(float(values["MODEL_PEAK_GIB"]), values["STRESS_LINKS"],
+    if values.get("NOSTOP_WORKLOAD") != common.WORKLOAD_ID:
+        raise ValueError("frozen.env requires new short-prefill/synthetic-KV diagnostics")
+    budget = memory_budget.estimate(float(values["ALLOCATED_PEAK_GIB"]), float(values["CONTEXT_GIB"]), values["STRESS_LINKS"],
                                    float(values["MPS_MEMORY_MIB"]), float(values["MEMORY_CAPACITY_GIB"]))
     counts = {level: int(values.get(f"{level}_PROCESSES_PER_PAIR", default)) for level, default in budget["counts"].items()}
     pressure = dict(links=",".join(f"{a}:{b}" for a, b in links), counts=counts,
@@ -54,7 +56,7 @@ def frozen_config(path):
             or not math.isfinite(pressure["min_free_gib"]) or pressure["min_free_gib"] <= 0):
         raise ValueError("invalid frozen pressure configuration (L0 must have zero stressors)")
     if pressure["min_free_gib"] != budget["min_free_gib"]:
-        raise ValueError("MIN_FREE_GIB must equal measured MODEL_PEAK_GIB + 1.5")
+        raise ValueError("MIN_FREE_GIB must equal measured ALLOCATED_PEAK_GIB + CONTEXT_GIB + 1.5")
     if pressure["stress_bytes"] != common.STRESS_BYTES:
         raise ValueError("806 MiB stressor memory evidence requires 64 MiB stress buffers")
     if max(counts.values()) > (budget["max_l3_processes"] or 0):
@@ -80,7 +82,7 @@ def prepare_manifest(root, frozen_path, frozen, *, checkpoint, mps_owner, python
     evidence = Path(values["DIAGNOSTIC_EVIDENCE"])
     source = artifacts.read_json(evidence / "manifest.json")
     if any(frozen["memory_budget"][key] != source["memory_budget"][key]
-           for key in ("model_peak_gib", "min_free_gib", "capacity_gib", "mps_mib")):
+           for key in ("workload", "allocated_peak_gib", "context_gib", "min_free_gib", "capacity_gib", "mps_mib")):
         raise ValueError("frozen memory budget differs from diagnostic evidence")
     machine_info = artifacts.read_json(evidence / "machine.json")
     profile = Path(values["PROFILE"]).read_bytes()

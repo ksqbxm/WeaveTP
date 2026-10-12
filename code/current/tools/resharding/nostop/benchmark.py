@@ -13,7 +13,15 @@ CODE = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(CODE))
 sys.path.insert(0, str(CODE / "examples/rl"))
 
-from tools.resharding.nostop.common import MAX_WAVES, capacity_budget, intervals_overlap
+from tools.resharding.nostop import synthetic_kv
+from tools.resharding.nostop.common import (
+    MAX_WAVES,
+    WORKLOAD_ID,
+    capacity_budget,
+    intervals_overlap,
+    kv_workload,
+)
+from tools.resharding.nostop.cuda_memory import StageMemory
 
 
 def clock_identity():
@@ -36,13 +44,16 @@ class Diagnostic:
         expected = 3 if self.mode == "cycle" else 1
         if (self.mode not in ("cycle", "independent") or args.live_switches != expected
                 or self.kv != 2048 or self.extra != 10 or not args.live_release_standby_weights
-                or args.live_prompt_tokens != self.kv - 12
+                or args.live_prompt_tokens != 8 or os.environ.get("NOSTOP_WORKLOAD") != WORKLOAD_ID
                 or args.live_repeat_forward or args.live_weight_bitwise_audit):
             raise ValueError("diagnostic requires mode-matched switches, KV=2048, extra=10, release=1, audit=0")
         capacity = capacity_budget()["max_position_embeddings"]
         if args.live_max_waves != MAX_WAVES or args.max_position_embeddings != capacity or args.seq_length != capacity:
             raise ValueError(f"diagnostic requires MAX_WAVES={MAX_WAVES} and both sequence capacities={capacity}")
         self.rank = self.dist.get_rank()
+        self.memory = StageMemory(self.torch, self.rank)
+        self.prefill_count = 0
+        self.prefix = None
         self.index, self.phase, self.wave, self.step = -1, "initial_validation", None, 0
         self.decodes, self.transfers, self.marks, self.waves, self.states = [], [], [], [], []
         self.plan_inputs = []
@@ -113,6 +124,7 @@ class Diagnostic:
                       weights, services, control_group, default_plan, candidate_plan,
                       dst_bundle, token_counter):
         self.index, self.phase, self.wave = index, "prepare", None
+        self.memory.begin(f"prepare_switch_{index}")
         if self.origin is None:
             if self.dist.get_world_size() != 8 or self.args.expert_model_parallel_size != 2:
                 raise ValueError("diagnostic requires one host, eight ranks, EP=2")
@@ -146,36 +158,37 @@ class Diagnostic:
             if active_tp != 2:
                 raise AssertionError("measured expansion must start from TP2")
             weights[4]._check_storage(False)
-            # The 2036-token real prefill prefix is immutable. Clear its tail
-            # and regenerate the same 12 tokens, not just the offsets.
-            restored = self.kv - 12
-            with self.torch.inference_mode():
-                for context in (src_context, dst_context):
-                    for values in context.key_value_memory_dict.values():
-                        for tensor in values:
-                            tensor[self.args.live_prompt_tokens:].zero_()
-                    context.sequence_len_offset = restored
-                    context.enable_decode_mode()
+            for model, context in ((src_model, src_context), (dst_model, dst_context)):
+                self.restore_prefix(model, context)
             self.torch.cuda.current_stream().synchronize()  # outside measured window
-            self.torch.cuda.reset_peak_memory_stats()
             token_counter = self.args.live_prompt_tokens + 32
             for i in range(12):
                 self.phase = "normal_warmup" if i < 2 else "normal"
                 self.b._decode(src_model, src_context, self.args, token_value=token_counter)
                 token_counter += 1
-            # Standby prefix will be poisoned and copied in full at cutover.
-            dst_context.sequence_len_offset = src_context.sequence_len_offset
-            if src_context.sequence_len_offset != self.kv:
-                raise AssertionError("measured KV length is not exactly 2048")
+            # Normal decodes appended after the canonical 2048-token prefix.
+            # Discard only their logical tail: no GPU work after last completion.
+            src_context.sequence_len_offset = dst_context.sequence_len_offset = self.kv
         target = 4 if active_tp == 2 else 2
         weights[target]._check_storage(False)
         self.states.append({"switch": index, "active_tp": active_tp,
                             "kv_tokens": (src_context if active_tp == 2 else dst_context).sequence_len_offset,
                             "target_weight_storage_bytes": 0, "target_weight_bytes_required": weights[target].num_bytes,
-                            "real_prefill_tokens": self.kv - 12,
+                            "real_prefill_tokens": 8, "kv_content": kv_workload(),
                             "measured": index == self.args.live_switches - 1})
         self.phase = "prepare"
+        self.memory.begin(f"switch_{index}")
         return token_counter
+
+    def prefill(self, original, model, context, args):
+        if self.prefill_count == 0:
+            self.memory.begin("prefill")
+        self.prefill_count += 1
+        return original(model, context, args)[:, -1:, :].clone()
+
+    def restore_prefix(self, model, context):
+        synthetic_kv.restore(context, self.prefix, self.dist.get_rank(model.pg_collection.tp),
+                             self.args.live_request_domain_id, self.torch)
 
     def remember_plan(self, base, delta, bundle):
         # Keep immutable references inside the switch; inspect after timing.
@@ -219,7 +232,22 @@ class Diagnostic:
 
     def validate(self, original, src_model, src_context, dst_model, dst_context, args, group, token):
         if self.index < 0 or self.origin is None:
-            return original(src_model, src_context, dst_model, dst_context, args, group, token)
+            # Gloo-only initialization: choose one real TP2 prefix per request
+            # domain so both replicas and TP4 start from bit-identical contents.
+            local = dict(rank=self.rank, request_domain=args.live_request_domain_id,
+                         tp_ranks=self.dist.get_process_group_ranks(src_model.pg_collection.tp),
+                         prefix={layer: tuple(t[:8].cpu().clone() for t in pair)
+                                 for layer, pair in src_context.key_value_memory_dict.items()})
+            gathered = [None] * self.dist.get_world_size(group)
+            self.dist.all_gather_object(gathered, local, group=group)
+            self.prefix = synthetic_kv.canonical_prefix(gathered, args.live_request_domain_id, self.torch)
+            self.restore_prefix(src_model, src_context)
+            self.restore_prefix(dst_model, dst_context)
+            value = original(src_model, src_context, dst_model, dst_context, args, group, token)
+            self.memory.observe_context("after_prefill_validation")
+            self.memory.begin("plan_setup")
+            return value
+        self.memory.begin(f"post_switch_{self.index}")
         count = self.extra if self.index == args.live_switches - 1 else 1
         targets, dst_ms, src_ms, diffs = [], [], [], []
         self.phase, self.wave = "post", None
@@ -238,9 +266,12 @@ class Diagnostic:
                 raise AssertionError(f"post-cutover logits mismatch: {metrics}")
             diffs.append(self.b._all_max(float((source.float() - target.float()).abs().max().item()), group))
             src_ms.append(ms)
+        self.memory.observe_context(f"after_switch_{self.index}_validation")
         return max(diffs), token + count, self.b._all_max(statistics.mean(src_ms), group), self.b._all_max(statistics.mean(dst_ms), group)
 
     def write(self, original, args, result):
+        self.memory.finish()
+        memory = self.memory.document(complete=True)
         for row in self.decodes + self.transfers:
             start, end = row.pop("events")
             row["gpu_start_ms"] = self.origin.elapsed_time(start)
@@ -259,8 +290,9 @@ class Diagnostic:
                "decodes": self.decodes, "transfers": self.transfers, "waves": self.waves,
                "milestones": self.marks, "state_checks": self.states,
                "independent_warmup": self.warmup_evidence,
-               "peak_allocated": self.torch.cuda.max_memory_allocated(),
-               "peak_reserved": self.torch.cuda.max_memory_reserved(),
+               "workload": kv_workload(), "memory": memory,
+               "peak_allocated": max(p["max_memory_allocated"] for p in memory["phases"]),
+               "peak_reserved": max(p["max_memory_reserved"] for p in memory["phases"]),
                "host_time_semantics": "completion observed immediately after CUDA Event synchronization",
                "verified_execution_overlap_steps": None,
                "gpu_time_semantics": "same-device event bounds; NCCL bounds include device dependency waits; intersection is not kernel-concurrency proof",
@@ -279,10 +311,13 @@ class Diagnostic:
         directory = Path(args.live_json_output).parent
         directory.mkdir(parents=True, exist_ok=True)
         (directory / f"trace_rank{self.rank}.json").write_text(json.dumps(raw, indent=2), encoding="utf-8")
+        (directory / f"memory_rank{self.rank}.json").write_text(json.dumps(memory, indent=2), encoding="utf-8")
         if self.rank == 0:
             (directory / "routes.json").write_text(json.dumps(self.routes, indent=2), encoding="utf-8")
         result["nostop_diagnostic"] = {"mode": self.mode, "measured_switch": args.live_switches - 1,
-                                       "capacity_budget": capacity_budget(), "stall_pause": self.stall_pause}
+                                       "capacity_budget": capacity_budget(), "stall_pause": self.stall_pause,
+                                       "workload": kv_workload(),
+                                       "memory_files": [f"memory_rank{rank}.json" for rank in range(8)]}
         original(args, result)
 
 
@@ -297,12 +332,18 @@ def main():
     def run():
         args = b.get_args()
         holder["diagnostic"] = args._nostop_diagnostic = Diagnostic(b, args)
-        original_run()
+        try:
+            original_run()
+        except BaseException:
+            diagnostic = holder["diagnostic"]
+            diagnostic.memory.finish()
+            path = Path(args.live_json_output).parent / f"memory_rank{diagnostic.rank}.json"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(diagnostic.memory.document(complete=False), indent=2), encoding="utf-8")
+            raise
 
     b.run_live_benchmark = run
-    # The caller only needs prefill logits for optional equivalence diagnostics
-    # (disabled here). Avoid retaining the full 2036-token vocabulary tensor.
-    b._prefill = lambda *a, **kw: original_prefill(*a, **kw)[:, -1:, :].clone()
+    b._prefill = lambda *a, **kw: holder["diagnostic"].prefill(original_prefill, *a, **kw)
     b._decode = lambda *a, **kw: holder["diagnostic"].decode(original_decode, *a, **kw)
     b._validate_cutover = lambda *a, **kw: holder["diagnostic"].validate(original_validate, *a, **kw)
     b._write_results = lambda *a, **kw: holder["diagnostic"].write(original_write, *a, **kw)

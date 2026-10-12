@@ -27,7 +27,7 @@ from tools.resharding.nostop.tests.test_analysis import synthetic_traces
 
 def frozen_file(tmp_path, **overrides):
     values = dict(DIAGNOSTICS_READY="1", NOSTOP_COLD_MODE="cycle", STRESS_LINKS="0:2,1:3,4:6,5:7",
-                  STRESS_BYTES=str(64 * 1024 * 1024), MIN_FREE_GIB="22", MODEL_PEAK_GIB="20.5",
+                  STRESS_BYTES=str(64 * 1024 * 1024), MIN_FREE_GIB="22", ALLOCATED_PEAK_GIB="20", CONTEXT_GIB="0.5", NOSTOP_WORKLOAD=common.WORKLOAD_ID,
                   MEMORY_CAPACITY_GIB="31.36", MPS_MEMORY_MIB="56", **formal_plan.FIXED)
     values.update(overrides)
     path = tmp_path / "frozen.env"
@@ -51,7 +51,7 @@ def test_frozen_defaults_and_sha(tmp_path):
     config = formal_plan.frozen_config(path)
     assert config["ready"] and config["sha256"] == formal_plan.sha(path.read_bytes())
     assert config["pressure"]["counts"] == dict(L0=0, L1=1, L2=3, L3=7)
-    path = frozen_file(tmp_path, L1_PROCESSES_PER_PAIR="2", L3_PROCESSES_PER_PAIR="6", MODEL_PEAK_GIB="21.5", MIN_FREE_GIB="23")
+    path = frozen_file(tmp_path, L1_PROCESSES_PER_PAIR="2", L3_PROCESSES_PER_PAIR="6", ALLOCATED_PEAK_GIB="21", MIN_FREE_GIB="23")
     changed = formal_plan.frozen_config(path)
     assert changed["pressure"]["counts"]["L1"] == 2 and changed["pressure"]["counts"]["L3"] == 6
     assert changed["pressure"]["min_free_gib"] == 23 and changed["sha256"] != config["sha256"]
@@ -283,7 +283,7 @@ def test_manifest_immutable_inputs_and_fixed_route_snapshot(tmp_path):
     routes = dict(default=[dict(src=0, dst=2)], candidate=[dict(src=1, dst=3)], links=[dict(src=0, dst=2), dict(src=1, dst=3)])
     artifacts.save_json(evidence / "probe_routes.json", routes)
     artifacts.save_json(evidence / "manifest.json", dict(profile_sha256=formal_plan.sha(profile.read_bytes()), checkpoint=str(checkpoint),
-                        memory_budget=memory_budget.estimate(20.5, "0:2,1:3,4:6,5:7", 56)))
+                        memory_budget=memory_budget.estimate(20.0, 0.5, "0:2,1:3,4:6,5:7", 56)))
     artifacts.save_json(evidence / "machine.json", dict(host="SL3060", memory_used_mib={f"GPU-{i}": 100 for i in range(8)}))
     path = frozen_file(tmp_path, DIAGNOSTIC_EVIDENCE=str(evidence).replace("\\", "/"), PROFILE=str(profile).replace("\\", "/"))
     options = dict(checkpoint=None, mps_owner="yiwei", python="python", timeout=60)

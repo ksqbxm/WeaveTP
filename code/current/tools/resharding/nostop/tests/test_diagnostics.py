@@ -154,7 +154,7 @@ def test_probe_variability_preserved_and_flagged():
 def test_complete_report_has_only_two_decisions_and_frozen_recommendation(tmp_path):
     artifacts.write_json(tmp_path / "manifest.json", dict(execution_complete=True, stress_links="0:2", l3_processes=7,
         stress_bytes=256, stress_sync_every=16, min_free_gib=22, profile="/data/profile.json",
-        memory_budget=memory_budget.estimate(20.5, "0:2", 56)))
+        memory_budget=memory_budget.estimate(20.0, 0.5, "0:2", 56)))
     for name, _, method, mode in common.diagnostic_cases():
         case = tmp_path / name
         (case / "run").mkdir(parents=True)
@@ -167,23 +167,23 @@ def test_complete_report_has_only_two_decisions_and_frozen_recommendation(tmp_pa
     result = diag_report.make_report(tmp_path)
     assert set(result) == {"cold_start", "pressure"}
     assert result["cold_start"]["recommended_mode"] == "cycle"
-    frozen = (tmp_path / "frozen.env").read_text()
+    frozen = (tmp_path / "frozen.env").read_text(encoding="utf-8")
     assert "export DIAGNOSTICS_READY=1" in frozen and "export SWITCHES=3" in frozen
     assert "export MAX_WAVES=64" in frozen and "export MAX_POSITION_EMBEDDINGS=5248" in frozen
     assert "export NCCL_RUNTIME_CONNECT=" not in frozen
     # A completed probe file cannot override a later pressure/monitor failure.
-    manifest = json.loads((tmp_path / "manifest.json").read_text())
+    manifest = json.loads((tmp_path / "manifest.json").read_text(encoding="utf-8"))
     manifest["execution_complete"] = False
     artifacts.write_json(tmp_path / "manifest.json", manifest)
     result = diag_report.make_report(tmp_path)
     assert result["pressure"]["status"] == "inconclusive"
-    assert "export DIAGNOSTICS_READY=0" in (tmp_path / "frozen.env").read_text()
+    assert "export DIAGNOSTICS_READY=0" in (tmp_path / "frozen.env").read_text(encoding="utf-8")
     # A failed smoke or absent probe cannot recommend a ready configuration.
     (tmp_path / "smoke_L0_B0/exit_code.txt").write_text("1\n")
     (tmp_path / "probe_L3.json").unlink()
     result = diag_report.make_report(tmp_path)
     assert result["cold_start"]["status"] == result["pressure"]["status"] == "inconclusive"
-    assert "export DIAGNOSTICS_READY=0" in (tmp_path / "frozen.env").read_text()
+    assert "export DIAGNOSTICS_READY=0" in (tmp_path / "frozen.env").read_text(encoding="utf-8")
 
 
 @pytest.mark.parametrize("damage", ["kv", "resident_weights", "no_decode", "no_post", "no_warmup"])
@@ -207,11 +207,11 @@ def test_capacity_accounts_for_two_warmup_switches_and_validation():
     assert budget["warmup_peak_tokens"] == 4130
     assert budget["measured_peak_tokens"] == 3098
     assert budget["high_water_tokens"] == 4130
-    assert budget["benchmark_worst_case_tokens"] == 5163
+    assert budget["benchmark_worst_case_tokens"] == 3135
     assert budget["max_position_embeddings"] == 5248
     envs = [common.method_env(m,c,"p","o") for m in ("W2","B0") for c in ("cycle","independent")]
     assert {e["MAX_POSITION_EMBEDDINGS"] for e in envs} == {"5248"}
-    assert {e["PROMPT_TOKENS"] for e in envs} == {"2036"}
+    assert {e["PROMPT_TOKENS"] for e in envs} == {"8"}
     assert all("NCCL_RUNTIME_CONNECT" not in e for e in envs)
     assert envs[0]["ADAPTIVE_MIN_PREDICTED_E2E_GAIN_PCT"] == "5.0"
     assert envs[0]["HYBRID_MAX_FOREGROUND_PRESSURE"] == "0.20"
@@ -251,8 +251,8 @@ def test_stress_parameters_and_launch_order():
     assert len(commands) == 6 and all("--bidirectional" in c["command"] for c in commands)
     assert common.diagnostic_cases() == [
         ("smoke_L0_W2","L0","W2","cycle"), ("smoke_L0_B0","L0","B0","cycle"),
-        ("L0_W2_cycle","L0","W2","cycle"), ("L0_W2_independent","L0","W2","independent"),
-        ("L3_W2_cycle","L3","W2","cycle"), ("L3_W2_independent","L3","W2","independent")]
+        ("L0_W2_cycle","L0","W2","cycle"),
+        ("L3_W2_cycle","L3","W2","cycle")]
 
 
 @pytest.mark.parametrize("mode", ["machine","diag"])
@@ -262,7 +262,7 @@ def test_dry_run_never_creates_output_or_invokes_gpu(tmp_path, mode):
         mode, "--dry-run", "--out", str(out)], capture_output=True, text=True, check=True)
     plan = json.loads(result.stdout)
     assert not out.exists() and not plan["automatic_formal_launch"]
-    assert len(plan["cases"]) == (6 if mode == "diag" else 0)
+    assert len(plan["cases"]) == (4 if mode == "diag" else 0)
 
 
 def fake_diagnostic(monkeypatch, stall=False):
@@ -279,11 +279,13 @@ def fake_diagnostic(monkeypatch, stall=False):
     cuda = NS(Event=Event, current_device=lambda: 0)
     torch = NS(cuda=cuda, inference_mode=nullcontext, full=lambda *a, **kw: None,
                full_like=lambda *a, **kw: None, device=lambda *a: None, long="long")
-    args = NS(live_switches=3, live_prompt_tokens=2036, live_release_standby_weights=True,
+    args = NS(live_switches=3, live_prompt_tokens=8, live_release_standby_weights=True,
               live_repeat_forward=False, live_weight_bitwise_audit=False, max_position_embeddings=5248, seq_length=5248,
               live_max_waves=64, micro_batch_size=4, padded_vocab_size=100, live_kv_request_identity=False)
     monkeypatch.setenv("NOSTOP_COLD_MODE", "cycle")
     monkeypatch.setenv("STALL_PAUSE", "1" if stall else "0")
+    monkeypatch.setenv("NOSTOP_WORKLOAD", common.WORKLOAD_ID)
+    monkeypatch.setattr(benchmark, "StageMemory", lambda *a: Mock())
     b = NS(torch=torch, dist=NS(get_rank=lambda:0), _apply_hotspot_pressure=lambda *a:None)
     d = benchmark.Diagnostic(b,args)
     d.origin, d.index, d.phase, d.wave = Event(), 2, "base", 0
@@ -351,7 +353,7 @@ def test_cleanup_signals_only_owned_group_before_reaping(monkeypatch, tmp_path):
     first_end = record["ended_ns"]
     manager.cleanup()  # idempotent; no reused PID signals
     assert events == [(54321,signal.SIGTERM),(54321,signal.SIGKILL),"reap"]
-    assert (tmp_path / "child.exit_code.txt").read_text() == "0\n"
+    assert (tmp_path / "child.exit_code.txt").read_text(encoding="utf-8") == "0\n"
     assert record["ended_ns"] == first_end
 
 
@@ -402,35 +404,6 @@ def test_wave_budget_refuses_overflow(monkeypatch):
     with pytest.raises(RuntimeError,match="budget"):
         d.check_wave_count(64)
 
-
-def test_third_switch_restores_real_prefix_and_2048_tokens(monkeypatch):
-    d, _, model, _ = fake_diagnostic(monkeypatch)
-    d.torch = NS(inference_mode=torch.inference_mode,
-                 cuda=NS(current_stream=lambda:NS(synchronize=lambda:None),reset_peak_memory_stats=lambda:None))
-    source = NS(sequence_len_offset=2037, key_value_memory_dict={1:(torch.ones(5248,1),torch.ones(5248,1))},
-                enable_decode_mode=lambda:None)
-    target = NS(sequence_len_offset=2037, key_value_memory_dict={1:(torch.ones(5248,1),torch.ones(5248,1))},
-                enable_decode_mode=lambda:None)
-    weights = {tp:NS(_check_storage=Mock(),num_bytes=900) for tp in (2,4)}
-    def decode(_model, context, _args, *, token_value):
-        for tensor in context.key_value_memory_dict[1]:
-            tensor[context.sequence_len_offset] = token_value
-        context.sequence_len_offset += 1
-    d.b._decode = decode
-    def run(index):
-        return d.before_switch(index,2,model,source,model,target,weights,{},None,None,None,None,999)
-    first_token = run(0)
-    reference = [t[:2048].clone() for t in source.key_value_memory_dict[1]]
-    # Warmup migrations may write beyond the original prompt but not within it.
-    for context in (source,target):
-        context.sequence_len_offset = 4000
-        for tensor in context.key_value_memory_dict[1]:
-            tensor[2036:] = -7
-    assert run(2) == first_token
-    assert source.sequence_len_offset == target.sequence_len_offset == 2048
-    assert all(torch.equal(t[:2048],r) for t,r in zip(source.key_value_memory_dict[1],reference))
-    assert d.states[-1]["measured"] and d.states[-1]["real_prefill_tokens"] == 2036
-    assert weights[4]._check_storage.call_count == 4
 
 
 def test_post_cutover_completes_target_before_numerical_validation(monkeypatch):

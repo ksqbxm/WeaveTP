@@ -41,30 +41,29 @@ BASE = Path("/data/ubuntu/lxh/weavetp/nostop")
 def reuse_l0_cases(root, source, cases, machine_info, profile_sha256, checkpoint):
     """Snapshot completed L0 evidence only; old L3 pressure is not reusable."""
     source = source.resolve()
-    old_manifest = json.loads((source / "manifest.json").read_text())
-    old_machine = json.loads((source / "machine.json").read_text())
-    if (old_manifest["profile_sha256"] != profile_sha256 or old_manifest["checkpoint"] != checkpoint
+    old_manifest = json.loads((source / "manifest.json").read_text(encoding="utf-8"))
+    old_machine = json.loads((source / "machine.json").read_text(encoding="utf-8"))
+    if (old_manifest.get("workload") != common.kv_workload()
+            or old_manifest["profile_sha256"] != profile_sha256 or old_manifest["checkpoint"] != checkpoint
             or old_machine["host"] != machine_info["host"]
             or old_machine["memory_used_mib"].keys() != machine_info["memory_used_mib"].keys()):
-        raise ValueError("--routes-from must use the same host, GPUs, checkpoint and bandwidth profile")
+        raise ValueError("--routes-from must use the same new prefill workload, host, GPUs, checkpoint and bandwidth profile")
     reused = {}
     selected = {c[0] for c in cases}
     for name, level, method, mode in common.diagnostic_cases():
         if level != "L0" or name in selected:
             continue
         case = source / name
-        if not (case / "exit_code.txt").is_file() or (case / "exit_code.txt").read_text().strip() != "0":
-            if mode == "independent":
-                continue  # Optional reference, never a prerequisite for cycle.
+        if not (case / "exit_code.txt").is_file() or (case / "exit_code.txt").read_text(encoding="utf-8").strip() != "0":
             raise ValueError(f"cannot reuse incomplete L0 case: {case}")
         reason = trace_metrics.launch_gate(trace_metrics.load_traces(case / "run"), mode, method == "B0")
         if reason:
             raise ValueError(f"cannot reuse {case}: {reason}")
-        config = json.loads((case / "config.json").read_text())
+        config = json.loads((case / "config.json").read_text(encoding="utf-8"))
         expected = common.method_env(method, mode, "", "")
         if any(config.get(k) != v for k, v in expected.items() if k not in ("PROFILE", "OUT_DIR")):
             raise ValueError(f"incompatible benchmark configuration: {case}")
-        files = [case / "exit_code.txt", case / "config.json", case / "run/routes.json", *sorted((case / "run").glob("trace_rank*.json"))]
+        files = [case / "exit_code.txt", case / "config.json", case / "run/routes.json", *sorted((case / "run").glob("trace_rank*.json")), *sorted((case / "run").glob("memory_rank*.json"))]
         files += [case / name for name in ("environment.json", "command.txt", "run/result.json") if (case / name).is_file()]
         hashes = {}
         for path in files:
@@ -84,10 +83,10 @@ def collect_probe_routes(root):
     defaults, candidates, sources = [], [], []
     for name, _, method, _ in common.diagnostic_cases():
         case = root / name
-        if not (case / "exit_code.txt").is_file() or (case / "exit_code.txt").read_text().strip() != "0":
+        if not (case / "exit_code.txt").is_file() or (case / "exit_code.txt").read_text(encoding="utf-8").strip() != "0":
             continue
         path = case / "run/routes.json"
-        routes = json.loads(path.read_text())
+        routes = json.loads(path.read_text(encoding="utf-8"))
         sources.append(str(path.relative_to(root)))
         if method == "B0":
             defaults = routes["default"]
@@ -101,19 +100,14 @@ def collect_probe_routes(root):
 
 
 def run_diagnostics(args, root, manager):
-    budget = memory_budget.from_logs(args.memory_from, args.links)
-    artifacts.write_json(root / "memory_budget.json", budget)
-    args.min_free_gib = budget["min_free_gib"]
-    if args.processes_per_pair is None:
-        args.processes_per_pair = budget["counts"]["L3"]
-    if args.processes_per_pair > (budget["max_l3_processes"] or 0):
-        raise ValueError("requested stressor count exceeds measured memory budget")
+    memory_source = args.memory_from or args.routes_from
+    budget = memory_budget.from_runs(memory_source, args.links) if memory_source else None
     machine_info = machine.machine_check(root, args.sample_seconds, args.python, args.mps_owner)
     if machine_info["idle_state"] != "idle":
         raise RuntimeError(f"GPU state is {machine_info['idle_state']}: {machine_info['idle_errors']}; no benchmark launched")
     if machine_info["checks"]["runtime"]["exit_code"] != 0:
         raise RuntimeError("PyTorch/CUDA/NCCL runtime check failed")
-    if {g["uuid"] for g in budget["gpus"].values()} != machine_info["memory_used_mib"].keys():
+    if budget and set(budget["gpu_uuids"]) != machine_info["memory_used_mib"].keys():
         raise ValueError("L0 memory evidence belongs to a different GPU set")
     if not Path(args.checkpoint).is_dir() or not Path(args.profile).is_file():
         raise ValueError("existing checkpoint and real bandwidth profile are required")
@@ -131,11 +125,16 @@ def run_diagnostics(args, root, manager):
     available = {c[0] for c in cases} | reused.keys()
     if "smoke_L0_B0" not in available or not any("W2" in name for name in available):
         raise ValueError("selected cases lack B0/W2 routes; provide --routes-from")
+    if args.memory_from:
+        source = artifacts.read_json(args.memory_from / "manifest.json")
+        if source["checkpoint"] != args.checkpoint or source["profile_sha256"] != profile_sha256:
+            raise ValueError("--memory-from must use the same checkpoint/profile")
+    args.min_free_gib = budget["min_free_gib"] if budget else None
     env = supervisor.isolated_env(root)
     env.update(PYTHON=args.python, CHECKPOINT=args.checkpoint, CUDA_VISIBLE_DEVICES="0,1,2,3,4,5,6,7",
                MPS_OWNER=args.mps_owner or "",
                NCCL_DEBUG="INFO", NCCL_DEBUG_SUBSYS="INIT,GRAPH", NCCL_DEBUG_FILE=str(root / "nccl_%h_%p.log"))
-    manifest = {"execution_complete": False, "stress_links": args.links, "l3_processes": args.processes_per_pair,
+    manifest = {"execution_complete": False, "workload": common.kv_workload(), "stress_links": args.links, "l3_processes": args.processes_per_pair,
                 "mps_owner": args.mps_owner, "cuda_mps_pipe_directory": env.get("CUDA_MPS_PIPE_DIRECTORY"),
                 "stress_bytes": args.stress_bytes, "stress_sync_every": args.stress_sync_every,
                 "min_free_gib": args.min_free_gib, "memory_budget": budget,
@@ -147,9 +146,6 @@ def run_diagnostics(args, root, manager):
                 "pressure_threshold": 2.5, "cold_criterion": "cycle switch 2 first-wave maximum gap <= switch 0",
                 "cv_flag_threshold": 0.15, "bandwidth_shift_flag_threshold": 0.20}
     artifacts.write_json(root / "manifest.json", manifest)
-    if not budget["feasible"]:
-        raise RuntimeError(f"measured model peak {budget['model_peak_gib']} GiB requires {args.min_free_gib} GiB free; "
-                           "no positive stressor count leaves 2 GiB headroom; no GPU task launched")
     gpu_monitor = manager.start(["nvidia-smi", f"--query-gpu=timestamp,{machine.GPU_FIELDS}", "--format=csv", "-lms", "200"], "telemetry", env)
     app_monitor = manager.start(["nvidia-smi", "--query-compute-apps=pid,process_name,gpu_uuid,used_memory", "--format=csv", "-l", "1"], "process_memory", env)
     cpu_monitor = manager.start(["bash", "-c", 'while true; do date -u +%FT%TZ; ps -eo pid,ppid,pgid,pcpu,pmem,rss,comm; sleep 1; done'], "process_cpu", env)
@@ -158,8 +154,12 @@ def run_diagnostics(args, root, manager):
         case = root / name
         case.mkdir()
         machine.require_idle(case / "preflight", args.mps_owner)
+        if level == "L3":
+            args.processes_per_pair = memory_budget.l3_count(budget, args.processes_per_pair)
+            manifest["l3_processes"] = args.processes_per_pair
+            artifacts.write_json(root / "manifest.json", manifest)
         stress = pressure.start_stress(manager, args, env, f"{name}_pressure") if level == "L3" else []
-        if level == "L0":
+        if level == "L0" and budget is not None:
             pressure.check_pressure_memory(manager, [], [], f"{name}_pressure", args.min_free_gib)
         if any(manager.exited(p) for p in stress):
             raise RuntimeError("pressure process exited before benchmark")
@@ -179,12 +179,21 @@ def run_diagnostics(args, root, manager):
             raise RuntimeError("pressure process exited during benchmark")
         for process in stress:
             manager.stop(process)
+        if level == "L0":
+            budget = memory_budget.from_runs(root, args.links)
+            args.min_free_gib = budget["min_free_gib"]
+            manifest.update(memory_budget=budget, min_free_gib=args.min_free_gib)
+            artifacts.write_json(root / "memory_budget.json", budget)
+            artifacts.write_json(root / "manifest.json", manifest)
         print(f"DONE {name}", flush=True)
+    args.processes_per_pair = memory_budget.l3_count(budget, args.processes_per_pair)
+    manifest["l3_processes"] = args.processes_per_pair
+    artifacts.write_json(root / "manifest.json", manifest)
     collect_probe_routes(root)
     for level in ("L0", "L3"):
         machine.require_idle(root / f"probe_{level}_preflight", args.mps_owner)
         stress = pressure.start_stress(manager, args, env, "probe_pressure") if level == "L3" else []
-        if level == "L0":
+        if level == "L0" and budget is not None:
             pressure.check_pressure_memory(manager, [], [], "probe_L0_pressure", args.min_free_gib)
         command = [args.python, "-B", "-m", "torch.distributed.run", "--standalone", "--nproc_per_node=8",
                    "--run-path", str(supervisor.CODE / "tools/resharding/nostop/probe.py"), "--routes", str(root / "probe_routes.json"),
@@ -211,7 +220,7 @@ def finish_diagnostics(root, mps_owner, status, code):
             status["memory_recovery_error"] = str(error)
             code = code or 1
     if (root / "manifest.json").exists():
-        manifest = json.loads((root / "manifest.json").read_text())
+        manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
         manifest["execution_complete"] = code == 0
         artifacts.write_json(root / "manifest.json", manifest)
         try:
@@ -236,9 +245,9 @@ def main():
                         help="allow only this user's nvidia-cuda-mps-server (default: MPS_OWNER; unset forbids all compute processes)")
     parser.add_argument("--checkpoint", default=os.environ.get("CHECKPOINT", "/data/models/DeepSeek-V2-Lite-megatron-v2"))
     parser.add_argument("--profile", default=os.environ.get("PROFILE", "profiles/moe_tp_8gpu_idle_p2p_v21.json"))
-    parser.add_argument("--cases", help="comma-separated benchmark case names; L0/L3 probes always follow (default: all cases)")
-    parser.add_argument("--routes-from", type=Path, help="old run directory; snapshot its completed, unselected L0 cases and migration routes")
-    parser.add_argument("--memory-from", type=Path, help="L0 directory with process_memory.log and telemetry.log; required for execution")
+    parser.add_argument("--cases", help="comma-separated benchmark case names; L0/L3 probes always follow (default: both L0 smokes and L0/L3 W2 cycle)")
+    parser.add_argument("--routes-from", type=Path, help="same-workload run directory; snapshot its completed, unselected L0 cases and migration routes")
+    parser.add_argument("--memory-from", type=Path, help="optional NEW diagnostic run with torch memory rank files; otherwise learn from this run’s L0 cases")
     parser.add_argument("--links", default="0:2,1:3,4:6,5:7")
     parser.add_argument("--processes-per-pair", type=int, help="L3 count; defaults to the largest count allowed by measured memory (up to 7)")
     parser.add_argument("--stress-bytes", type=int, default=common.STRESS_BYTES)
@@ -260,7 +269,7 @@ def main():
     stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     root = args.out or BASE / f"{args.mode}_{socket.gethostname()}_{stamp}_{os.getpid()}"
     if args.dry_run:
-        budget = memory_budget.from_logs(args.memory_from, args.links) if args.mode == "diag" and args.memory_from else None
+        budget = memory_budget.from_runs(args.memory_from, args.links) if args.mode == "diag" and args.memory_from else None
         if args.processes_per_pair is None and budget:
             args.processes_per_pair = budget["counts"]["L3"]
         print(json.dumps({"mode": args.mode, "out": str(root), "capacity": common.capacity_budget(),
@@ -277,8 +286,6 @@ def main():
                           "probe_order": ["L0", "L3"] if args.mode == "diag" else [],
                           "automatic_formal_launch": False}, indent=2))
         return 0
-    if args.mode == "diag" and args.memory_from is None:
-        parser.error("--memory-from is required; free-memory admission is measured L0 model peak + 1.5 GiB")
     if os.name != "posix" or not root.is_absolute() or not str(root.resolve()).startswith("/data/"):
         parser.error("actual execution requires Linux and a new absolute directory under /data")
     root.mkdir(parents=True, exist_ok=False)

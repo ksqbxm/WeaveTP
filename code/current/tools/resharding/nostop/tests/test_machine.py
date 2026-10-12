@@ -22,7 +22,7 @@ from tools.resharding.nostop import (
     pressure,
     supervisor,
 )
-from tools.resharding.nostop.tests.test_memory_budget import write_memory_logs
+from tools.resharding.nostop.tests.test_memory_budget import write_memory_case
 
 
 def gpu_queries(monkeypatch, *, memory=137, utilization=0, owner="yiwei", name="/usr/bin/nvidia-cuda-mps-server"):
@@ -60,7 +60,7 @@ def test_machine_idle_rule_and_mps_evidence(monkeypatch, tmp_path, owner, name, 
     result = machine.machine_check(tmp_path, 0, "python", mps_owner)
     assert result["idle_state"] == expected
     assert bool(result["idle_errors"]) == (expected == "busy")
-    saved = json.loads((tmp_path / "machine.json").read_text())
+    saved = json.loads((tmp_path / "machine.json").read_text(encoding="utf-8"))
     assert saved["mps_owner"] == mps_owner
     assert saved["cuda_mps_pipe_directory"] == "/tmp/yiwei-mps"
     assert saved["memory_used_mib"]["GPU-7"] == memory
@@ -106,13 +106,13 @@ def test_memory_recovery_uses_startup_per_gpu_baseline(monkeypatch, tmp_path, de
     baseline = {f"GPU-{i}": 137 if i == 7 else 67 for i in reversed(range(8))}
     artifacts.write_json(tmp_path / "machine.json", dict(memory_used_mib=baseline))
     assert machine.check_memory_recovery(tmp_path, "yiwei") is expected
-    record = json.loads((tmp_path / "memory_recovery.json").read_text())
+    record = json.loads((tmp_path / "memory_recovery.json").read_text(encoding="utf-8"))
     assert record["memory_restored"] is expected
     assert record["final_mib"]["GPU-7"] == 137 + delta
     assert record["baseline_mib"] == baseline and record["allowance_mib"] == 16
 
 
-@pytest.mark.parametrize("blocked_at", [None, "L3_W2_independent", "probe_L3"])
+@pytest.mark.parametrize("blocked_at", [None, "L3_W2_cycle", "probe_L3"])
 def test_every_launch_rechecks_idle_before_own_pressure(monkeypatch, tmp_path, blocked_at):
     gpu_queries(monkeypatch)
     machine_info = machine.machine_check(tmp_path, 0, "python", "yiwei")
@@ -129,6 +129,7 @@ def test_every_launch_rechecks_idle_before_own_pressure(monkeypatch, tmp_path, b
     monkeypatch.setattr(machine, "require_idle", require_idle)
     def start_stress(manager, args, env, prefix):
         assert not active_stressors and env["MPS_OWNER"] == "yiwei"
+        assert args.min_free_gib == 23 and args.processes_per_pair == 7
         process = NS(name=prefix)
         active_stressors.append(process)
         return [process]
@@ -144,13 +145,15 @@ def test_every_launch_rechecks_idle_before_own_pressure(monkeypatch, tmp_path, b
         if not name.startswith("probe_"):
             out = Path(env["OUT_DIR"])
             out.mkdir()
+            write_memory_case(out.parent, "W2" if "W2" in name else "B0", "independent" if "independent" in name else "cycle",
+                              allocated=21 if "B0" in name else 20)
             artifacts.write_json(out / "routes.json", dict(default=[dict(src=0, dst=2)], candidate=[dict(src=1, dst=3)]))
     manager.run = run
     profile = tmp_path / "input_profile.json"
     artifacts.write_json(profile, dict(world_size=8, matrix_gbps=[[100]*8 for _ in range(8)]))
     args = NS(sample_seconds=0, python="python", mps_owner="yiwei", checkpoint=str(tmp_path),
-              profile=str(profile), links="0:2", processes_per_pair=7, stress_bytes=common.STRESS_BYTES, stress_sync_every=16, timeout=60,
-              cases=None, routes_from=None, memory_from=write_memory_logs(tmp_path / "l0_memory"))
+              profile=str(profile), links="0:2", processes_per_pair=None, stress_bytes=common.STRESS_BYTES, stress_sync_every=16, timeout=60,
+              cases=None, routes_from=None, memory_from=None)
     if blocked_at:
         with pytest.raises(RuntimeError, match="busy"):
             diagnostics.run_diagnostics(args, tmp_path, manager)
@@ -159,7 +162,7 @@ def test_every_launch_rechecks_idle_before_own_pressure(monkeypatch, tmp_path, b
         diagnostics.run_diagnostics(args, tmp_path, manager)
         assert checked == launched == [c[0] for c in common.diagnostic_cases()] + ["probe_L0", "probe_L3"]
     assert not active_stressors
-    assert not json.loads((tmp_path / "manifest.json").read_text())["execution_complete"]
+    assert not json.loads((tmp_path / "manifest.json").read_text(encoding="utf-8"))["execution_complete"]
 
 
 @pytest.mark.parametrize("initial_code,restored,expected", [(0, True, 4), (0, False, 1), (1, True, 1), (143, False, 143)])
@@ -167,13 +170,13 @@ def test_final_recovery_gates_completion_even_on_failure(monkeypatch, tmp_path, 
     artifacts.write_json(tmp_path / "machine.json", {})
     artifacts.write_json(tmp_path / "manifest.json", dict(execution_complete=False,
         stress_links="0:2", l3_processes=7, stress_bytes=256, stress_sync_every=16, min_free_gib=22, profile="/data/profile.json",
-        memory_budget=memory_budget.estimate(20.5, "0:2", 56)))
+        memory_budget=memory_budget.estimate(20.0, 0.5, "0:2", 56)))
     recover = Mock(return_value=restored)
     monkeypatch.setattr(machine, "check_memory_recovery", recover)
     status = {}
     assert diagnostics.finish_diagnostics(tmp_path, "yiwei", status, initial_code) == expected
     recover.assert_called_once_with(tmp_path, "yiwei")
     assert status["memory_restored"] is restored
-    manifest = json.loads((tmp_path / "manifest.json").read_text())
+    manifest = json.loads((tmp_path / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["execution_complete"] is (initial_code == 0 and restored)
-    assert "export DIAGNOSTICS_READY=0" in (tmp_path / "frozen.env").read_text()
+    assert "export DIAGNOSTICS_READY=0" in (tmp_path / "frozen.env").read_text(encoding="utf-8")
