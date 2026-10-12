@@ -1,1 +1,7 @@
 N=1（第1周期 10k, k=3） | 对TP2 1.04 对TP4 1.14 对Llumnix 1.29 对Flying 1.04 | 时长 2.8 h 切换 2 次
+N=2（第2周期 12k, k=3.3） | 对TP2 1.07 对TP4 1.17 对Llumnix 1.30 对Flying 1.07 | 时长 6.0 h 切换 4 次
+N=3（第3周期 14k, k=4） | 对TP2 1.16 对TP4 1.19 对Llumnix 1.39 对Flying 1.16 | 时长 9.2 h 切换 6 次
+N=4（第4周期 16k, k=5） | 对TP2 1.15 对TP4 1.22 对Llumnix 1.39 对Flying 1.15 | 时长 13.6 h 切换 8 次
+N=5（第5周期 16k, k=8） | 对TP2 1.14 对TP4 1.28 对Llumnix 1.37 对Flying 1.14 | 时长 18.9 h 切换 10 次
+
+[exited with code 0]
