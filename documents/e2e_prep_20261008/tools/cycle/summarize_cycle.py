@@ -30,6 +30,14 @@ def one(run_dir):
     if not os.path.exists(rp):
         return {"run": os.path.basename(run_dir), "error": "no result.json"}
     r = json.load(open(rp))
+    anchor = r.get("method_variant") == "anchortp-proxy"
+    implementation = r.get("implementation") if anchor else None
+    if anchor and implementation:
+        for sw in r.get("switches", []):
+            if any(sw.get(key) != 0 for key in ("reload_bytes", "overlap_steps", "delta_tokens")):
+                raise ValueError(f"{rp}: AnchorTP switch has missing/nonzero reload, overlap or delta")
+            if sw.get("scheduling_mode") != "anchortp":
+                raise ValueError(f"{rp}: AnchorTP scheduling mode mismatch")
     extra = r.get("cycle_extra") or []
     mb = extra[0]["micro_batch_size"] if extra else None
     kv_tokens = extra[0]["kv_tokens"] if extra else None
@@ -90,7 +98,15 @@ def one(run_dir):
             "hold_peak_alloc_gb": max(e["holds"][i]["peak_allocated"] for e in extra
                                       for i in range(len(e.get("holds") or [])) if e["holds"][i]["after_switch"] == k) / 1e9 if hold else None,
         })
+        if anchor:
+            rows[-1].update({key: sw.get(key) for key in (
+                "prealloc_s", "pause_s", "reload_bytes", "paths", "scheduling_mode",
+            )})
     return {"run": os.path.basename(run_dir), "method": r.get("method_variant"), "mb": mb, "kv_tokens": kv_tokens,
+            "implementation": implementation or ("legacy-weavetp-proxy" if anchor else None),
+            "method_label": ("AnchorTP 旧代理（含 WeaveTP residual 与改道）" if anchor and not implementation
+                             else r.get("method_variant")),
+            "code_commit": r.get("code_commit"),
             "steady_step_ms": steady, "smi_peak_mib": smi_peak(os.path.join(run_dir, "smi.csv")),
             "setup_peak_alloc_gb": V[0]["peak_alloc_gb"] if V else None, "switches": rows}
 
@@ -104,7 +120,7 @@ def main(root):
             print(f"\n## {s['run']}: {s['error']}")
             continue
         sp = max(s["smi_peak_mib"].values()) if s["smi_peak_mib"] else float("nan")
-        print(f"\n## {s['run']}  方法 {s['method']}  每副本 {s['mb']} 条 × {s['kv_tokens']} token；"
+        print(f"\n## {s['run']}  方法 {s['method_label']}（{s['implementation'] or '原实现'}）  每副本 {s['mb']} 条 × {s['kv_tokens']} token；"
               f"稳态单步 TP2 {s['steady_step_ms'].get(2, float('nan')):.0f} ms / TP4 {s['steady_step_ms'].get(4, float('nan')):.0f} ms；"
               f"nvidia-smi 峰值 {sp} MiB")
         print("  # 方向 源KV(GB/卡) 墙钟s 波数 前台步 前台token 期间单步ms 暴露等待s 增量+提交s 进度损失s 迁移GB 峰值分配GB 峰值保留GB 恢复步 | 切换后连续解码：步数 墙钟s 单步ms token 峰值GB")

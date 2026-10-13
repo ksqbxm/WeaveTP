@@ -22,6 +22,29 @@ def _is_mxfp8_tensor(param):
     )
 
 
+def prepare_reshard_receives(plan: ReshardPlan, dst_module: torch.nn.Module) -> dict:
+    """Allocate every ordinary-tensor receive before the first transport batch.
+
+    The returned views belong to this migration only: callers must finish all
+    transactions before releasing or resizing destination storage.
+    """
+    parameters = dict(dst_module.named_parameters()) if dst_module is not None else {}
+    prepared = {}
+    for op in plan.recv_ops:
+        parameter = parameters[op.param_name]
+        if _is_mxfp8_tensor(parameter):
+            raise ValueError("preallocated receives require ordinary floating-point tensors")
+        if op.task_id is None or op.task_id in prepared:
+            raise ValueError("preallocated receives require unique task IDs")
+        view = parameter.data[op.my_slice]
+        if view.is_contiguous():
+            prepared[op.task_id] = (view, ('direct',))
+        else:
+            buffer = torch.empty(view.shape, dtype=view.dtype, device=view.device)
+            prepared[op.task_id] = (buffer, ('default', buffer, parameter, op.my_slice))
+    return prepared
+
+
 class ReshardTransaction:
     """A launched reshard with explicit transport and destination commit phases."""
 
@@ -144,6 +167,7 @@ def launch_reshard_plan(
     synchronize_group: bool = False,
     synchronize_device: bool = False,
     release_cache: bool = False,
+    prepared_receives: Optional[dict] = None,
 ) -> ReshardTransaction:
     """Submit a plan and return a non-blocking launch/wait/commit transaction."""
     src_params = {}
@@ -168,6 +192,12 @@ def launch_reshard_plan(
             f"Reshard plan references missing parameters: sends={missing_sends}, "
             f"recvs={missing_recvs}. No operations were submitted."
         )
+
+    if prepared_receives is not None:
+        if transform is not None:
+            raise ValueError("preallocated receives do not support receive transforms")
+        if any(op.task_id not in prepared_receives for op in plan.recv_ops):
+            raise ValueError("missing preallocated receive; no operations were submitted")
 
     sendable_cache: dict[str, torch.Tensor] = {}
     uncacheable_send_task_ids = set()
@@ -207,6 +237,11 @@ def launch_reshard_plan(
     pending_quantized: dict[int, tuple[torch.nn.Parameter, torch.Tensor, list]] = {}
 
     for op in plan.recv_ops:
+        if prepared_receives is not None:
+            buffer, writeback = prepared_receives[op.task_id]
+            service.submit_recv(buffer, op.peer_rank, task_id=op.task_id)
+            recv_writebacks.append(writeback)
+            continue
         if transform is not None and transform.should_transform(op.param_name):
             recv_buffers = transform.prepare_recv(op.param_name, op.my_slice)
             for buffer in recv_buffers:

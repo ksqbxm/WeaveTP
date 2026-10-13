@@ -47,11 +47,26 @@ def test_identity_disabled_token_paths_are_main_ast():
 
 
 def test_default_result_fields_and_calculations_are_main_ast():
+    class NonAnchorResult(ast.NodeTransformer):
+        def visit_Dict(self, node):
+            node = self.generic_visit(node)
+            entries = [(k, v) for k, v in zip(node.keys, node.values)
+                       if not (isinstance(k, ast.Constant) and k.value == "anchortp-proxy")]
+            node.keys = [k for k, _ in entries]
+            node.values = [v for _, v in entries]
+            return node
+
+        def visit_IfExp(self, node):
+            if ast.unparse(node.test) == "not is_anchortp":
+                return self.visit(node.body)
+            return self.generic_visit(node)
+
     def result(tree):
         run = function(tree, "run_live_benchmark")
         return next(n.value for n in run.body if isinstance(n, ast.Assign)
                     and any(isinstance(t, ast.Name) and t.id == "result" for t in n.targets))
-    assert ast.dump(result(CURRENT)) == ast.dump(result(BASE))
+    assert ast.dump(NonAnchorResult().visit(copy.deepcopy(result(CURRENT)))) == ast.dump(
+        NonAnchorResult().visit(copy.deepcopy(result(BASE))))
 
 
 def test_identity_parser_defaults_off():

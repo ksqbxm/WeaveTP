@@ -295,7 +295,7 @@ def add_live_args(parser):
     )
     group.add_argument(
         "--live-scheduler-mode",
-        choices=("baseline", "residual"),
+        choices=("baseline", "residual", "anchortp"),
         default="residual",
     )
     group.add_argument("--live-bandwidth-ewma", type=float, default=0.5)
@@ -1065,6 +1065,18 @@ def _run_async_waves(
     hybrid_fast_path: bool = False,
     hybrid_fast_path_reason: dict[str, object] | None = None,
 ) -> tuple[dict[str, object], int]:
+    if args.live_method_variant == "anchortp-proxy":
+        from megatron.core.resharding import anchortp
+
+        metrics = anchortp.execute(
+            plan, src_bundle, dst_bundle, service,
+            bandwidth=args._anchortp_capacity,
+            hosts=args._anchortp_hosts, links=args._anchortp_links,
+            max_tasks=args.live_max_wave_tasks if max_wave_tasks is None else max_wave_tasks,
+            max_bytes=args.live_max_wave_bytes, group=reshard_group,
+            control_group=control_group, prealloc_started=args._anchortp_prealloc_start,
+        )
+        return metrics, token_counter
     effective_scheduler_mode = wave_scheduler_mode or args.live_scheduler_mode
     wave_task_limit = args.live_max_wave_tasks if max_wave_tasks is None else max_wave_tasks
     if effective_scheduler_mode not in {"baseline", "fifo", "residual"}:
@@ -1303,6 +1315,13 @@ def _write_results(args, result: dict[str, object]) -> None:
 
 def run_live_benchmark() -> None:
     args = get_args()
+    is_anchortp = args.live_method_variant == "anchortp-proxy"
+    if is_anchortp:
+        from megatron.core.resharding import anchortp
+
+        anchortp.configure(args)
+    elif args.live_scheduler_mode == "anchortp":
+        raise ValueError("AnchorTP scheduler requires --live-method-variant anchortp-proxy")
     rank = dist.get_rank()
     world_size = dist.get_world_size()
     _validate_model_preset(args)
@@ -1496,7 +1515,7 @@ def run_live_benchmark() -> None:
         else None
     )
     capacity = _load_bandwidth_matrix(args, world_size)
-    policy = BandwidthAwareRefitPolicy(
+    policy = None if is_anchortp else BandwidthAwareRefitPolicy(
         bandwidth_gbps=capacity,
         reference_bandwidth_gbps=capacity,
         reroute_penalty_us=args.live_reroute_penalty_us,
@@ -1514,16 +1533,35 @@ def run_live_benchmark() -> None:
     )
 
     print_rank_0("Synchronizing initial TP2 weights into TP4...")
-    swap_model_weights(
-        src_model,
-        dst_model,
-        refit_method=NCCLCopyService(
-            group=reshard_group, p2p_order=args.live_p2p_order
-        ),
-        group=reshard_group,
-        bandwidth_policy=policy,
-        release_cache=False,
-    )
+    if is_anchortp:
+        from megatron.core.resharding.refit import _unwrap_model_cores
+
+        initial_source, initial_target, initial_experts = _unwrap_model_cores(src_model, dst_model)
+        args._anchortp_capacity = capacity
+        args._anchortp_hosts, args._anchortp_links = anchortp.topology(
+            control_group, args.live_bandwidth_profile,
+        )
+        initial_plan = build_centralized_reshard_plan(
+            initial_source, initial_target, num_experts=initial_experts, group=reshard_group,
+        )
+        initial_sync = anchortp.execute(
+            initial_plan, initial_source, initial_target,
+            NCCLCopyService(group=reshard_group, p2p_order="task-round", ensure_all_ranks_participate=True),
+            bandwidth=capacity, hosts=args._anchortp_hosts, links=args._anchortp_links,
+            max_tasks=args.live_max_wave_tasks, max_bytes=args.live_max_wave_bytes,
+            group=reshard_group, control_group=control_group,
+        )
+    else:
+        swap_model_weights(
+            src_model,
+            dst_model,
+            refit_method=NCCLCopyService(
+                group=reshard_group, p2p_order=args.live_p2p_order
+            ),
+            group=reshard_group,
+            bandwidth_policy=policy,
+            release_cache=False,
+        )
 
     model_parallel_cuda_manual_seed(args.seed + 101)
     src_context = StaticInferenceContext(
@@ -1625,7 +1663,7 @@ def run_live_benchmark() -> None:
         **reverse_planner_kwargs,
     )
 
-    trackers = {
+    trackers = {} if is_anchortp else {
         tp: ResidualBandwidthTracker(
             capacity,
             ewma_alpha=args.live_bandwidth_ewma,
@@ -1633,7 +1671,7 @@ def run_live_benchmark() -> None:
         )
         for tp in (src_tp, dst_tp)
     }
-    schedulers = {
+    schedulers = {} if is_anchortp else {
         tp: ResidualBandwidthWaveScheduler(
             trackers[tp],
             max_waves=args.live_max_waves,
@@ -1711,7 +1749,7 @@ def run_live_benchmark() -> None:
         0 if args.live_scheduler_mode == "baseline" else args.live_pack_max_item_bytes
     )
     ensure_wave_participation = bool(
-        args.live_scheduler_mode != "baseline" and args.live_max_waves > 1
+        is_anchortp or (args.live_scheduler_mode != "baseline" and args.live_max_waves > 1)
     )
     services = {
         "2->4-candidate": NCCLCopyService(
@@ -1880,7 +1918,7 @@ def run_live_benchmark() -> None:
                 if guard is not None
                 else (
                     "baseline"
-                    if args.live_scheduler_mode == "baseline"
+                    if is_anchortp or args.live_scheduler_mode == "baseline"
                     else "candidate"
                 )
             )
@@ -1957,8 +1995,8 @@ def run_live_benchmark() -> None:
             source_tp = 4
             requested_plan_variant = plan_variant
 
-        tracker = trackers[source_tp]
-        scheduler = schedulers[source_tp]
+        tracker = trackers.get(source_tp)
+        scheduler = schedulers.get(source_tp)
         foreground_key = (source_tp, active_experts, pressure_ranks)
         foreground_baseline_used_ms = foreground_tpot_ms[foreground_key]
         active_foreground_links = _collect_active_collective_links(
@@ -2043,6 +2081,8 @@ def run_live_benchmark() -> None:
             adaptive_decision_s = 0.0
         flying_shared_state = args.live_method_variant == "flying-serving-proxy"
         kv_only_migration = args.live_method_variant == "llumnix-proxy"
+        if is_anchortp:
+            args._anchortp_prealloc_start = time.perf_counter()
         if args.live_release_standby_weights:
             prepare_start = time.perf_counter()
             before_allocate = cuda_memory()
@@ -2059,7 +2099,7 @@ def run_live_benchmark() -> None:
             end=0 if flying_shared_state else snapshot_end,
             include_non_kv=not (flying_shared_state or kv_only_migration),
         )
-        hybrid_decision = _hybrid_fast_path_decision(
+        hybrid_decision = {"enabled": False, "reason": "anchortp"} if is_anchortp else _hybrid_fast_path_decision(
             full_plan,
             tracker,
             args,
@@ -2105,7 +2145,7 @@ def run_live_benchmark() -> None:
                 weight_checked = torch.cuda.Event()
                 weight_checked.record()
             check_tpot_ms = []
-            for _ in range(args.live_max_overlap_steps):
+            for _ in range(0 if is_anchortp else args.live_max_overlap_steps):
                 if _all_ready(weight_checked.query(), control_group):
                     break
                 _, step_ms = _decode(source_model, source_context, args, token_value=token_counter)
@@ -2114,6 +2154,8 @@ def run_live_benchmark() -> None:
             weight_check_overlap_s = time.perf_counter() - check_start
 
         delta_end = source_context.sequence_len_offset
+        if is_anchortp and delta_end != snapshot_end:
+            raise AssertionError("AnchorTP KV offset changed during paused migration")
         delta_plan = restrict_plan_sequence(
             full_plan,
             start=snapshot_end,
@@ -2125,7 +2167,7 @@ def run_live_benchmark() -> None:
             # The post-overlap KV delta contains one operation per KV shard and
             # can still be several thousand P2P items on a reverse TP switch.
             # Keep it under the same NCCL FIFO bound as the main migration.
-            delta_tasks = collect_transfer_tasks(
+            delta_tasks = [] if is_anchortp else collect_transfer_tasks(
                 delta_plan, target_bundle, group=reshard_group
             )
             delta_chunk_size = directional_max_wave_tasks[direction] or max(
@@ -2208,6 +2250,8 @@ def run_live_benchmark() -> None:
         pointer_start = time.perf_counter()
         active_tp = 2 if args.live_repeat_forward and direction == "2->4" else next_tp
         pointer_switch_s = _all_max(time.perf_counter() - pointer_start, control_group)
+        if is_anchortp:
+            pause_s = _all_max(time.perf_counter() - switch_start, control_group)
         (
             validation_diff,
             token_counter,
@@ -2296,13 +2340,22 @@ def run_live_benchmark() -> None:
             "candidate_route_available": candidate_route_available,
             "packing_candidate_available": packing_candidate_available,
             "base": base_metrics,
-            "residual_bandwidth": tracker.snapshot(),
+            "residual_bandwidth": tracker.snapshot() if tracker is not None else None,
             "migration_first_guard": guard.snapshot() if guard is not None else None,
             "dual_objective_guard": guard.snapshot() if guard is not None else None,
             "online_plan_controller": (
                 plan_controller.snapshot() if plan_controller is not None else None
             ),
         }
+        if is_anchortp:
+            record.update(
+                prealloc_s=base_metrics["prealloc_s"], pause_s=pause_s,
+                reload_bytes=base_metrics["reload_bytes"], overlap_steps=base_metrics["overlap_steps"],
+                scheduling_mode=base_metrics["execution_mode"], paths=base_metrics["paths"],
+                implementation=anchortp.IMPLEMENTATION,
+            )
+            if any(record[key] != 0 for key in ("reload_bytes", "overlap_steps", "delta_tokens")):
+                raise AssertionError("AnchorTP fault-free switch must have zero reload, overlap and delta")
         records.append(record)
         if parallel_groups is not None:
             # Save existing immutable plan references only, after switch_wall_s.
@@ -2366,7 +2419,7 @@ def run_live_benchmark() -> None:
         "method_variant": args.live_method_variant,
         "proxy_semantics": {
             "flying-serving-proxy": "resident weights and shared-KV cutover lower bound",
-            "anchortp-proxy": "bandwidth-aware full-state minimal-source migration",
+            "anchortp-proxy": "fixed-source static-path scheduling with paused full-state migration",
             "llumnix-proxy": "request/KV-only live migration with resident target weights",
         }.get(args.live_method_variant, "full weight and KV migration"),
         "model_preset": args.live_model_preset,
@@ -2450,11 +2503,17 @@ def run_live_benchmark() -> None:
         "switches": records,
         "copy_service_by_rank": copy_service_by_rank,
         "final_active_tp": active_tp,
-        "final_residual_bandwidth": trackers[src_tp].snapshot(),
+        "final_residual_bandwidth": trackers[src_tp].snapshot() if not is_anchortp else None,
         "final_residual_bandwidth_by_tp": {
             str(tp): tracker.snapshot() for tp, tracker in trackers.items()
         },
     }
+    if is_anchortp:
+        result.update(anchortp.provenance(REPO_ROOT))
+        result["initial_sync"] = initial_sync
+        for record in records:
+            record["code_commit"] = result["code_commit"]
+            record["code_dirty"] = result["code_dirty"]
     if source_search_config is not None:
         import hashlib
 

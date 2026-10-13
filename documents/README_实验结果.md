@@ -39,10 +39,10 @@ WeaveTP 扩容 switch wall 相对 Fixed-2048 降低 **38.7%**，相对 Direction
 | WeaveTP（历史） | 8.787 ± 0.135 | 3.092 ± 0.084 | 9.585 ± 0.156 |
 | Live-default | 8.769 ± 0.374 | 2.911 ± 0.149 | 9.542 ± 0.424 |
 | Flying Serving-proxy | 约 0.000004907 | 0 | 0.790 ± 0.021 |
-| AnchorTP-proxy | 19.472 ± 0.345 | 2.250 ± 0.162 | 20.255 ± 0.351 |
+| AnchorTP-proxy：旧代理（含 WeaveTP residual 与改道） | 19.472 ± 0.345 | 2.250 ± 0.162 | 20.255 ± 0.351 |
 | Llumnix-proxy | 0.496 ± 0.066 | 0.045 ± 0.008 | 1.341 ± 0.185 |
 
-WeaveTP 历史 switch wall 比 AnchorTP-proxy 低约 52.7%，但 Transport 反而高约 37.4%；相对 Live-default 的 switch wall 高约 0.5%。因此不能说“所有指标、所有基线都最好”。
+WeaveTP 历史 switch wall 比 AnchorTP 旧代理低约 52.7%，但 Transport 反而高约 37.4%；相对 Live-default 的 switch wall 高约 0.5%。上述 AnchorTP 数值及分析均只对应旧代理。本分支 `anchortp-fixed-paths-v1` 尚无新 GPU 性能结果，新旧实现不能合并求均值或混作同一方法比较。
 
 Flying Serving-proxy 使用驻留/共享状态语义，Llumnix-proxy 只搬 KV，而 WeaveTP 和 AnchorTP-proxy 的状态范围不同。前两者更短不等于同工作量下更快，WeaveTP 也不能把与 AnchorTP-proxy 的差距写成对官方 AnchorTP 的已证实加速。Flying 代理没有可比的迁移重叠 TPOT 样本，Excel 记为“不适用”，不是 0 ms。
 

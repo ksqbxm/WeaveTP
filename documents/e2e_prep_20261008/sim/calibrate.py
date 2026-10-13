@@ -84,11 +84,16 @@ def main():
             calib["prefill"][str(tp)] = [av, 1.0 / bv if bv > 0 else 1e9]
             report.append(f"TP{tp} prefill：{av:.3f} s + tokens / {1.0/bv if bv > 0 else float('inf'):.0f}（{len(pre[tp])} 点）")
     sw = {}
+    anchor_versions = set()
     for f in a.cycle:
         for run in json.load(open(f)):
             m = VARIANT.get(run.get("method"))
             if not m or "switches" not in run:
                 continue
+            if m == "anchortp":
+                anchor_versions.add(run.get("implementation") or "legacy-weavetp-proxy")
+                if len(anchor_versions) > 1:
+                    raise ValueError("不能混合不同 AnchorTP 实现的校准结果，请分开输入")
             for w in run["switches"]:
                 sw.setdefault(m, {}).setdefault(w["dir"], []).append(w)
     if sw:
@@ -102,6 +107,8 @@ def main():
                 calib["switch"][m][d] = [wa, wb, sa, sb]
                 report.append(f"{m} {d}：墙钟 {wa:.2f} s + {wb:.2f} s/GB，前台步 {sa:.1f} + {sb:.2f}/GB（{len(ws)} 次，KV {min(kv):.1f}–{max(kv):.1f} GB/卡）")
     calib["report"] = report
+    if anchor_versions:
+        calib["anchortp_implementation"] = next(iter(anchor_versions))
     json.dump(calib, open(a.out, "w"), indent=1, ensure_ascii=False)
     print("\n".join(report))
     print(f"已写 {a.out}")

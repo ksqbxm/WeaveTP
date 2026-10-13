@@ -15,7 +15,8 @@ HOLD4=${CYCLE_HOLD_TP4:-0}          # 每次扩容后在 TP4 上连续解码的�
 HOLD2=${CYCLE_HOLD_TP2:-0}          # 每次缩容后在 TP2 上连续解码的步数（恢复期）
 
 # 1) 取分支、导出快照（不动仓库工作区）；把包装器放进快照，并让快照里的启动脚本可以换入口
-git -C "$REPO" -c http.version=HTTP/1.1 fetch -q origin codex/standby-weight-storage || exit 2
+REF=${ANCHORTP_REF:-codex/anchortp-faithful}
+git -C "$REPO" -c http.version=HTTP/1.1 fetch -q origin "$REF" || exit 2
 SHA=$(git -C "$REPO" rev-parse FETCH_HEAD); echo "SHA=$SHA" | tee "$OUT/sha.txt"
 SNAP=$BASE/cyc_${SHA:0:7}
 if [[ ! -f "$SNAP/code/current/examples/rl/cycle_bench.py" ]]; then
@@ -35,7 +36,7 @@ method_env() {
     weavetp) echo RELEASE_STANDBY_WEIGHTS=1 METHOD_VARIANT=moetp++-hybrid SCHEDULER_MODE=residual \
       DISABLE_SOURCE_REROUTE=0 ADAPTIVE_HYBRID=1 ADAPTIVE_RESIDUAL_MAX_WAVES=4 ALLOW_AWARE_SHRINK=1 \
       REROUTE_MIN_GAIN_PCT=0 EXPANSION_MAX_WAVE_TASKS=4096 SHRINK_MAX_WAVE_TASKS=2048 MAX_WAVE_TASKS=2048 ;;
-    anchortp) echo RELEASE_STANDBY_WEIGHTS=1 METHOD_VARIANT=anchortp-proxy SCHEDULER_MODE=residual \
+    anchortp) echo RELEASE_STANDBY_WEIGHTS=1 METHOD_VARIANT=anchortp-proxy SCHEDULER_MODE=anchortp \
       DISABLE_SOURCE_REROUTE=1 ADAPTIVE_HYBRID=0 ALLOW_AWARE_SHRINK=0 MAX_WAVE_TASKS=2048 ;;
     llumnix) echo RELEASE_STANDBY_WEIGHTS=0 METHOD_VARIANT=llumnix-proxy SCHEDULER_MODE=baseline \
       DISABLE_SOURCE_REROUTE=1 ADAPTIVE_HYBRID=0 ALLOW_AWARE_SHRINK=0 MAX_WAVE_TASKS=2048 ;;
@@ -57,6 +58,7 @@ for KV in $KV_LIST; do
     nvidia-smi --query-gpu=timestamp,index,memory.used --format=csv,noheader,nounits -lms 200 > "$D/smi.csv" &
     SMI=$!
     ( cd "$SNAP/code/current" && env $(method_env "$M") \
+        ANCHORTP_CODE_COMMIT="$SHA" \
         NNODES=1 NODE_RANK=0 MASTER_ADDR=127.0.0.1 MASTER_PORT=$port \
         ENTRYPOINT_OVERRIDE=examples/rl/cycle_bench.py CYCLE_KV_TOKENS=$KV CYCLE_EXTRA_STEPS=$EXTRA CYCLE_HOLD_TP4=$HOLD4 CYCLE_HOLD_TP2=$HOLD2 \
         CHECKPOINT=/data/models/DeepSeek-V2-Lite-megatron-v2 ${PROFILE:+PROFILE=$PROFILE} OUT_DIR="$D/run" \

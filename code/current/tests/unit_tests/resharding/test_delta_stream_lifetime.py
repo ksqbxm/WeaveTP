@@ -86,7 +86,8 @@ def test_delta_writeback_finishes_before_receive_storage_reuse(release, dtype, d
         index = (slice(None), slice(tid * 2, tid * 2 + 2))
         sends.append(TransferOp("kv::k", 0, True, index, index, tid))
         recvs.append(TransferOp("kv::k", 0, False, index, index, tid))
-    ns = dict(torch=torch, nullcontext=nullcontext, args=SimpleNamespace(live_release_standby_weights=release),
+    ns = dict(torch=torch, nullcontext=nullcontext, is_anchortp=False,
+              args=SimpleNamespace(live_release_standby_weights=release),
               delta_plan=ReshardPlan(sends, recvs), source_bundle=source, target_bundle=target,
               service=Service(), reshard_group=None, directional_max_wave_tasks={direction: 1}, direction=direction,
               collect_transfer_tasks=lambda *_a, **_kw: [SimpleNamespace(task_id=i) for i in range(2)],

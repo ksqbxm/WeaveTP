@@ -14,7 +14,7 @@ import pytest
 import test_live_defaults as defaults
 import torch
 
-from megatron.core.resharding import live
+from megatron.core.resharding import anchortp, live
 from megatron.core.resharding.async_execution import launch_reshard_plan
 from megatron.core.resharding.refit import BandwidthAwareRefitPolicy
 from megatron.core.resharding.utils import ReshardPlan, TransferOp
@@ -28,7 +28,7 @@ from tools.resharding.standby_weights import (
 
 
 def run_coordinator(tree, *, release=False, bitwise=False, identity=False, repeat=False, fault=False, check_polls=1,
-                    peer_check_polls=0, peer_weight_valid=True, capacity=128):
+                    peer_check_polls=0, peer_weight_valid=True, capacity=128, anchor=False):
     names = ["run_live_benchmark", "add_live_args", "StaticKVCacheModule", "LiveStateBundle",
              "_run_async_waves", "_parse_rank_phases", "_pressure_ranks_for_switch",
              "_active_experts_for_switch", "_set_active_experts", "_poison_kv", "_percentile",
@@ -45,6 +45,12 @@ def run_coordinator(tree, *, release=False, bitwise=False, identity=False, repea
                       live_active_experts_tuple=(0, 1), live_active_expert_phases_tuple=((0, 1),),
                       live_switches=4, live_repeat_forward=repeat, live_scheduler_mode="baseline",
                       live_max_waves=1, live_max_overlap_steps=2)
+    if anchor:
+        vars(args).update(live_method_variant="anchortp-proxy", live_max_wave_tasks=1,
+                          live_force_bandwidth_routing=True, live_allow_aware_shrink=True,
+                          live_online_replan=True, live_adaptive_hybrid=True,
+                          live_online_migration_first_guard=True, live_pack_target_bytes=100,
+                          live_pack_max_item_bytes=50)
     groups = SimpleNamespace(rank=lambda: 0, size=lambda: 1)
     models, releases, written = [], [], []
     pg = SimpleNamespace(tp=groups, dp=groups, ep=groups)
@@ -53,7 +59,7 @@ def run_coordinator(tree, *, release=False, bitwise=False, identity=False, repea
         def __init__(self):
             super().__init__()
             self.w = torch.nn.Parameter(torch.arange(12.).reshape(3, 4), requires_grad=False)
-            self.config, self.pg_collection = SimpleNamespace(), pg
+            self.config, self.pg_collection = SimpleNamespace(num_moe_experts=args.num_experts), pg
         def cuda(self):
             return self
 
@@ -113,6 +119,8 @@ def run_coordinator(tree, *, release=False, bitwise=False, identity=False, repea
         def __init__(self, **_):
             self.producer_stream = None
             self.sends, self.recvs = [], []
+        def set_task_order(self, ids):
+            self.order = ids
         def submit_send(self, tensor, _peer, task_id=None):
             self.sends.append((task_id, tensor))
         def submit_recv(self, tensor, _peer, task_id=None):
@@ -162,6 +170,7 @@ def run_coordinator(tree, *, release=False, bitwise=False, identity=False, repea
     clock = itertools.count()
     ns.update(get_args=lambda: args, dist=SimpleNamespace(
         get_rank=lambda: 0, get_world_size=lambda **_: 4, new_group=lambda **_: groups,
+        all_reduce=lambda *_a, **_kw: None, ReduceOp=SimpleNamespace(MAX=0, SUM=1),
         barrier=lambda **_: None, broadcast_object_list=lambda *_a, **_kw: None,
         all_gather_object=lambda out, value, **_: out.__setitem__(slice(None), [value] * len(out))),
         time=SimpleNamespace(perf_counter=lambda: next(clock) / 1000), statistics=__import__("statistics"),
@@ -181,12 +190,48 @@ def run_coordinator(tree, *, release=False, bitwise=False, identity=False, repea
         audit_weight_checksums=audit_weight_checksums,
         release_standby=release_hook, cuda_memory=lambda: {"allocated": 0, "reserved": 0},
         _write_results=lambda _, result: written.append(result), json=SimpleNamespace(dumps=lambda *_a, **_kw: ""))
+    ns["REPO_ROOT"] = defaults.ROOT
+    if anchor:
+        for name in ("BandwidthAwareRefitPolicy", "ResidualBandwidthTracker", "ResidualBandwidthWaveScheduler",
+                     "swap_model_weights", "_hybrid_fast_path_decision"):
+            ns[name] = Mock(side_effect=AssertionError("AnchorTP entered WeaveTP path: " + name))
     with patch("torch.cuda.Stream", return_value=Mock()), patch("torch.cuda.Event", Event), \
             patch("torch.cuda.stream", return_value=nullcontext()), patch("torch.cuda.current_stream", return_value=Mock()), \
+            patch("torch.cuda.synchronize"), patch.object(anchortp, "dist", ns["dist"]), \
+            patch.object(anchortp, "collect_transfer_tasks", tasks), \
+            patch.object(anchortp, "time", ns["time"]), \
             patch("tools.resharding.standby_weights.cuda_memory", return_value={"allocated": 0, "reserved": 0}), \
             patch("tools.resharding.standby_weights.dist", ns["dist"]):
         ns["run_live_benchmark"]()
     return written[0], models, releases
+
+
+@pytest.mark.parametrize("release", [False, True])
+def test_anchor_initial_expansion_shrink_are_paused_and_batched(release):
+    result, models, releases = run_coordinator(defaults.CURRENT, release=release, anchor=True, check_polls=100)
+    assert result["implementation"] == anchortp.IMPLEMENTATION
+    assert result["initial_sync"]["execution_mode"] == "anchortp"
+    assert not result["bandwidth_aware_plan"] and not result["bandwidth_aware_shrink"]
+    assert result["final_residual_bandwidth"] is None
+    assert not result["adaptive_hybrid"] and not result["online_replan"]
+    assert result["pack_target_bytes"] == 0
+    assert len(releases) == (5 if release else 0)
+    assert torch.isfinite(models[0].w).all()
+    for row in result["switches"]:
+        assert row["reload_bytes"] == row["overlap_steps"] == row["delta_tokens"] == 0
+        assert 0 < row["prealloc_s"] <= row["base"]["wall_s"] <= row["pause_s"] <= row["switch_wall_s"]
+        assert row["base"]["waves"] == 3  # max_waves=1 must not truncate or unbound batches.
+        assert all(wave["tasks"] == 1 for wave in row["base"]["wave_records"])
+        assert row["scheduling_mode"] == "anchortp"
+        assert row["code_commit"] == result["code_commit"]
+    if release:
+        for row in result["standby_weight_storage"]["ranks"][0]["switches"]:
+            assert row["weight_check_overlap_steps"] == 0 and row["all_weights_finite"]
+
+
+def test_anchor_invalid_weights_reject_cutover_without_decode():
+    with pytest.raises(AssertionError, match="cutover rejected"):
+        run_coordinator(defaults.CURRENT, release=True, anchor=True, fault=True)
 
 
 def test_actual_default_coordinator_result_matches_frozen_main():

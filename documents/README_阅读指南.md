@@ -26,7 +26,7 @@ WeaveTP（旧名 MOETP++）研究 MoE 推理中的动态张量并行重配置。
 
 ## 三篇对比论文究竟是哪三篇
 
-Flying Serving、AnchorTP、Llumnix。它们在现有工作中的身份是 **同一原型内实现的机制代理（proxy）**，不是三套官方系统的完整性能复现。历史实验还包含普通基线 Live-default 和当时的 WeaveTP，共 5 个方法、每个 5 次独立启动。
+Flying Serving、AnchorTP、Llumnix。它们在现有工作中的身份是 **同一原型内实现的机制代理（proxy）**，不是三套官方系统的完整性能复现。历史实验还包含普通基线 Live-default 和当时的 WeaveTP，共 5 个方法、每个 5 次独立启动。历史 AnchorTP 统一标为 **旧代理（含 WeaveTP residual 与改道）**，不能和本分支 `anchortp-fixed-paths-v1` 合并统计；当前实现与未实测范围见 [AnchorTP 说明](baselines/README_AnchorTP.md)。
 
 另外有 HarMoEny、ExpertFlow、FIRM-MoE 的复现准备或算法级小型验证，不能混称为上述三篇的正式对比，也不能当成已经完成的原生性能复现。
 

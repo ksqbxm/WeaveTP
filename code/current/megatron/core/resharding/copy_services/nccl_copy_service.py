@@ -188,6 +188,7 @@ class NCCLCopyService(CopyService):
         self._recv_pack_cache: dict[tuple, torch.Tensor] = {}
         self.last_launch_stats: dict[str, object] = {}
         self.p2p_order = p2p_order.lower() if p2p_order is not None else None
+        self._task_order = None
         valid_orders = {
             "send-recv",
             "nccl-round",
@@ -258,7 +259,14 @@ class NCCLCopyService(CopyService):
     def _task_sort_key(self, task_id: Optional[int], fallback_index: int):
         if task_id is None:
             return (1, fallback_index)
+        order = getattr(self, "_task_order", None)
+        if order is not None:
+            return (0, -1 if task_id < 0 else order[task_id])
         return (0, int(task_id))
+
+    def set_task_order(self, task_ids):
+        """Preserve a caller's globally agreed order with task-round transport."""
+        self._task_order = {task_id: index for index, task_id in enumerate(task_ids)}
 
     def _partition_pack_groups(self, ops, peer_attr: str):
         """Group small, task-addressable tensors into deterministic peer buckets."""

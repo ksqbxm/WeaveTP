@@ -90,7 +90,7 @@ METHODS = {
     "weavetp":        dict(mem="single", peak=True,  kv_move=True,  sw={"2->4": (5.4, 6), "4->2": (15.4, 22)}),
     "weavetp_ideal":  dict(mem="single", peak=False, kv_move=True,  sw={"2->4": (5.4, 6), "4->2": (15.4, 22)}, own_plan=True),
     "weavetp_cutkv":  dict(mem="single", peak=True,  kv_move=True,  kv_cutover=True, sw={"2->4": (5.4, 6), "4->2": (15.4, 22)}, own_plan=True),
-    # AnchorTP 代理（L2 修正）：原复现只关掉误开的带宽感知改道；residual 调度、每波 2048 任务、每波解码 1 步。
+    # AnchorTP 历史模拟：旧代理（含 WeaveTP residual 与改道）的外推；保留假设数值，不代表新实现。
     # 16 卡墙钟按 8 卡历史 20.26 s 乘 16/8 卡默认计划的比例约 1.8 估为 36 s；期间解码步数取默认计划在 2048 上限下的波数（16 卡约 24 / 44）。
     "anchortp":       dict(mem="single", peak=True,  kv_move=True,  sw={"2->4": (36.0, 24), "4->2": (36.0, 44)}),
     "anchortp_20s":   dict(mem="single", peak=True,  kv_move=True,  sw={"2->4": (20.26, 12), "4->2": (20.26, 22)}),
