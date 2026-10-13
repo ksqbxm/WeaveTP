@@ -79,6 +79,24 @@ def test_missing_process_owner_cannot_pass(monkeypatch, tmp_path):
     assert machine.check_gpus(tmp_path, 0, "yiwei")["idle_state"] == "unknown"
 
 
+@pytest.mark.parametrize("ignored,memory,owner,name,mps_owner,state", [
+    ([7],200,"yiwei","nvidia-cuda-mps-server","yiwei","idle"),
+    ([],137,"yiwei","nvidia-cuda-mps-server","yiwei","busy"),
+    ([1,4,5],137,"yiwei","nvidia-cuda-mps-server","yiwei","busy"),
+    ([7],201,"yiwei","nvidia-cuda-mps-server","yiwei","busy"),
+    ([7],137,"other","nvidia-cuda-mps-server","yiwei","busy"),
+    ([7],137,"yiwei","python","yiwei","busy"),
+    ([7],137,"yiwei","nvidia-cuda-mps-server",None,"busy"),
+])
+def test_ignore_util_only_skips_named_gpu_utilization(monkeypatch,tmp_path,ignored,memory,owner,name,mps_owner,state):
+    gpu_queries(monkeypatch,memory=memory,utilization=100,owner=owner,name=name)
+    result=machine.check_gpus(tmp_path,0,mps_owner,ignored)
+    assert result["idle_state"]==state
+    assert result["ignore_util_gpus"]==ignored
+    assert result["gpu_uuids"]=={i:f"GPU-{i}" for i in range(8)}
+    assert result["memory_used_mib"]["GPU-7"]==memory
+
+
 @pytest.mark.parametrize("environment,option,expected", [
     (None, [], None), ("yiwei", [], "yiwei"),
     ("other", ["--mps-owner", "yiwei"], "yiwei"), ("yiwei", ["--mps-owner", ""], None),

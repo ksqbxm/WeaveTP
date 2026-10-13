@@ -18,6 +18,7 @@ from tools.resharding.nostop import (
     pressure,
     quick,
     quick_benchmark,
+    quick_preflight,
     quick_protocol,
     summarize,
 )
@@ -83,7 +84,7 @@ def test_order_restores_each_pair_and_empties_cache_before_every_request(tmp_pat
     ("desc","early_exit"),("desc","last_exit"),("desc","cleanup")])
 def test_supervisor_go_only_after_pressure_memory_gate_and_owned_cleanup(monkeypatch, tmp_path, order, failure):
     rows = quick_protocol.schedule(1,order)
-    args = NS(out=tmp_path,k=1,order=order,timeout=100,python="python",mps_owner="yiwei")
+    args = NS(out=tmp_path,k=1,order=order,timeout=100,python="python",mps_owner="yiwei",ignore_util_gpus=[1,4,5])
     actions, children = [], []
     class Manager:
         def __init__(self,path): self.root,self.required,self.children=path,[],[]
@@ -105,7 +106,10 @@ def test_supervisor_go_only_after_pressure_memory_gate_and_owned_cleanup(monkeyp
             return ["fixture cleanup failure"] if failure=="cleanup" else []
     monkeypatch.setattr(quick.supervisor,"Processes",Manager)
     monkeypatch.setattr(quick.machine,"ComputeMonitor",lambda *a: NS(start=lambda:None,close=lambda:None))
-    monkeypatch.setattr(quick.machine,"require_idle",lambda *a: actions.append(("idle","W2")))
+    def idle(path, owner, ignored):
+        assert ignored == [1,4,5]
+        actions.append(("idle","W2"))
+    monkeypatch.setattr(quick.machine,"require_idle",idle)
     monkeypatch.setattr(quick,"check_method_outputs",lambda *a: None)
     def gate(manager,stress,specs,prefix,minimum,*,resident):
         assert minimum==22 and len(resident)==8
@@ -156,6 +160,7 @@ def run(args,method,rows,env):
     with (args.out/'methods_called.txt').open('a') as f: f.write(method+'\\n')
     if method==FAILED_METHOD: raise FAILURE
 quick.run_method=run
+quick.quick_preflight.run=lambda args,env,manifest: None
 quick.write_figures=lambda root: (_ for _ in ()).throw(AssertionError('must not summarize failure'))
 raise SystemExit(quick.main(sys.argv[1:]))
 """.replace("FAILED_METHOD",repr(failed_method)).replace("FAILURE",error)
@@ -186,7 +191,10 @@ def write_quick(root):
     artifacts.write_json(root/"manifest.json",dict(cases=[[quick_protocol.case_name(m,r),r["level"],m,"cycle"]
         for m in ("W2","B0") for r in rows],profile_sha256="synthetic",checkpoint="synthetic",
         stress_links=quick_protocol.LINKS,stress_bytes=common.STRESS_BYTES,stress_sync_every=16,
-        processes_per_pair=quick_protocol.COUNTS))
+        processes_per_pair=quick_protocol.COUNTS,ignore_util_gpus=[1,4,5],
+        matmul_preflight=dict(gpus=[dict(gpu=i,tflops=166 if i in (2,3,6) else 240,
+            clock_sample={"clocks.current.sm":"2010" if i in (2,3,6) else "2800"}) for i in range(8)],
+            reported_clock_locks=quick_preflight.REPORTED_CLOCK_LOCKS)))
     for method in ("W2","B0"):
         for row in rows:
             case=root/quick_protocol.case_name(method,row)
@@ -225,6 +233,12 @@ def test_quick_csv_and_multiple_runs_are_readable_without_reader_adapters(tmp_pa
         with (root/"downtime.csv").open(encoding="utf-8") as f: rows=list(csv.DictReader(f))
         assert len(rows)==8 and {r["n"] for r in rows}=={"1"}
         assert {float(r["b0_migration_bandwidth_gbps"]) for r in rows}=={800/1e9}
+        for filename in ("downtime.csv","step_latency.csv","measurements.csv"):
+            with (root/filename).open(encoding="utf-8") as stream:
+                for row in csv.DictReader(stream):
+                    notes=json.loads(row["notes"])
+                    assert notes["ignore_util_gpus"]==[1,4,5] and len(notes["matmul_gpus"])==8
+                    assert notes["reported_clock_locks"]["gpus"]==[2,3,6]
         assert len((root/"step_latency.csv").read_text().splitlines())==9
     merged=summarize.collect([tmp_path/"launch_a",tmp_path/"launch_b"])
     assert not merged["errors"] and len(merged["launches"])==16

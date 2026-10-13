@@ -32,11 +32,12 @@ def process_owner(pid):
     return pwd.getpwuid(Path(f"/proc/{pid}").stat().st_uid).pw_name
 
 
-def gpu_snapshot(root, mps_owner):
+def gpu_snapshot(root, mps_owner, ignore_util_gpus=()):
     gpu = supervisor.capture(["nvidia-smi", f"--query-gpu={GPU_FIELDS}", "--format=csv,noheader,nounits"], root, "gpu_query", timeout=15)
     apps = supervisor.capture(["nvidia-smi", "--query-compute-apps=pid,process_name,gpu_uuid,used_memory", "--format=csv,noheader,nounits"], root, "gpu_processes", timeout=15)
     sample = {"host_ns": time.perf_counter_ns(), "exit_code": gpu["exit_code"], "csv": gpu["output"],
-              "process_query": apps, "processes": [], "memory_used_mib": {}, "idle_state": "unknown", "idle_errors": []}
+              "process_query": apps, "processes": [], "memory_used_mib": {}, "gpu_uuids": {},
+              "ignore_util_gpus": list(ignore_util_gpus), "idle_state": "unknown", "idle_errors": []}
     if gpu["exit_code"] or apps["exit_code"]:
         sample["idle_errors"].append("nvidia-smi GPU/process query failed")
         return sample
@@ -46,12 +47,13 @@ def gpu_snapshot(root, mps_owner):
                 or len({r[1].strip() for r in rows}) != 8):
             raise ValueError("expected all eight local GPUs with distinct UUIDs")
         for row in rows:
-            uuid, used, utilization = row[1].strip(), int(row[4]), int(row[5])
+            uuid, used = row[1].strip(), int(row[4])
+            sample["gpu_uuids"][int(row[0])] = uuid
             sample["memory_used_mib"][uuid] = used
             if used > 200:
                 sample["idle_errors"].append(f"GPU {row[0]} ({uuid}): memory.used={used} MiB exceeds 200 MiB")
-            if utilization != 0:
-                sample["idle_errors"].append(f"GPU {row[0]} ({uuid}): utilization.gpu={utilization}% must be 0%")
+            if int(row[0]) not in ignore_util_gpus and int(row[5]) != 0:
+                sample["idle_errors"].append(f"GPU {row[0]} ({uuid}): utilization.gpu={row[5]}% must be 0%")
         owners = {}
         for row in csv.reader(apps["output"].splitlines(), skipinitialspace=True):
             pid, name, uuid, memory = (field.strip() for field in row)
@@ -68,13 +70,13 @@ def gpu_snapshot(root, mps_owner):
     return sample
 
 
-def check_gpus(root, seconds, mps_owner):
+def check_gpus(root, seconds, mps_owner, ignore_util_gpus=()):
     """The same occupancy policy for machine inspection and every launch."""
     root = Path(root)
     root.mkdir(parents=True, exist_ok=True)
     samples, end = [], time.monotonic() + seconds
     while True:
-        sample = gpu_snapshot(root, mps_owner)
+        sample = gpu_snapshot(root, mps_owner, ignore_util_gpus)
         samples.append(sample)
         if sample["idle_state"] != "idle" or time.monotonic() >= end:
             break
@@ -84,6 +86,7 @@ def check_gpus(root, seconds, mps_owner):
                 "idle_errors": sample["idle_errors"], "mps_owner": mps_owner,
                 "cuda_mps_pipe_directory": os.environ.get("CUDA_MPS_PIPE_DIRECTORY"),
                 "compute_processes": sample["processes"], "memory_used_mib": sample["memory_used_mib"],
+                "ignore_util_gpus": list(ignore_util_gpus), "gpu_uuids": sample["gpu_uuids"],
                 "idle_clock_is_not_load_stability": True,
                 "checks": {"processes": sample["process_query"]}, "gpu_fields": GPU_FIELDS.split(","),
                 "environment": {k: os.environ[k] for k in ENV_NAMES if k in os.environ}, "gpu_ranges": {}}
@@ -106,10 +109,11 @@ def check_gpus(root, seconds, mps_owner):
     return document
 
 
-def require_idle(root, mps_owner):
-    machine = check_gpus(root, 0, mps_owner)
+def require_idle(root, mps_owner, ignore_util_gpus=()):
+    machine = check_gpus(root, 0, mps_owner, ignore_util_gpus)
     if machine["idle_state"] != "idle":
         raise RuntimeError(f"GPU state is {machine['idle_state']}: {machine['idle_errors']}; no launch started")
+    return machine
 
 
 def check_memory_recovery(root, mps_owner):

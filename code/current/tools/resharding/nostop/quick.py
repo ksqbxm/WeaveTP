@@ -19,6 +19,7 @@ from tools.resharding.nostop import (
     common,
     machine,
     pressure,
+    quick_preflight,
     quick_protocol,
     summarize,
     supervisor,
@@ -57,7 +58,7 @@ def run_method(args, method, rows, env):
         (directory / "handshake" / row["level"]).mkdir(parents=True, exist_ok=True)
     stress, code = [], 1
     try:
-        machine.require_idle(directory, args.mps_owner)
+        machine.require_idle(directory, args.mps_owner, args.ignore_util_gpus)
         monitor.start()
         gpu = manager.start(["nvidia-smi", f"--query-gpu=timestamp,{machine.GPU_FIELDS}", "--format=csv", "-lms", "200"], "gpu_200ms", env)
         manager.required.append(gpu)
@@ -135,12 +136,18 @@ def write_figures(root):
     if summarize.main([str(root), "--output", str(root / "summary")]):
         raise ValueError("incomplete quick artifacts; see summary/summary.json")
     report = artifacts.read_json(root / "summary/summary.json")
+    manifest = artifacts.read_json(root / "manifest.json")
+    preflight = manifest["matmul_preflight"]
+    notes = dict(ignore_util_gpus=manifest["ignore_util_gpus"],
+                 matmul=quick_preflight.MATMUL, matmul_gpus=preflight["gpus"],
+                 reported_clock_locks=preflight["reported_clock_locks"])
     launches = report["launches"]
     for launch in launches:
         transport = launch["transport_s"]
         if transport is None or transport <= 0:
             raise ValueError("quick needs positive measured Base transport time")
         launch["migration_bandwidth_gbps"] = launch["base_remote_bytes"] / transport / 1e9
+        launch["notes"] = notes
     # Receiver-only remote Base bytes / Base transport seconds; Delta is saved
     # separately, never divided by a Base-only duration.
     bandwidth = {level: statistics.mean(l["migration_bandwidth_gbps"] for l in launches
@@ -149,7 +156,7 @@ def write_figures(root):
     def row(method, level, values, **extra):
         return dict(method=method, level=level, b0_migration_bandwidth_gbps=bandwidth[level],
                     x_label=f"{level} ({bandwidth[level]:.3f} GB/s)", mean=statistics.mean(values) if values else None,
-                    min=min(values) if values else None, max=max(values) if values else None, n=len(values), **extra)
+                    min=min(values) if values else None, max=max(values) if values else None, n=len(values), notes=notes, **extra)
     downtime, latency = [], []
     for method in ("W2", "B0"):
         for level in quick_protocol.COUNTS:
@@ -159,13 +166,13 @@ def write_figures(root):
                 for phase in ("normal", "migration"):
                     values = [l["step_latency_ms"][phase]["mean"] for l in group]
                     latency.append(row(method, level, [v for v in values if v is not None], phase=phase))
-    fields = ["method", "level", "b0_migration_bandwidth_gbps", "x_label", "mean", "min", "max", "n"]
+    fields = ["method", "level", "b0_migration_bandwidth_gbps", "x_label", "mean", "min", "max", "n", "notes"]
     artifacts.write_csv(root / "downtime.csv", downtime, fields)
     artifacts.write_csv(root / "step_latency.csv", latency, ["phase", *fields])
     artifacts.write_json(root / "measurements.json", launches)
     artifacts.write_csv(root / "measurements.csv", launches, ["launch_id", "process_launch_id", "original_switch", "case", "source", "method", "level", "raw_max_gap_s",
         "excess_downtime_s", "normal_tbt_s", "step_latency_ms", "base_bytes", "delta_bytes", "base_remote_bytes",
-        "delta_remote_bytes", "transport_s", "migration_bandwidth_gbps", "wave_count", "plan_variant"])
+        "delta_remote_bytes", "transport_s", "migration_bandwidth_gbps", "wave_count", "plan_variant", "notes"])
 
 
 def main(argv=None):
@@ -175,6 +182,8 @@ def main(argv=None):
     parser.add_argument("--order", choices=("desc", "asc"), default="desc")
     parser.add_argument("--python", default=os.environ.get("PYTHON", sys.executable))
     parser.add_argument("--mps-owner", default=os.environ.get("MPS_OWNER", "yiwei"))
+    parser.add_argument("--ignore-util-gpus", type=quick_preflight.parse_ignored, default="",
+                        help="comma-separated physical GPU indices; skip only their utilization check")
     parser.add_argument("--checkpoint", default=os.environ.get("CHECKPOINT", "/data/models/DeepSeek-V2-Lite-megatron-v2"))
     parser.add_argument("--profile", type=Path, default=os.environ.get("PROFILE", "profiles/moe_tp_8gpu_idle_p2p_v21.json"))
     parser.add_argument("--timeout", type=int, default=7200, help="seconds per torchrun process")
@@ -189,6 +198,8 @@ def main(argv=None):
         print(json.dumps(dict(order=args.order, schedule=rows, torchrun_launches=2,
                               runtime_switches_per_launch=2 + 2 * len(rows), pressure_counts=quick_protocol.COUNTS,
                               stress_links=quick_protocol.LINKS, stress_bytes=common.STRESS_BYTES,
+                              ignore_util_gpus=args.ignore_util_gpus, matmul_preflight=quick_preflight.MATMUL,
+                              ignored_gpu_minimum_fraction=.95, reported_clock_locks=quick_preflight.REPORTED_CLOCK_LOCKS,
                               resident_admission="free + current reserved + current context >= peak allocated + peak context + 1.5 GiB",
                               configs={m: method_config(args, m) for m in ("W2", "B0")}), indent=2))
         return 0
@@ -207,15 +218,18 @@ def main(argv=None):
             raise ValueError("existing checkpoint required")
         profile = args.profile.read_bytes()
         (args.out / "bandwidth_profile.json").write_bytes(profile)
-        artifacts.write_json(args.out / "manifest.json", dict(protocol="nostop_quick_v1", workload=common.kv_workload(),
+        manifest = dict(protocol="nostop_quick_v1", workload=common.kv_workload(),
             cases=[[quick_protocol.case_name(m, r), r["level"], m, "cycle"] for m in ("W2", "B0") for r in rows],
             checkpoint=args.checkpoint, profile_sha256=hashlib.sha256(profile).hexdigest(), order=args.order, k=args.k,
             torchrun_launches=2, runtime_switches_per_launch=2+2*len(rows), schedule=rows,
             stress_links=quick_protocol.LINKS, stress_bytes=common.STRESS_BYTES, stress_sync_every=16,
             processes_per_pair=quick_protocol.COUNTS, l3_processes=7,
-            sample_semantics="K repeated measurements per level sharing one model load/warm cycle; not independent launches"))
+            ignore_util_gpus=args.ignore_util_gpus,
+            sample_semantics="K repeated measurements per level sharing one model load/warm cycle; not independent launches")
+        artifacts.write_json(args.out / "manifest.json", manifest)
         env = supervisor.isolated_env(args.out)
         env.update(PYTHON=args.python, CHECKPOINT=args.checkpoint, MPS_OWNER=args.mps_owner or "")
+        quick_preflight.run(args, env, manifest)
         for method in ("W2", "B0"):
             print(f"START {method}", flush=True)
             run_method(args, method, rows, env)

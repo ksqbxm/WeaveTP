@@ -1,5 +1,17 @@
 # TP2→TP4 Decode 连续性实验
 
+## 2026-10-13：quick 利用率例外与启动 matmul 测速
+
+新增 `--ignore-util-gpus 1,4,5`，编号是 `nvidia-smi` 的物理 GPU index。默认空列表保持严格利用率检查；仅显式列出的卡跳过 `utilization.gpu=0`，**每卡显存 ≤200 MiB、MPS_OWNER 进程白名单照常检查**。启动测速前、测速后的空闲确认以及 W2/B0 各方法启动前使用相同列表。diag/formal 的规则不变；参数重复、越界或覆盖全部 8 卡会直接报错（必须保留至少一张测速参考卡）。
+
+每次 quick 在加载 W2/B0 之前测速一次：按 GPU UUID 隔离、依次启动 8 个短进程，每个只见本卡；执行 bf16 `8192×8192` matmul，预分配输出，预热 5 次、CUDA Event 计时 50 次，吞吐 = `2×8192³×50 / 秒 / 10¹²`。计时提交之后采样 SM/显存时钟、最大 SM 时钟、P-state 和温度，不在 GPU 起止 Event 之间插入主机查询。进程退出即释放测速 context/缓存，不把它留在模型进程中。所有子进程的命令、PID、退出码、原始时钟读数与日志保存在 `preflight/`，结果逐卡写入 manifest；失败也保留已有样本。
+
+只对忽略列表中的卡执行门槛：**吞吐 ≥ 未忽略卡中的最大吞吐 × 0.95**，恰好低 5% 可以通过，超过 5% 即停止，不加载 W2/B0。使用最大值而非平均值；未忽略的低频卡不会单独导致失败。测速全部结束后固定等待 2 秒，让本任务的短测速退出 NVML 最近利用率窗口，再复查空闲；初始 busy 仍立即退出，没有等待外部任务结束的循环。不修改任何锁频设置。
+
+`manifest.json` 的 `ignore_util_gpus` / `matmul_preflight` 以及根目录 `downtime.csv`、`step_latency.csv`、`measurements.csv` 的 JSON `notes` 列保存忽略卡、8 卡测速和时钟。`reported_clock_locks` 明确标注 **SL3060 GPU2/3/6、2010 MHz、source=user_report**，来源是本次用户确认的锁频信息；实测时钟另列，不能把吞吐较低自动当成锁频，也不将这份 SL3060 报告当作其他服务器的配置检测结果。锁频标注本身不构成拒绝条件。
+
+新增工作全部位于 benchmark 外层；`benchmark.py`、`quick_benchmark.py`、`benchmark_live_moe_tp.py` 保持不变。本次 **268 项 CPU 测试通过**，验证例外范围、显存/进程规则、95% 边界、锁频标注、设备隔离、5+50 次计时顺序、失败停止、dry-run 及 CSV 备注；quick.sh 参数透传和 README 14 段 Bash 命令的语法检查通过。GPU 测速须在服务器运行后取得真实结果。
+
 ## 2026-10-13：合成 KV 切换审计与失败退出
 
 针对 SL3060 的 `nrmse=0.411 / cosine=0.9156`，本次增加实际位内容审计；尚无该失败运行的 KV checksum，不能提前断言它只是数值噪声。下方 quick 命令固定到本次修复版本。
@@ -53,7 +65,7 @@ git -C "$REPO" checkout --detach b91369e6ee91304ba07e1dd9e03e8df7cf6e76a6
 export NOSTOP="$REPO/code/current/tools/resharding/nostop"
 export QUICK_OUT=/data/ubuntu/lxh/weavetp/nostop/quick_$(date +%Y%m%d_%H%M%S)
 mkdir -p "$QUICK_OUT"
-nohup bash "$NOSTOP/quick.sh" --out "$QUICK_OUT/run" --k 2 --order desc > "$QUICK_OUT/quick.log" 2>&1 < /dev/null &
+nohup bash "$NOSTOP/quick.sh" --out "$QUICK_OUT/run" --k 2 --order desc --ignore-util-gpus 1,4,5 > "$QUICK_OUT/quick.log" 2>&1 < /dev/null &
 echo "$!" > "$QUICK_OUT/nohup_pid.txt"
 tail -f "$QUICK_OUT/quick.log"
 ```
