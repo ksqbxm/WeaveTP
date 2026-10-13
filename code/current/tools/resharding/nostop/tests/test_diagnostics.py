@@ -415,11 +415,15 @@ def test_post_cutover_completes_target_before_numerical_validation(monkeypatch):
         context.sequence_len_offset += 1
         return torch.tensor([float(token_value)]), 12.0
     d.b._decode = decode
-    d.b._comparison_metrics = lambda *a:dict(nrmse=0,cosine=1,top1_agreement=1)
+    d.b._comparison_metrics = lambda *a:dict(nrmse=0,cosine=1,top1_agreement=1,max_abs=0)
     d.b._all_ready = lambda valid,_group:valid
     d.b._all_max = lambda value,_group:value
     d.args.live_logit_max_nrmse,d.args.live_logit_min_cosine,d.args.live_logit_min_top1_agreement = .4,.93,0
-    output = d.validate(None,model,source,model,target,d.args,None,100)
+    def audit(*args, **kwargs):
+        assert order == [("post",target)]*10
+        return dict(kv_passed=True, weights_passed=True)
+    d.audit.check = audit
+    output = d.validate(model,source,model,target,d.args,None,100)
     assert order == [("post",target)]*10 + [("validation",source)]*10
     assert source.sequence_len_offset == target.sequence_len_offset == 2058
     assert output == (0.0,110,12.0,12.0)

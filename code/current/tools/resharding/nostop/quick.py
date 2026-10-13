@@ -22,6 +22,7 @@ from tools.resharding.nostop import (
     quick_protocol,
     summarize,
     supervisor,
+    trace_metrics,
 )
 
 
@@ -96,20 +97,38 @@ def run_method(args, method, rows, env):
             time.sleep(.2)
         check(require_running=False)
         manager.stop(process)
-        code = process.returncode
-        if code:
-            raise RuntimeError(f"{method} exited {code}; see {directory / 'benchmark.log'}")
+        if process.returncode:
+            raise RuntimeError(f"{method} exited {process.returncode}; see {directory / 'benchmark.log'}")
+        check_method_outputs(args.out, method, rows)
         for row in rows:
             # Existing Restart reader discovers CASE.log beside the case.
             (args.out / f"{quick_protocol.case_name(method, row)}.log").hardlink_to(directory / "benchmark.log")
+        code = 0
     finally:
-        cleanup = manager.cleanup()
-        monitor.close()  # foreign processes are recorded only, never signalled
-        (directory / "exit_code.txt").write_text(f"{code}\n")
-        for row in rows:
-            (args.out / quick_protocol.case_name(method, row) / "exit_code.txt").write_text(f"{code}\n")
-        if cleanup:
-            raise RuntimeError(f"quick owned-process cleanup failed: {cleanup}")
+        try:
+            cleanup = manager.cleanup()
+            monitor.close()  # foreign processes are recorded only, never signalled
+            if cleanup:
+                raise RuntimeError(f"quick owned-process cleanup failed: {cleanup}")
+        except BaseException:
+            code = 1
+            raise
+        finally:
+            (directory / "exit_code.txt").write_text(f"{code}\n")
+            for row in rows:
+                (args.out / quick_protocol.case_name(method, row) / "exit_code.txt").write_text(f"{code}\n")
+
+
+def check_method_outputs(root, method, rows):
+    """A zero child exit without complete evidence is still a failed method."""
+    for row in rows:
+        directory = root / quick_protocol.case_name(method, row) / "run"
+        artifacts.read_json(directory / "routes.json")
+        for rank in range(8):
+            if not artifacts.read_json(directory / f"memory_rank{rank}.json")["complete"]:
+                raise ValueError(f"incomplete memory evidence: {directory}, rank {rank}")
+        trace_metrics.summarize_trace(trace_metrics.load_traces(directory), method, "cycle",
+                                      artifacts.read_json(directory / "result.json"))
 
 
 def write_figures(root):
@@ -203,9 +222,10 @@ def main(argv=None):
         write_figures(args.out)
         code = 0
     except SystemExit as error:
-        code = int(error.code)
+        code = int(error.code or 1)
         status["error"] = f"interrupted {code}"
     except Exception as error:
+        code = 1
         status["error"] = f"{type(error).__name__}: {error}"
         print(status["error"], file=sys.stderr, flush=True)
     finally:

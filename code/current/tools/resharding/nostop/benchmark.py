@@ -22,6 +22,7 @@ from tools.resharding.nostop.common import (
     kv_workload,
 )
 from tools.resharding.nostop.cuda_memory import StageMemory
+from tools.resharding.nostop.validation import CutoverAudit, synthetic_logit_check
 
 
 def clock_identity():
@@ -60,6 +61,8 @@ class Diagnostic:
         self.first_target = set()
         self.origin = None
         self.routes = None
+        self.audit = CutoverAudit(self)
+        self.logit_metrics = []
 
     def is_measured(self, index):
         return index == self.args.live_switches - 1
@@ -164,6 +167,8 @@ class Diagnostic:
             for model, context in ((src_model, src_context), (dst_model, dst_context)):
                 self.restore_prefix(model, context)
             self.torch.cuda.current_stream().synchronize()  # outside measured window
+            self.audit.check(src_model, src_context, dst_model, dst_context, control_group,
+                             stage="restore", weights=False)
             token_counter = self.args.live_prompt_tokens + 32
             for i in range(12):
                 self.phase = "normal_warmup" if i < 2 else "normal"
@@ -233,8 +238,9 @@ class Diagnostic:
             self.marks.append({"switch": self.index, "name": "target_first_decode_complete", "host_ns": completed})
         return logits, elapsed
 
-    def validate(self, original, src_model, src_context, dst_model, dst_context, args, group, token):
-        if self.index < 0 or self.origin is None:
+    def validate(self, src_model, src_context, dst_model, dst_context, args, group, token):
+        initial = self.index < 0 or self.origin is None
+        if initial:
             # Gloo-only initialization: choose one real TP2 prefix per request
             # domain so both replicas and TP4 start from bit-identical contents.
             local = dict(rank=self.rank, request_domain=args.live_request_domain_id,
@@ -246,31 +252,47 @@ class Diagnostic:
             self.prefix = synthetic_kv.canonical_prefix(gathered, args.live_request_domain_id, self.torch)
             self.restore_prefix(src_model, src_context)
             self.restore_prefix(dst_model, dst_context)
-            value = original(src_model, src_context, dst_model, dst_context, args, group, token)
-            self.memory.observe_context("after_prefill_validation")
-            self.memory.begin("plan_setup")
-            return value
-        self.memory.begin(f"post_switch_{self.index}")
-        count = self.extra if self.is_measured(self.index) else 1
+            audit = self.audit.check(src_model, src_context, dst_model, dst_context, group, stage="initial")
+        else:
+            self.memory.begin(f"post_switch_{self.index}")
+        count = self.extra if not initial and self.is_measured(self.index) else 1
         targets, dst_ms, src_ms, diffs = [], [], [], []
-        self.phase, self.wave = "post", None
+        self.phase, self.wave = "initial_validation" if initial else "post", None
         for step in range(count):
             output, ms = self.b._decode(dst_model, dst_context, args, token_value=token + step)
             targets.append(output)
             dst_ms.append(ms)
         self.phase = "validation"
+        if not initial:
+            # Post decodes only append beyond 2048. Audit the immutable prefix
+            # after first-target completion, before comparing logits or releasing source weights.
+            audit = self.audit.check(src_model, src_context, dst_model, dst_context, group, stage="cutover")
         for step, target in enumerate(targets):
             source, ms = self.b._decode(src_model, src_context, args, token_value=token + step)
             metrics = self.b._comparison_metrics(source, target, group)
-            valid = (metrics["nrmse"] <= args.live_logit_max_nrmse
-                     and metrics["cosine"] >= args.live_logit_min_cosine
-                     and metrics["top1_agreement"] >= args.live_logit_min_top1_agreement)
-            if not self.b._all_ready(valid, group):
-                raise AssertionError(f"post-cutover logits mismatch: {metrics}")
-            diffs.append(self.b._all_max(float((source.float() - target.float()).abs().max().item()), group))
+            within = synthetic_logit_check(metrics, args, audit)
+            self.logit_metrics.append(dict(switch=self.index, step=step, token_value=token + step,
+                                           policy="record_only_after_bit_content_audits",
+                                           within_thresholds=within, metrics=metrics))
+            diffs.append(metrics["max_abs"])
             src_ms.append(ms)
-        self.memory.observe_context(f"after_switch_{self.index}_validation")
+        self.memory.observe_context("after_prefill_validation" if initial else f"after_switch_{self.index}_validation")
+        if initial:
+            self.memory.begin("plan_setup")
         return max(diffs), token + count, self.b._all_max(statistics.mean(src_ms), group), self.b._all_max(statistics.mean(dst_ms), group)
+
+    def write_failure(self, error):
+        self.memory.finish()
+        directory = Path(self.args.live_json_output).parent
+        directory.mkdir(parents=True, exist_ok=True)
+        memory = self.memory.document(complete=False)
+        raw = dict(schema_version=1, complete=False, rank=self.rank, error=str(error),
+                   workload=kv_workload(), validation_audits=self.audit.records, logit_metrics=self.logit_metrics,
+                   weight_reference=self.audit.weight_reference, memory=memory,
+                   decodes=[{k: v for k, v in r.items() if k != "events"} for r in self.decodes],
+                   milestones=self.marks, state_checks=self.states, waves=self.waves)
+        for name, value in ((f"memory_rank{self.rank}.json", memory), (f"trace_rank{self.rank}.json", raw)):
+            (directory / name).write_text(json.dumps(value, indent=2), encoding="utf-8")
 
     def write(self, original, args, result):
         self.memory.finish()
@@ -293,6 +315,8 @@ class Diagnostic:
                "measured_switch": measured, "stall_pause": self.stall_pause,
                "decodes": self.decodes, "transfers": self.transfers, "waves": self.waves,
                "milestones": self.marks, "state_checks": self.states,
+               "validation_audits": self.audit.records, "logit_metrics": self.logit_metrics,
+               "weight_reference": self.audit.weight_reference,
                "independent_warmup": self.warmup_evidence,
                "workload": kv_workload(), "memory": memory,
                "peak_allocated": max(p["max_memory_allocated"] for p in memory["phases"]),
@@ -321,6 +345,7 @@ class Diagnostic:
         result["nostop_diagnostic"] = {"mode": self.mode, "measured_switch": measured,
                                        "capacity_budget": capacity_budget(), "stall_pause": self.stall_pause,
                                        "workload": kv_workload(),
+                                       "logit_validation": "record_only_after_KV_and_weight_bit_content_audits",
                                        "memory_files": [f"memory_rank{rank}.json" for rank in range(8)]}
         original(args, result)
         return raw
@@ -331,7 +356,7 @@ def main(diagnostic_type=Diagnostic):
 
     original_run, original_decode = b.run_live_benchmark, b._decode
     original_prefill = b._prefill
-    original_validate, original_write = b._validate_cutover, b._write_results
+    original_write = b._write_results
     holder = {}
 
     def run():
@@ -339,18 +364,14 @@ def main(diagnostic_type=Diagnostic):
         holder["diagnostic"] = args._nostop_diagnostic = diagnostic_type(b, args)
         try:
             original_run()
-        except BaseException:
-            diagnostic = holder["diagnostic"]
-            diagnostic.memory.finish()
-            path = Path(args.live_json_output).parent / f"memory_rank{diagnostic.rank}.json"
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(json.dumps(diagnostic.memory.document(complete=False), indent=2), encoding="utf-8")
+        except BaseException as error:
+            holder["diagnostic"].write_failure(error)
             raise
 
     b.run_live_benchmark = run
     b._prefill = lambda *a, **kw: holder["diagnostic"].prefill(original_prefill, *a, **kw)
     b._decode = lambda *a, **kw: holder["diagnostic"].decode(original_decode, *a, **kw)
-    b._validate_cutover = lambda *a, **kw: holder["diagnostic"].validate(original_validate, *a, **kw)
+    b._validate_cutover = lambda *a, **kw: holder["diagnostic"].validate(*a, **kw)
     b._write_results = lambda *a, **kw: holder["diagnostic"].write(original_write, *a, **kw)
     b.main()
 

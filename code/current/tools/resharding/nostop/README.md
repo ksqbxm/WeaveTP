@@ -1,5 +1,19 @@
 # TP2→TP4 Decode 连续性实验
 
+## 2026-10-13：合成 KV 切换审计与失败退出
+
+针对 SL3060 的 `nrmse=0.411 / cosine=0.9156`，本次增加实际位内容审计；尚无该失败运行的 KV checksum，不能提前断言它只是数值噪声。下方 quick 命令固定到本次修复版本。
+
+- 每个 rank 的 `trace_rankN.json` 增加 `validation_audits`：按请求域、层、K/V、全局 head，对 `[0,2048)` 的全部 batch 元素计算原始字节 SHA256，比较 TP2/TP4 及同域全部副本，同时核对初始化基准。保留本 rank 的全部 checksum、跨 rank 失败项、审计开始/完成时间。
+- `stage=initial` 检查首次合成内容与 head 分片是否一致；`restore` 检查 cycle 恢复；`cutover` 检查每次扩容、回切之后的内容。初始化/恢复通过而 cutover 目标不一致时，应沿迁移路径排查，不能通过放松 logits 阈值掩盖。
+- 权重复用 `StandbyWeights.bitwise_checksums()` 的逐参数原始位双 int64 checksum，与首次加载的本 rank、同 TP 布局基准比较，源、目标都审计。基准保存在 `weight_reference`，失败记录包含参数名和 expected/actual。它沿用仓库现有的 checksum 审计语义，并非保存整份 CPU 权重进行逐元素比较。
+- 合成 KV 只有在全 rank KV 与权重审计都通过后，logits 才采用仅记录策略。`logit_metrics` 保存 nrmse、cosine、top1、max_abs、reference_max_abs 等原指标及 `within_thresholds`，不改原阈值。真实 KV 的原始 validator 仍然断言；`benchmark_live_moe_tp.py` 相对 `8ae22e7` 和 `4a9d1fa` 均为零 diff。
+- 切换审计在目标 post Decode 完成后、源侧 logits 比较前执行，检查不会被 post Decode 改写的原始 2048 前缀；恢复审计在正常 Decode 段之前。审计增加窗口外校验耗时，不能将这部分计入 downtime。Decode、Transfer、cutover 路径及其同步点保持不变，没有在迁移窗口增加校验通信。
+- 失败时方法目录仍写出 `complete=false` 的 rank trace 和 memory，包含已取得的审计证据；不伪造成功 result。成功时各测量目录按原有 switch 映射保留对应审计与 logits 指标，现有汇总/回放读取格式保持可用。
+- quick 仅在子进程成功、完整输出检查和本任务清理均成功后写退出码 0。缺文件、提前退出、末档失败、清理失败均返回非零；W2 失败后不启动 B0。根目录 `status.json.exit_code`、`exit_code.txt` 与 quick 进程退出码一致；子进程原始退出码另外保存在 `processes.json` / `benchmark.exit_code.txt`。`quick.sh` 继续通过 `exec` 传递 Python 的退出码。
+
+本次全套 **240 项 CPU 测试通过**，包括原始位单 bit/正负零差异、全局 head 错位、远端副本和权重损坏、原权重释放重建、cycle 基准、审计先于 logits 比较、真实 KV 严格校验、失败 trace、quick 进程实际退出码与状态一致及标准文件读取。14 段 README 命令和 3 个相关 shell 脚本通过 Bash 语法检查；decode/prefill/transfer 包装函数 AST 与 `4a9d1fa` 相同。GPU 上须重新运行确认 KV/权重审计结果；原来的 logits 失败记录不足以证明迁移内容正确。
+
 ## 2026-10-13：quick 最小出数入口
 
 实现 SHA：`4a9d1fa7526e014823a09041f4e2c6643141eb03`。

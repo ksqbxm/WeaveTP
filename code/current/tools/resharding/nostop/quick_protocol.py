@@ -62,7 +62,8 @@ def project(raw, result, row, launch_id):
                     original_switch=index, switch_mapping=mapping, shared_warmup=True)
     trace = copy.deepcopy(raw)
     trace.update(measured_switch=2, quick=metadata)
-    for field in ("decodes", "transfers", "waves", "milestones", "state_checks", "plan_records"):
+    for field in ("decodes", "transfers", "waves", "milestones", "state_checks", "plan_records",
+                  "validation_audits", "logit_metrics"):
         trace[field] = [dict(r, original_switch=r["switch"], switch=mapping[r["switch"]])
                         for r in trace[field] if r["switch"] in mapping]
     for state in trace["state_checks"]:

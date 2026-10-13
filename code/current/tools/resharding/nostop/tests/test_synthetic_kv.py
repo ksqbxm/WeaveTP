@@ -65,14 +65,20 @@ def test_initial_validation_sees_identical_2048_prefix_in_both_layouts(monkeypat
     d.dist = NS(get_rank=lambda group: 0, get_world_size=lambda group: 4,
                 get_process_group_ranks=lambda group: [0,1], all_gather_object=gather)
     model = NS(pg_collection=NS(tp="tp"))
-    def validate(*args):
+    def audit(*args, **kwargs):
         assert src.sequence_len_offset == dst.sequence_len_offset == 2048
         for kind in (0,1):
             source, target = src.key_value_memory_dict[1][kind], dst.key_value_memory_dict[1][kind]
             assert torch.equal(source[:8], real[1][kind][:,:,:2])
             assert torch.equal(source[:2048,:,:1], target[:2048])
-        return "validated"
-    assert d.validate(validate, model, src, model, dst, d.args, "gloo", 39) == "validated"
+        return dict(kv_passed=True, weights_passed=True)
+    d.audit.check = audit
+    d.b._decode = Mock(return_value=(torch.ones(1), 12))
+    d.b._comparison_metrics = Mock(return_value=dict(nrmse=.411, cosine=.9156, top1_agreement=0, max_abs=0))
+    d.b._all_max = lambda value, group: value
+    d.args.live_logit_max_nrmse, d.args.live_logit_min_cosine, d.args.live_logit_min_top1_agreement = .4, .93, 0
+    assert d.validate(model, src, model, dst, d.args, "gloo", 39) == (0,40,12,12)
+    assert not d.logit_metrics[0]["within_thresholds"]
     d.memory.observe_context.assert_called_once_with("after_prefill_validation")
     d.memory.begin.assert_called_once_with("plan_setup")
 
@@ -94,6 +100,7 @@ def test_cycle_discards_normal_tail_and_restores_same_2048_contents(monkeypatch)
             t[ctx.sequence_len_offset].fill_(token_value)
         ctx.sequence_len_offset += 1
     d.b._decode = decode
+    d.audit.check = Mock()
     def run(i):
         return d.before_switch(i,2,model,source,model,target,weights,{},None,None,None,None,999)
     token = run(0)
