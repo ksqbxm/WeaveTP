@@ -2,6 +2,8 @@
 
 ## 2026-10-13：quick 最小出数入口
 
+实现 SHA：`4a9d1fa7526e014823a09041f4e2c6643141eb03`。
+
 CPU 验证：全套 221 项通过，其中 quick 新增 8 项覆盖 desc/asc 顺序、每档 empty_cache、握手与显存门槛、进程清理、dry-run、标准文件读取及多次运行合并。两个相关 Bash 脚本和本 README 的 14 段命令通过语法检查；尚未在服务器执行 GPU 实测。
 
 `quick.sh` 独立启动 `quick.py`，不调用 diag/formal。W2 然后 B0，各一个 torchrun 进程、各加载一次模型。保留 `method_env` 的 W2/B0 参数、8-token 真实 prefill、确定性合成 KV、固定画像、5248 容量和权重释放规则。加载后先执行一个无压力预热周期 2→4→2，然后按 `--order desc|asc` 换档；默认 desc 为 L3→L2→L1→L0，asc 为相反顺序。
@@ -33,7 +35,7 @@ CPU 验证：全套 221 项通过，其中 quick 新增 8 项覆盖 desc/asc 顺
 source /data/ubuntu/lxh/weavetp/env.sh
 export REPO PYTHON MPS_OWNER=yiwei
 git -C "$REPO" fetch origin codex/nostop-diagnostics
-git -C "$REPO" checkout --detach origin/codex/nostop-diagnostics
+git -C "$REPO" checkout --detach 4a9d1fa7526e014823a09041f4e2c6643141eb03
 export NOSTOP="$REPO/code/current/tools/resharding/nostop"
 export QUICK_OUT=/data/ubuntu/lxh/weavetp/nostop/quick_$(date +%Y%m%d_%H%M%S)
 mkdir -p "$QUICK_OUT"
