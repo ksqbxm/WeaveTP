@@ -120,6 +120,8 @@ class Req:
     finish: int = -1
     t_first: float = -1.0   # 首 token 时刻（prefill 那一步结束）
     t_done: float = -1.0    # 最后一个 token 时刻
+    arrive: float = 0.0     # 到达时刻（s）；0 = 闭环，开环负载由脚本填入
+    t_admit: float = -1.0   # 被接纳（开始 prefill）的时刻
 
 
 def load_pools(lengths_csv: str, longout_csv: str):
@@ -245,7 +247,7 @@ class Sim:
         self.m = METHODS[method]
         self.name = method
         self.b_max = b_max
-        self.queue = [Req(q.rid, q.inp, q.out, q.kind, q.seg) for q in reqs]
+        self.queue = [Req(q.rid, q.inp, q.out, q.kind, q.seg, arrive=q.arrive) for q in reqs]
         self.tp = self.m.get("static", 2)
         self.reps = [Replica() for _ in range(WORLD // self.tp)]
         self.ptr = 0
@@ -491,6 +493,9 @@ class Sim:
             if q.rid == stop_rid:
                 reason = "anchor"
                 break
+            if q.arrive > self.T + 1e-9:
+                reason = "arrival"
+                break
             if self.barrier and q.seg > 0 and self.seg_left.get(q.seg - 1, 0) > 0:
                 reason = "barrier"
                 break
@@ -540,12 +545,25 @@ class Sim:
                 span = (min(nf) - self.s + 1) if (nf and not any_admit) else 1
                 self.kvb[seg] = self.kvb.get(seg, 0) + span
             if not any_admit:
+                if reason == "arrival":
+                    ta = self.queue[self.ptr].arrive
+                    nf = [r.next_finish() for r in self.reps if r.next_finish() is not None]
+                    if not nf:                       # 空闲：直接跳到下一条到达
+                        self._add("idle", ta - self.T, 0, occ=0.0)
+                        self.T = ta
+                        continue
+                    dt = t_dec(b, self.tp, max(r.used(self.s) for r in self.reps))
+                    k = max(1, math.ceil((ta - self.T) / dt))
+                    self.decode_until(min(min(nf), self.s + k - 1))   # 只解码到到达时刻附近
+                    continue
                 if not self.jump_to_next_event():
                     break
                 continue
             td, tp_ = t_dec(b, self.tp, max(r.used(self.s) for r in self.reps)), max(t_pf(p, self.tp) for p in pf)
             self._add(self._decode_cat(), td, ndec)
             self._add("prefill", tp_, len(self.just_admitted))
+            for q in self.just_admitted:
+                q.t_admit = self.T
             self.T += td + tp_
             for q in self.just_admitted:
                 q.t_first = self.T
