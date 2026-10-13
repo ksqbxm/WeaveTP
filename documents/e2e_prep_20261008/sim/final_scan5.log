@@ -1,0 +1,34 @@
+
+=== C1 版本 A（无 Flying/Llumnix，own），8k，短段输入档递增  T=8000  计划=own
+切换 | 短段输入档 | 每短段条数 | 总token吞吐: WeaveTP fixed_tp2 fixed_tp4 restart anchortp | 生成token吞吐 WeaveTP | 倍数（两口径相同）| 时长
+1 | [32,127] | 361309 | 6192 4699 3894 6150 6168 | 1936 | 1.32 1.59 1.01 1.00 | 1.70 h
+2 | [128,255] | 65660 | 7480 5053 5225 7343 7398 | 1025 | 1.48 1.43 1.02 1.01 | 1.12 h
+3 | [256,511] | 69432 | 8012 5214 5900 7837 7936 | 778 | 1.54 1.36 1.02 1.01 | 2.00 h
+4 | [512,1024] | 23951 | 7754 5077 5695 7569 7659 | 581 | 1.53 1.36 1.02 1.01 | 2.02 h
+
+=== C2 版本 B（加 Flying/Llumnix，shared），8k，短段输入档递增  T=8000  计划=shared
+切换 | 短段输入档 | 每短段条数 | 总token吞吐: WeaveTP fixed_tp2 fixed_tp4 restart anchortp llumnix flying_view | 生成token吞吐 WeaveTP | 倍数（两口径相同）| 时长
+1 | [32,127] | 361309 | 6192 4699 3894 6150 6168 4415 4465 | 1936 | 1.32 1.59 1.01 1.00 1.40 1.39 | 1.70 h
+2 | [128,255] | 65660 | 7480 5053 5225 7343 7398 4701 4805 | 1025 | 1.48 1.43 1.02 1.01 1.59 1.56 | 1.12 h
+3 | [256,511] | 69432 | 8012 5214 5900 7837 7936 4812 4893 | 778 | 1.54 1.36 1.02 1.01 1.67 1.64 | 2.00 h
+4 | [512,1024] | 23951 | 7754 5077 5695 7569 7659 4783 4853 | 581 | 1.53 1.36 1.02 1.01 1.62 1.60 | 2.02 h
+[525s]
+
+=== C3 版本 A，2k（周期短），短段输入档递增，输入总量 6.5M  T=2000  计划=own
+切换 | 短段输入档 | 每短段条数 | 总token吞吐: WeaveTP fixed_tp2 fixed_tp4 restart anchortp | 生成token吞吐 WeaveTP | 倍数（两口径相同）| 时长
+Traceback (most recent call last):
+  File "/home/user/WeaveTP/documents/e2e_prep_20261008/sim/final_scan5.py", line 63, in <module>
+    report("C3 版本 A，2k（周期短），短段输入档递增，输入总量 6.5M", 2000, A, 'own', tot_in=6_500_000)
+    ~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/user/WeaveTP/documents/e2e_prep_20261008/sim/final_scan5.py", line 43, in report
+    reqs, ns = build(T, N, b, seed, tot_in)
+               ~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/user/WeaveTP/documents/e2e_prep_20261008/sim/final_scan5.py", line 34, in build
+    add_long() if k % 2 == 1 else add_short()
+    ~~~~~~~~^^
+  File "/home/user/WeaveTP/documents/e2e_prep_20261008/sim/final_scan5.py", line 29, in add_long
+    for i, o in rnd.sample(lp, Lk):
+                ~~~~~~~~~~^^^^^^^^
+  File "/usr/lib/python3.13/random.py", line 434, in sample
+    raise ValueError("Sample larger than population or is negative")
+ValueError: Sample larger than population or is negative
