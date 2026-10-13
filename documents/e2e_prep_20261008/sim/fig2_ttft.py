@@ -44,24 +44,25 @@ def metrics(r):
                 ttft_short=st.mean(q.t_first - q.arrive for q in r.reqs if q.kind == 'short'),
                 thr=r.thr, time_h=r.time_s / 3600, n_sw=len(r.switches))
 
-rows = []
-print("切换 | 长请求平均TTFT s：WeaveTP TP2 TP4 Llumnix Flying 重启 | 短请求平均TTFT s | 全部平均TTFT s | 全部p99 TTFT s | 长请求TTFT比（各/WeaveTP） | 全部TTFT比")
-for N in range(1, 9):
-    acc = {m: [] for m in NAMES}
-    for seed in (7, 11, 13):
-        reqs = build_open(N, seed)
-        best = None
-        for mode in ('throttle', 'after_long'):
-            res, _, _ = E.run_all(reqs, b_max=256, methods=G.BARS, shrink_mode=mode, plan_mode='own')
-            mm = {m: metrics(res[m]) for m in NAMES}
-            if best is None or mm['weavetp']['ttft_mean'] < best[0]['weavetp']['ttft_mean']:
-                best = (mm, mode)
-        for m in NAMES:
-            acc[m].append(best[0][m])
-            rows.append(dict(switches=2 * N, N=N, seed=seed, method=m, mode=best[1], **best[0][m]))
-    f = lambda key: ' '.join(f"{st.mean(x[key] for x in acc[m]):.0f}" for m in NAMES)
-    g = lambda key: ' '.join(f"{st.mean(x[key] for x in acc[m]) / st.mean(x[key] for x in acc['weavetp']):.2f}" for m in G.NAMES)
-    print(f"{2*N:3d} | {f('ttft_long')} | {f('ttft_short')} | {f('ttft_mean')} | {f('ttft_p99')} | {g('ttft_long')} | {g('ttft_mean')}", flush=True)
-with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'fig2_ttft_data.csv'), 'w', newline='') as fh:
-    w = csv.DictWriter(fh, fieldnames=list(rows[0])); w.writeheader(); w.writerows(rows)
-print("写入 fig2_ttft_data.csv", len(rows), "行")
+if __name__ == '__main__':
+    rows = []
+    print("切换 | 长请求平均TTFT s：WeaveTP TP2 TP4 Llumnix Flying 重启 | 短请求平均TTFT s | 全部平均TTFT s | 全部p99 TTFT s | 长请求TTFT比（各/WeaveTP） | 全部TTFT比")
+    for N in range(1, 9):
+        acc = {m: [] for m in NAMES}
+        for seed in (7, 11, 13):
+            reqs = build_open(N, seed)
+            best = None
+            for mode in ('throttle', 'after_long'):
+                res, _, _ = E.run_all(reqs, b_max=256, methods=G.BARS, shrink_mode=mode, plan_mode='own')
+                mm = {m: metrics(res[m]) for m in NAMES}
+                if best is None or mm['weavetp']['ttft_mean'] < best[0]['weavetp']['ttft_mean']:
+                    best = (mm, mode)
+            for m in NAMES:
+                acc[m].append(best[0][m])
+                rows.append(dict(switches=2 * N, N=N, seed=seed, method=m, mode=best[1], **best[0][m]))
+        f = lambda key: ' '.join(f"{st.mean(x[key] for x in acc[m]):.0f}" for m in NAMES)
+        g = lambda key: ' '.join(f"{st.mean(x[key] for x in acc[m]) / st.mean(x[key] for x in acc['weavetp']):.2f}" for m in G.NAMES)
+        print(f"{2*N:3d} | {f('ttft_long')} | {f('ttft_short')} | {f('ttft_mean')} | {f('ttft_p99')} | {g('ttft_long')} | {g('ttft_mean')}", flush=True)
+    with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'fig2_ttft_data.csv'), 'w', newline='') as fh:
+        w = csv.DictWriter(fh, fieldnames=list(rows[0])); w.writeheader(); w.writerows(rows)
+    print("写入 fig2_ttft_data.csv", len(rows), "行")
