@@ -16,7 +16,7 @@
 
 ## 2026-10-13：quick 最小出数入口
 
-实现 SHA：`4a9d1fa7526e014823a09041f4e2c6643141eb03`。
+当前实现 SHA：`b91369e6ee91304ba07e1dd9e03e8df7cf6e76a6`（包含上述合成 KV 审计及退出码修复；quick 初版为 `4a9d1fa`）。
 
 CPU 验证：全套 221 项通过，其中 quick 新增 8 项覆盖 desc/asc 顺序、每档 empty_cache、握手与显存门槛、进程清理、dry-run、标准文件读取及多次运行合并。两个相关 Bash 脚本和本 README 的 14 段命令通过语法检查；尚未在服务器执行 GPU 实测。
 
@@ -49,7 +49,7 @@ CPU 验证：全套 221 项通过，其中 quick 新增 8 项覆盖 desc/asc 顺
 source /data/ubuntu/lxh/weavetp/env.sh
 export REPO PYTHON MPS_OWNER=yiwei
 git -C "$REPO" fetch origin codex/nostop-diagnostics
-git -C "$REPO" checkout --detach 4a9d1fa7526e014823a09041f4e2c6643141eb03
+git -C "$REPO" checkout --detach b91369e6ee91304ba07e1dd9e03e8df7cf6e76a6
 export NOSTOP="$REPO/code/current/tools/resharding/nostop"
 export QUICK_OUT=/data/ubuntu/lxh/weavetp/nostop/quick_$(date +%Y%m%d_%H%M%S)
 mkdir -p "$QUICK_OUT"
