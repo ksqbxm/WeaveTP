@@ -260,7 +260,7 @@ if [[ "$REPEAT_FORWARD" == "1" ]]; then
 fi
 
 ENTRYPOINT=${ENTRYPOINT_OVERRIDE:-examples/rl/benchmark_live_moe_tp.py}
-if [[ "$ENTRYPOINT" == tools/resharding/nostop/benchmark.py ]]; then
+if [[ "$ENTRYPOINT" == tools/resharding/nostop/benchmark.py || "$ENTRYPOINT" == tools/resharding/nostop/quick_benchmark.py ]]; then
     # Callable workers inherit the supervisor's process group. The default
     # torchrun subprocess workers create new sessions and escape group cleanup.
     DIST_ARGS+=(--run-path)

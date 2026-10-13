@@ -35,8 +35,9 @@ def collect(runs, cases=None):
                 digest = hashlib.sha256(b"".join(p.read_bytes() for p in paths)).hexdigest()
                 config = artifacts.read_json(directory / "config.json")
                 result_path = directory / "run/result.json"
+                result = artifacts.read_json(result_path) if result_path.exists() else None
                 metrics = trace_metrics.summarize_trace([artifacts.read_json(p) for p in paths], method, mode,
-                                          artifacts.read_json(result_path) if result_path.exists() else None)
+                                          result)
                 if digest in seen:
                     duplicates.append(str(directory.resolve()))
                     continue
@@ -48,6 +49,8 @@ def collect(runs, cases=None):
                           "pressure": {**{k: manifest[k] for k in ("stress_links", "stress_bytes", "stress_sync_every")},
                                        "processes_per_pair": manifest["processes_per_pair"][level] if "processes_per_pair" in manifest else manifest["l3_processes"]} if level != "L0" else None}
                 launches.append({"launch_id": digest, "case": name, "source": str(directory.resolve()),
+                                 "process_launch_id": (result or {}).get("quick", {}).get("process_launch_id", digest),
+                                 "original_switch": (result or {}).get("quick", {}).get("original_switch", metrics["measured_switch"]),
                                  "method": method, "level": level, "cold_mode": mode,
                                  "cohort": hashlib.sha256(json.dumps(cohort, sort_keys=True).encode()).hexdigest()[:16],
                                  "cohort_inputs": cohort, "config": config, **metrics})
@@ -114,11 +117,11 @@ def main(argv=None):
     # The figure compares W2 migration against its own same-launch normal segment.
     # B0 normal samples remain in aggregates.csv and launches.csv.
     artifacts.write_csv(args.output / "step_latency.csv", [r for r in rows if r["phase"] and r["method"] == "W2"], fields)
-    flat = [{**{k: launch[k] for k in (*trace_metrics.GROUP, "launch_id", "case", "plan_variant", "execution_mode", "scheduler", "fallback_reason", "adaptive_reasons_by_rank")},
+    flat = [{**{k: launch[k] for k in (*trace_metrics.GROUP, "launch_id", "process_launch_id", "original_switch", "case", "plan_variant", "execution_mode", "scheduler", "fallback_reason", "adaptive_reasons_by_rank")},
              "phase": phase, "metric": metric, "value": value}
             for launch in report["launches"] for metric, phase, value in metric_points(launch)]
     artifacts.write_csv(args.output / "launches.csv", flat,
-              [*trace_metrics.GROUP, "launch_id", "case", "phase", "metric", "value", "plan_variant", "execution_mode", "scheduler", "fallback_reason", "adaptive_reasons_by_rank"])
+              [*trace_metrics.GROUP, "launch_id", "process_launch_id", "original_switch", "case", "phase", "metric", "value", "plan_variant", "execution_mode", "scheduler", "fallback_reason", "adaptive_reasons_by_rank"])
     print(json.dumps({"launches": len(report["launches"]), "errors": report["errors"], "output": str(args.output)}, ensure_ascii=False))
     return 1 if report["errors"] else 0
 

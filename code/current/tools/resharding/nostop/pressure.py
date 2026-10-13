@@ -20,13 +20,15 @@ def stress_commands(args):
             for src, dst in common.parse_links(args.links) for _ in range(args.processes_per_pair)]
 
 
-def check_pressure_memory(manager, stress, specs, prefix, min_free_gib):
+def check_pressure_memory(manager, stress, specs, prefix, min_free_gib, *, resident=None):
     gpu = supervisor.capture(["nvidia-smi", "--query-gpu=index,uuid,memory.total,memory.used,memory.free",
                    "--format=csv,noheader,nounits"], manager.root, f"{prefix}_gpu_memory")
     apps = supervisor.capture(["nvidia-smi", "--query-compute-apps=pid,gpu_uuid,used_memory",
                     "--format=csv,noheader,nounits"], manager.root, f"{prefix}_process_memory")
     record = {"host_ns": time.perf_counter_ns(), "min_free_gib": min_free_gib,
               "status": "failed", "gpus": [], "stressors": [], "errors": []}
+    if resident is not None:
+        record["resident_model_credit"] = resident
     try:
         if gpu["exit_code"] or apps["exit_code"]:
             raise ValueError("nvidia-smi memory query failed")
@@ -36,6 +38,8 @@ def check_pressure_memory(manager, stress, specs, prefix, min_free_gib):
         if (len(record["gpus"]) != 8 or {g["index"] for g in record["gpus"]} != set(range(8))
                 or len({g["uuid"] for g in record["gpus"]}) != 8):
             raise ValueError("memory gate requires all eight GPUs")
+        if resident is not None and resident.keys() != {g["uuid"] for g in record["gpus"]}:
+            raise ValueError("resident memory sample belongs to a different GPU set")
         usage = {}
         for row in csv.reader(apps["output"].splitlines(), skipinitialspace=True):
             pid, uuid, used = (x.strip() for x in row)
@@ -45,19 +49,23 @@ def check_pressure_memory(manager, stress, specs, prefix, min_free_gib):
                 memory_mib_by_gpu={g["uuid"]: usage.get((process.pid, g["uuid"])) for g in record["gpus"]}))
         record["memory_note"] = "null means PID/GPU not reported by nvidia-smi; no per-client memory is inferred from MPS server usage"
         for g in record["gpus"]:
-            if g["free_mib"] < min_free_gib * 1024:
-                record["errors"].append(f"GPU {g['index']} ({g['uuid']}): free={g['free_mib']} MiB < {min_free_gib} GiB")
+            credit = resident[g["uuid"]] if resident is not None else 0
+            available = g["free_mib"] * 1024**2 + credit
+            g["available_with_resident_gib"] = available / 1024**3
+            if available < min_free_gib * 1024**3:
+                record["errors"].append(f"GPU {g['index']} ({g['uuid']}): free={g['free_mib']} MiB, resident credit={credit} bytes; budget < {min_free_gib} GiB")
     except ValueError as error:
         record["errors"].append(str(error))
     if not record["errors"]:
         record["status"] = "passed"
     artifacts.write_json(manager.root / f"{prefix}_memory.json", record)
     if record["errors"]:
-        raise RuntimeError(f"pressure memory gate failed: {record['errors']}; no model/probe launched")
+        action = "quick stage not admitted" if resident is not None else "no model/probe launched"
+        raise RuntimeError(f"pressure memory gate failed: {record['errors']}; {action}")
     return record
 
 
-def start_stress(manager, args, env, prefix):
+def start_stress(manager, args, env, prefix, *, resident=None):
     specs = stress_commands(args)
     stress = [manager.start(spec["command"], f"{prefix}_{i}", {**env, **spec["env"]}) for i, spec in enumerate(specs)]
     # Every process prints START only after allocations/initialization finish.
@@ -75,7 +83,7 @@ def start_stress(manager, args, env, prefix):
         time.sleep(0.5)
     time.sleep(5)
     manager.required.extend(stress)
-    check_pressure_memory(manager, stress, specs, prefix, args.min_free_gib)
+    check_pressure_memory(manager, stress, specs, prefix, args.min_free_gib, resident=resident)
     return stress
 
 

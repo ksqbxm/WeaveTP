@@ -1,5 +1,62 @@
 # TP2→TP4 Decode 连续性实验
 
+## 2026-10-13：quick 最小出数入口
+
+CPU 验证：全套 221 项通过，其中 quick 新增 8 项覆盖 desc/asc 顺序、每档 empty_cache、握手与显存门槛、进程清理、dry-run、标准文件读取及多次运行合并。两个相关 Bash 脚本和本 README 的 14 段命令通过语法检查；尚未在服务器执行 GPU 实测。
+
+`quick.sh` 独立启动 `quick.py`，不调用 diag/formal。W2 然后 B0，各一个 torchrun 进程、各加载一次模型。保留 `method_env` 的 W2/B0 参数、8-token 真实 prefill、确定性合成 KV、固定画像、5248 容量和权重释放规则。加载后先执行一个无压力预热周期 2→4→2，然后按 `--order desc|asc` 换档；默认 desc 为 L3→L2→L1→L0，asc 为相反顺序。
+
+`run_live_moe_tp_benchmark.sh` 仅为 quick 入口启用已有 `--run-path` 策略，使 torchrun worker 保持在本任务的进程组中，供 supervisor 清理。
+
+每档固定链路 `0:2,1:3,4:6,5:7`，每对 L3/L2/L1/L0 使用 7/3/1/0 个隔离设备的 stressor、64 MiB buffer。每次换档（包括 asc）先在 GPU 进程中 barrier → `empty_cache()` → barrier，读取本次进程的 torch 峰值/context，写 request；外层停止上一档自己的 stressor，启动新档，检查显存，再原子写 go。全部发生在计时窗口之外。门槛不足就停止，不自动调低进程数。
+
+模型已常驻，因此准入采用已确认的口径：**`NVML free + 本 rank 当前 reserved + 当前 context ≥ 全 rank 历史最大 allocated + 全 rank 历史最大 context + 1.5 GiB`**，避免重复扣算本模型。每档保存原始 free、增加的本模型可用预算、A/C 和进程显存；A/C 每次换档更新，不使用旧 L0 文件。
+
+每档测 `--k` 次（默认 2）：恢复同一 2048 KV → 12 次正常 Decode（前 2 次预热）→ 被测 2→4 → 10 次目标 Decode及校验 → 不计入指标的 4→2。默认每个进程实际执行 18 次切换，其中 8 次扩容计入指标；整个 quick 共两次进程启动、16 次测量。CPU 外层在原有容量检查及分配完成后扩展 host 循环，并按“每对切换前恢复 KV”的真实高水位检查 5248 容量；不按累计切换数膨胀 KV 分配。`benchmark_live_moe_tp.py` 保持零 diff，Decode/Transfer/cutover 执行逻辑未改。
+
+自动输出：
+
+- `downtime.csv`：方法 × 档位，Excess Downtime 的 mean/min/max/n，单位秒。
+- `step_latency.csv`：W2 normal/migration × 档位，先算每次测量的最慢 rank 单步 GPU Event 耗时均值，再给 mean/min/max/n，单位 ms；n 是测量次数，不是 token 数。
+- 两张表的 `x_label` / `b0_migration_bandwidth_gbps` 使用同档 B0 的平均实测迁移带宽。带宽 = **远端 Base 接收字节 / Base transport_s / 1e9**，是整个迁移路径的聚合吞吐，包含通信与并发 Decode 的影响，不是裸链路探针。Base/Delta、本地/远端字节分别保存。
+- `measurements.csv/json`：每次测量的 raw gap、normal TBT、excess downtime、step latency、字节、transport、带宽和计划。`summary/` 是现有 `summarize.py` 的完整输出，可直接交给 `replay.py` 和 `restart_estimate.py`，缺失的模拟器输入仍须用户提供。
+
+`methods/W2|B0/run/` 保留完整进程的 `trace_rank0..7.json`、`memory_rank0..7.json`、`result.json`、routes 和日志。每次测量另有 `W2_L3_R1/run/` 等标准目录，含同名全部文件；其 trace 将共享的真实预热周期映射为 0/1、被测扩容映射为 2，保留原始时钟/逻辑步及 `original_switch`。result 的 switches 和权重生命周期也按相同映射选择，其余进程级遥测的范围在 quick 元数据中明确标注。memory 文件保留完整进程的全部原始阶段。`process_launch_id` 标明两次真实进程启动；同一进程内 K 次测量共享模型与预热，不能当作 K 次独立 launch。原始完整轨迹不丢弃。
+
+每个 case 同时提供 `CASE.log`，与所属方法的日志共用文件内容，便于现有 Restart 读取器发现 checkpoint 加载计时；没有可识别计时才沿用 35 秒参考值。
+
+仅保留 MPS 空闲检查、本任务进程组清理和外部进程只读监测；每方法保存 200 ms GPU 采样、1 s compute-apps、外部进程时间段、environment/config、PID、退出状态与完整日志。外部进程记录不触发中断/重跑。没有探针、带宽门槛、frozen.env、失败重试或污染重跑。输出目录必须新建；失败后另选目录重新执行。
+
+服务器复制执行（下方为一个 nohup 启动命令，默认 K=2、desc）：
+
+```bash
+source /data/ubuntu/lxh/weavetp/env.sh
+export REPO PYTHON MPS_OWNER=yiwei
+git -C "$REPO" fetch origin codex/nostop-diagnostics
+git -C "$REPO" checkout --detach origin/codex/nostop-diagnostics
+export NOSTOP="$REPO/code/current/tools/resharding/nostop"
+export QUICK_OUT=/data/ubuntu/lxh/weavetp/nostop/quick_$(date +%Y%m%d_%H%M%S)
+mkdir -p "$QUICK_OUT"
+nohup bash "$NOSTOP/quick.sh" --out "$QUICK_OUT/run" --k 2 --order desc > "$QUICK_OUT/quick.log" 2>&1 < /dev/null &
+echo "$!" > "$QUICK_OUT/nohup_pid.txt"
+tail -f "$QUICK_OUT/quick.log"
+```
+
+改成 `--order asc` 即为升档，同样每档 empty_cache 并重验门槛。进程结束后：
+
+```bash
+cat "$QUICK_OUT/run/status.json" "$QUICK_OUT/run/exit_code.txt"
+cat "$QUICK_OUT/run/downtime.csv" "$QUICK_OUT/run/step_latency.csv"
+tar -C "$(dirname "$QUICK_OUT")" -czf "${QUICK_OUT}.tar.gz" "$(basename "$QUICK_OUT")"
+# 多次 quick 运行一起合并；分别传每次的 run 目录，不传 methods 子目录。
+"$PYTHON" "$NOSTOP/summarize.py" \
+  /data/ubuntu/lxh/weavetp/nostop/quick_第一次/run \
+  /data/ubuntu/lxh/weavetp/nostop/quick_第二次/run \
+  --output /data/ubuntu/lxh/weavetp/nostop/quick_merged
+```
+
+可先使用 `bash "$NOSTOP/quick.sh" --out "$QUICK_OUT/run" --dry-run` 查看顺序和配置，不查询 GPU、不启动进程、不创建输出目录。默认每个 torchrun 的总超时为 7200 秒；两次加载共 36 次切换的真实机时须由服务器日志确定。
+
 ## 2026-10-12：8-token prefill、合成 KV 与 torch 显存预算
 
 实现 SHA：`8d22890be3e4639165571e15382c2eff656202a5`。
@@ -84,7 +141,7 @@ tar -C "$(dirname "$DIAG_OUT")" -czf "${DIAG_OUT}.tar.gz" "$(basename "$DIAG_OUT
 
 依赖方向为入口 → 职责模块。两个执行入口直接使用同一个 supervisor、机器规则和压力模块；正式入口不导入诊断或汇总 CLI。诊断整批执行与正式实验逐 attempt 执行的生命周期不同，因此保留各自编排，不引入通用工作流框架。共享模块不在 import 时查询 GPU 或启动进程。
 
-在 `bb60cf9` 架构重构时，`benchmark.py`、`benchmark_live_moe_tp.py`、`probe.py`、`p2p_link_stressor.py` 和原 benchmark 启动脚本相对 `8ae22e7` 均无修改。当前 `benchmark.py` 的 prefill/初始化和显存采样改动以上文为准，其余这些文件仍为零 diff；200 ms GPU 采样和 1 s compute-apps 采样频率保持不变。`verified_execution_overlap_steps` 仍为 null，kernel 级重叠留待配置冻结后，单独用 1 次 nsys run 验证。
+在 `bb60cf9` 架构重构时，`benchmark.py`、`benchmark_live_moe_tp.py`、`probe.py`、`p2p_link_stressor.py` 和原 benchmark 启动脚本相对 `8ae22e7` 均无修改。后续 `benchmark.py` 的 prefill/初始化/显存采样及 quick 的启动脚本变更见上文；200 ms GPU 采样和 1 s compute-apps 采样频率保持不变。`verified_execution_overlap_steps` 仍为 null，kernel 级重叠留待配置冻结后，单独用 1 次 nsys run 验证。
 
 重构后 188 项 CPU 测试通过（重构前 174 项）。另外对照重构前实现，确认 24 次顺序、四档 stressor 命令、四种配置的单 Launch 指标、冷启动/压力判定、288 种重试状态、dry-run JSON、跨 Launch 汇总及 Restart 估计相同。尚未重新执行 GPU 实验，CPU 验证不代表服务器性能实测。
 

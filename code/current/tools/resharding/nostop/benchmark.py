@@ -61,6 +61,9 @@ class Diagnostic:
         self.origin = None
         self.routes = None
 
+    def is_measured(self, index):
+        return index == self.args.live_switches - 1
+
     def mark(self, name):
         self.marks.append({"switch": self.index, "name": name, "host_ns": time.perf_counter_ns()})
         if name in ("base_done", "delta_done", "target_ready"):
@@ -154,7 +157,7 @@ class Diagnostic:
                     services, weights, (src_context, dst_context), control_group, pairs)
             for service in services.values():
                 service.set_launch_callback(lambda service=service: self.capture_transfer(service))
-        if index in (0, self.args.live_switches - 1):
+        if index == 0 or self.is_measured(index):
             if active_tp != 2:
                 raise AssertionError("measured expansion must start from TP2")
             weights[4]._check_storage(False)
@@ -175,7 +178,7 @@ class Diagnostic:
                             "kv_tokens": (src_context if active_tp == 2 else dst_context).sequence_len_offset,
                             "target_weight_storage_bytes": 0, "target_weight_bytes_required": weights[target].num_bytes,
                             "real_prefill_tokens": 8, "kv_content": kv_workload(),
-                            "measured": index == self.args.live_switches - 1})
+                            "measured": self.is_measured(index)})
         self.phase = "prepare"
         self.memory.begin(f"switch_{index}")
         return token_counter
@@ -248,7 +251,7 @@ class Diagnostic:
             self.memory.begin("plan_setup")
             return value
         self.memory.begin(f"post_switch_{self.index}")
-        count = self.extra if self.index == args.live_switches - 1 else 1
+        count = self.extra if self.is_measured(self.index) else 1
         targets, dst_ms, src_ms, diffs = [], [], [], []
         self.phase, self.wave = "post", None
         for step in range(count):
@@ -272,6 +275,7 @@ class Diagnostic:
     def write(self, original, args, result):
         self.memory.finish()
         memory = self.memory.document(complete=True)
+        measured = max(s["switch"] for s in self.states if s["measured"])
         for row in self.decodes + self.transfers:
             start, end = row.pop("events")
             row["gpu_start_ms"] = self.origin.elapsed_time(start)
@@ -286,7 +290,7 @@ class Diagnostic:
                                                            x["gpu_start_ms"], x["gpu_end_ms"])]
         raw = {"schema_version": 1, "rank": self.rank, "clock": self.clock, "mode": self.mode,
                "clock_anchor": self.clock_anchor,
-               "measured_switch": args.live_switches - 1, "stall_pause": self.stall_pause,
+               "measured_switch": measured, "stall_pause": self.stall_pause,
                "decodes": self.decodes, "transfers": self.transfers, "waves": self.waves,
                "milestones": self.marks, "state_checks": self.states,
                "independent_warmup": self.warmup_evidence,
@@ -314,14 +318,15 @@ class Diagnostic:
         (directory / f"memory_rank{self.rank}.json").write_text(json.dumps(memory, indent=2), encoding="utf-8")
         if self.rank == 0:
             (directory / "routes.json").write_text(json.dumps(self.routes, indent=2), encoding="utf-8")
-        result["nostop_diagnostic"] = {"mode": self.mode, "measured_switch": args.live_switches - 1,
+        result["nostop_diagnostic"] = {"mode": self.mode, "measured_switch": measured,
                                        "capacity_budget": capacity_budget(), "stall_pause": self.stall_pause,
                                        "workload": kv_workload(),
                                        "memory_files": [f"memory_rank{rank}.json" for rank in range(8)]}
         original(args, result)
+        return raw
 
 
-def main():
+def main(diagnostic_type=Diagnostic):
     import benchmark_live_moe_tp as b
 
     original_run, original_decode = b.run_live_benchmark, b._decode
@@ -331,7 +336,7 @@ def main():
 
     def run():
         args = b.get_args()
-        holder["diagnostic"] = args._nostop_diagnostic = Diagnostic(b, args)
+        holder["diagnostic"] = args._nostop_diagnostic = diagnostic_type(b, args)
         try:
             original_run()
         except BaseException:
