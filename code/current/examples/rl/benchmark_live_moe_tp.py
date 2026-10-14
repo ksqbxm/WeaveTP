@@ -1350,8 +1350,10 @@ def run_live_benchmark() -> None:
         raise ValueError("WORLD_SIZE must be divisible by destination TP*EP")
     if args.expert_tensor_parallel_size != src_tp:
         raise ValueError("source expert tensor parallel size must match source TP")
-    if args.live_switches < 1 or args.live_max_waves < 1:
-        raise ValueError("live-switches and live-max-waves must be positive")
+    if args.live_switches < 1:
+        raise ValueError("live-switches must be positive")
+    if not is_anchortp and args.live_max_waves < 1:
+        raise ValueError("live-max-waves must be positive")
     if (
         args.live_max_wave_tasks < 0
         or args.live_expansion_max_wave_tasks < 0
@@ -1379,7 +1381,7 @@ def run_live_benchmark() -> None:
         and args.live_pack_max_item_bytes > args.live_pack_target_bytes
     ):
         raise ValueError("live-pack-max-item-bytes cannot exceed live-pack-target-bytes")
-    if not 1 <= args.live_min_overlap_steps <= args.live_max_overlap_steps:
+    if not is_anchortp and not 1 <= args.live_min_overlap_steps <= args.live_max_overlap_steps:
         raise ValueError("overlap steps must satisfy 1 <= min <= max")
     if args.live_min_transport_gain_pct < 0.0:
         raise ValueError("live minimum transport gain must be non-negative")
@@ -1429,14 +1431,26 @@ def run_live_benchmark() -> None:
         )
     if len(args.live_active_expert_phases_tuple) > 1 and args.live_router_mode != "fixed-hot":
         raise ValueError("active expert phases currently require live-router-mode=fixed-hot")
-    worst_case_tokens = (
-        args.live_prompt_tokens
-        + 1
-        + args.live_switches * (args.live_max_waves * args.live_max_overlap_steps + 2)
-    )
-    if args.live_release_standby_weights:
-        worst_case_tokens += args.live_switches * args.live_max_overlap_steps
-    if worst_case_tokens >= args.max_position_embeddings:
+    if is_anchortp:
+        # One decode per cutover and per newly calibrated expert/pressure phase.
+        # Source and target validation advance their respective KV offsets once.
+        phases = {(args.live_active_experts_tuple, args.live_pressure_ranks_tuple)}
+        phases.update(
+            (_active_experts_for_switch(args, i), _pressure_ranks_for_switch(args, i))
+            for i in range(args.live_switches)
+        )
+        required_tokens = args.live_prompt_tokens + args.live_switches + len(phases)
+        capacity_exceeded = required_tokens > args.max_position_embeddings
+    else:
+        worst_case_tokens = (
+            args.live_prompt_tokens
+            + 1
+            + args.live_switches * (args.live_max_waves * args.live_max_overlap_steps + 2)
+        )
+        if args.live_release_standby_weights:
+            worst_case_tokens += args.live_switches * args.live_max_overlap_steps
+        capacity_exceeded = worst_case_tokens >= args.max_position_embeddings
+    if capacity_exceeded:
         raise ValueError("max-position-embeddings is too small for the requested live run")
 
     expansion_max_wave_tasks = (
@@ -2146,7 +2160,7 @@ def run_live_benchmark() -> None:
                 weight_checked = torch.cuda.Event()
                 weight_checked.record()
             check_tpot_ms = []
-            for _ in range(0 if is_anchortp else args.live_max_overlap_steps):
+            for _ in range(args.live_max_overlap_steps):
                 if _all_ready(weight_checked.query(), control_group):
                     break
                 _, step_ms = _decode(source_model, source_context, args, token_value=token_counter)

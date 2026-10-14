@@ -41,6 +41,8 @@ def configure(args):
     args.live_pack_target_bytes = args.live_pack_max_item_bytes = 0
     args.live_unpack_chunk_bytes = 0
     args.live_p2p_order = "task-round"
+    args.live_max_waves = 0
+    args.live_min_overlap_steps = args.live_max_overlap_steps = 0
 
 
 def topology(control_group, profile=None):

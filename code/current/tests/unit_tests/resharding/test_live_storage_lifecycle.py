@@ -28,7 +28,7 @@ from tools.resharding.standby_weights import (
 
 
 def run_coordinator(tree, *, release=False, bitwise=False, identity=False, repeat=False, fault=False, check_polls=1,
-                    peer_check_polls=0, peer_weight_valid=True, capacity=128, anchor=False):
+                    peer_check_polls=0, peer_weight_valid=True, capacity=128, anchor=False, **arg_overrides):
     names = ["run_live_benchmark", "add_live_args", "StaticKVCacheModule", "LiveStateBundle",
              "_run_async_waves", "_parse_rank_phases", "_pressure_ranks_for_switch",
              "_active_experts_for_switch", "_set_active_experts", "_poison_kv", "_percentile",
@@ -51,6 +51,7 @@ def run_coordinator(tree, *, release=False, bitwise=False, identity=False, repea
                           live_online_replan=True, live_adaptive_hybrid=True,
                           live_online_migration_first_guard=True, live_pack_target_bytes=100,
                           live_pack_max_item_bytes=50)
+    vars(args).update(arg_overrides)
     groups = SimpleNamespace(rank=lambda: 0, size=lambda: 1)
     models, releases, written = [], [], []
     pg = SimpleNamespace(tp=groups, dp=groups, ep=groups)
@@ -69,7 +70,7 @@ def run_coordinator(tree, *, release=False, bitwise=False, identity=False, repea
         return [model]
 
     def context(**_kw):
-        return SimpleNamespace(key_value_memory_dict={1: (torch.zeros(128, 1, 2, 2), torch.zeros(128, 1, 2, 2))},
+        return SimpleNamespace(key_value_memory_dict={1: (torch.zeros(capacity, 1, 2, 2), torch.zeros(capacity, 1, 2, 2))},
                                sequence_len_offset=0, enable_decode_mode=lambda: None)
 
     def prefill(_model, ctx, _args):
@@ -220,7 +221,7 @@ def test_anchor_initial_expansion_shrink_are_paused_and_batched(release):
     for row in result["switches"]:
         assert row["reload_bytes"] == row["overlap_steps"] == row["delta_tokens"] == 0
         assert 0 < row["prealloc_s"] <= row["base"]["wall_s"] <= row["pause_s"] <= row["switch_wall_s"]
-        assert row["base"]["waves"] == 3  # max_waves=1 must not truncate or unbound batches.
+        assert row["base"]["waves"] == 3  # The inherited max_waves=1 must not limit AnchorTP.
         assert all(wave["tasks"] == 1 for wave in row["base"]["wave_records"])
         assert row["scheduling_mode"] == "anchortp"
         assert row["code_commit"] == result["code_commit"]
@@ -232,6 +233,32 @@ def test_anchor_initial_expansion_shrink_are_paused_and_batched(release):
 def test_anchor_invalid_weights_reject_cutover_without_decode():
     with pytest.raises(AssertionError, match="cutover rejected"):
         run_coordinator(defaults.CURRENT, release=True, anchor=True, fault=True)
+
+
+@pytest.mark.parametrize("release", [False, True])
+@pytest.mark.parametrize("legacy_limits", [0, 10000])
+def test_anchor_capacity_ignores_wave_and_overlap_limits(release, legacy_limits):
+    # 8 prefill + 1 initial validation + 4 post-cutover validations.
+    kwargs = dict(anchor=True, release=release, live_max_waves=legacy_limits,
+                  live_min_overlap_steps=legacy_limits, live_max_overlap_steps=legacy_limits)
+    result, _, _ = run_coordinator(defaults.CURRENT, capacity=13, **kwargs)
+    assert result["max_waves"] == 0
+    assert [s["snapshot_tokens"] for s in result["switches"]] == [9, 10, 11, 12]
+    with pytest.raises(ValueError, match="max-position-embeddings"):
+        run_coordinator(defaults.CURRENT, capacity=12, **kwargs)
+
+
+@pytest.mark.parametrize("phases", [
+    {"live_active_expert_phases_tuple": ((0, 1), (2, 3), (0, 1))},
+    {"live_pressure_rank_phases": "0;1;0"},
+])
+def test_anchor_capacity_counts_new_calibration_phases_once(phases):
+    # Six switches revisit the first phase; only one extra calibration is needed.
+    kwargs = dict(anchor=True, live_switches=6, **phases)
+    result, _, _ = run_coordinator(defaults.CURRENT, capacity=16, **kwargs)
+    assert [s["snapshot_tokens"] for s in result["switches"]] == [9, 10, 12, 13, 14, 15]
+    with pytest.raises(ValueError, match="max-position-embeddings"):
+        run_coordinator(defaults.CURRENT, capacity=15, **kwargs)
 
 
 def test_actual_default_coordinator_result_matches_frozen_main():
