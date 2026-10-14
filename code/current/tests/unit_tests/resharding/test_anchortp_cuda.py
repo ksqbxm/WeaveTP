@@ -53,8 +53,9 @@ def run():
             source, target = model(10.0 + rank), model(float("nan"))
             storage = StandbyWeights(target, protected_tensors=tuple(source.parameters()))
             service = NCCLCopyService(p2p_order="task-round", ensure_all_ranks_participate=True)
-            preparation = torch.cuda.Stream()
-            service.producer_stream = preparation
+            preparation = torch.cuda.Stream() if release else None
+            # Match initialization and retained-weight callers: execute owns
+            # the producer dependency; target preparation alone cannot supply it.
             transfers = [(0, 0, 0, 2), (1, 0, 2, 8), (0, 1, 0, 2), (0, 1, 2, 6)]
             if not host_reload:
                 transfers.append((0, 1, 6, 8))

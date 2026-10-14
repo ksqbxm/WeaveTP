@@ -1842,8 +1842,9 @@ def run_live_benchmark() -> None:
         }
         standby_kv_bytes = {tp: storage_bytes(tensors) for tp, tensors in kv_tensors.items()}
         preparation_stream = torch.cuda.Stream()
-        for copy_service in services.values():
-            copy_service.producer_stream = preparation_stream
+        if not is_anchortp:
+            for copy_service in services.values():
+                copy_service.producer_stream = preparation_stream
         if args.live_weight_bitwise_audit:
             weight_references = {tp: storage.bitwise_checksums() for tp, storage in weights.items()}
             torch.cuda.current_stream().synchronize()

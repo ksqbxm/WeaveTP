@@ -11,7 +11,6 @@ import os
 import socket
 import subprocess
 import time
-from contextlib import nullcontext
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -205,18 +204,20 @@ def execute(plan, src_module, dst_module, service, *, bandwidth, hosts, links=No
                     target.copy_(receive, non_blocking=True)
     service.p2p_order = "task-round"
     service.pack_target_bytes = service.pack_max_item_bytes = 0
+    # Source slices become contiguous on this stream after preallocation.
+    # Both local copies and NCCL must wait for that work in every batch.
+    service.producer_stream = torch.cuda.current_stream()
     records = []
     by_id = {task.task_id: task for task in tasks}
     for ids in batches:
         start = time.perf_counter()
         service.set_task_order(ids)
-        with torch.cuda.stream(service.producer_stream) if service.producer_stream is not None else nullcontext():
-            transaction = launch_reshard_plan(
-                filter_plan_by_task_ids(plan, ids), src_module, dst_module, service,
-                group=group, prepared_receives=receives,
-            )
-            transaction.wait().commit()
-            torch.cuda.current_stream().synchronize()
+        transaction = launch_reshard_plan(
+            filter_plan_by_task_ids(plan, ids), src_module, dst_module, service,
+            group=group, prepared_receives=receives,
+        )
+        transaction.wait().commit()
+        service.producer_stream.synchronize()
         elapsed = _maximum(time.perf_counter() - start, control_group)
         transport = _maximum(transaction.transport_elapsed_s or 0.0, control_group)
         records.append({
