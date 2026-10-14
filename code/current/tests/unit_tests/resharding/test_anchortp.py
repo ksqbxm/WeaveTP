@@ -58,7 +58,7 @@ def test_transport_preserves_scheduler_order(monkeypatch):
     send = [SimpleNamespace(task_id=i, tensor=torch.zeros(1), dest_rank=1) for i in [2, 9]]
     recv = [SimpleNamespace(task_id=5, tensor=torch.zeros(1), src_rank=1)]
     ops = service._build_task_round_p2p_ops(send, recv)
-    assert [op.tensor for op in ops] == [send[1].tensor, send[0].tensor, recv[0].tensor]
+    assert [id(op.tensor) for op in ops] == [id(send[1].tensor), id(send[0].tensor), id(recv[0].tensor)]
     assert service._task_sort_key(-1, 0) < service._task_sort_key(9, 0)
 
 
