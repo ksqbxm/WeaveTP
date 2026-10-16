@@ -1,0 +1,9 @@
+{
+  "baseline_commit": "e1a5fd0bb1e70be797e340f7127a5561eb151d51",
+  "tests_run": 3,
+  "failures_including_subtests": 5,
+  "errors": 1,
+  "expected_to_fail": true,
+  "baseline_rejected": true,
+  "gpu_executed": false
+}

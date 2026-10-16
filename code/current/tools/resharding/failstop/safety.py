@@ -1,6 +1,7 @@
 """Read-only GPU/MPS inspection and signalling of registered child processes."""
 
 import os
+import select
 import signal
 import subprocess
 import time
@@ -68,7 +69,7 @@ def mps_snapshot(log, snapshot, explicit_pipe=None):
             continue
         pid, _, comm, args = parts
         executable = Path(args.split()[0]).name
-        if executable == "nvidia-cuda-mps-control" and "-d" in args.split():
+        if executable == "nvidia-cuda-mps-control":
             controls.add(int(pid))
         if executable == "nvidia-cuda-mps-server":
             servers.add(int(pid))
@@ -86,13 +87,14 @@ def mps_snapshot(log, snapshot, explicit_pipe=None):
         except PermissionError:
             # A matching readable daemon PID file can still establish the pipe.
             pass
-    located = {}
+    located, service_pipes = {}, set()
     for pipe in sorted(candidates):
         pidfile = Path(pipe) / "nvidia-cuda-mps-control.pid"
         if pidfile.exists():
             pid = int(pidfile.read_text().strip())
             require(pid in controls, f"stale/unmatched MPS PID file: {pidfile}")
             located[pid] = pipe
+            service_pipes.add(pipe)
     require(set(located) == controls, f"cannot locate actual MPS pipe for daemons {controls-set(located)}")
     require(not servers or controls, "MPS server exists without an inspectable control daemon")
     clients, queried_servers, queries = set(), set(), []
@@ -111,7 +113,7 @@ def mps_snapshot(log, snapshot, explicit_pipe=None):
             clients.update(per_server[server])
         queries.append({"control_pid": pid, "pipe": pipe, "servers": per_server})
     require(servers <= queried_servers, f"unqueried MPS servers: {servers-queried_servers}")
-    result = {"original_pipe": original, "original_pipe_has_service": original in located.values(),
+    result = {"original_pipe": original, "original_pipe_has_service": original in service_pipes,
               "queries": queries, "servers": sorted(queried_servers), "clients": sorted(clients),
               "state": "queried" if controls else "no_daemon_or_server_in_process_inventory"}
     append_json(log, {"mps_snapshot": result})
@@ -141,11 +143,13 @@ def start_ticks(pid):
     return int(stat[stat.rfind(")") + 2:].split()[19])
 
 
-def signal_registered(record, sig, gpu_processes=None):
+def signal_registered(record, sig, gpu_processes=None, wait_timeout=None):
     """PID fd closes the check/signal PID reuse race; no PID from ps is signalled."""
     pid = record["pid"]
     fd = os.pidfd_open(pid)
     try:
+        if select.select([fd], [], [], 0)[0]:
+            return False  # Exited, possibly still awaiting its parent's waitpid.
         require(start_ticks(pid) == record["start_ticks"], "PID start time changed")
         environment = Path(f"/proc/{pid}/environ").read_bytes().split(b"\0")
         require(f"WEAVETP_PROBE_LAUNCH={record['launch']}".encode() in environment,
@@ -156,6 +160,9 @@ def signal_registered(record, sig, gpu_processes=None):
             require(record["role"] == "worker", "fault target must be a worker")
             require(gpu_processes.get(pid) == record["gpu_uuid"], "fault target GPU mismatch")
         signal.pidfd_send_signal(fd, sig)
+        if wait_timeout is not None:
+            require(select.select([fd], [], [], wait_timeout)[0], f"PID {pid} exit unconfirmed")
+        return True
     finally:
         os.close(fd)
 
@@ -170,13 +177,19 @@ class Children:
                "WEAVETP_PROBE_ROLE": role, "PYTHONUNBUFFERED": "1", **(extra_env or {})}
         with (self.root / f"{role}_{len(self.children)}.log").open("w") as log:
             child = subprocess.Popen(argv, env=env, stdout=log, stderr=subprocess.STDOUT)
-        record = {"pid": child.pid, "start_ticks": start_ticks(child.pid), "role": role,
-                  "launch": self.config["launch"], "gpu_uuid": gpu_uuid,
-                  "replacement_for": replacement_for, "node": self.config["node"],
-                  "argv": argv, "start": self.journal.event("spawn", child_pid=child.pid,
-                                                           child_role=role, gpu_uuid=gpu_uuid)}
+        try:
+            record = {"pid": child.pid, "start_ticks": start_ticks(child.pid), "role": role,
+                      "launch": self.config["launch"], "gpu_uuid": gpu_uuid,
+                      "replacement_for": replacement_for, "node": self.config["node"],
+                      "argv": argv, "start": self.journal.event("spawn", child_pid=child.pid,
+                                                               child_role=role, gpu_uuid=gpu_uuid)}
+            append_json(self.root / "registered_processes.jsonl", record)
+        except BaseException:
+            # This unreaped Popen child is ours even if its registry write failed.
+            child.kill()
+            child.wait(timeout=10)
+            raise
         self.children.append((child, record))
-        append_json(self.root / "registered_processes.jsonl", record)
         return child, record
 
     def exited(self, child, record, reason):

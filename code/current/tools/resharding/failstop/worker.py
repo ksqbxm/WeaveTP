@@ -15,6 +15,19 @@ from common import Journal, connect, failed_slots, membership, prefix, require, 
 from safety import parent_death_signal
 
 
+def listen(config, slot, journal, notifications):
+    try:
+        # TCPStore serializes operations per connection. A separate connection
+        # keeps PG rendezvous/abort waits from blocking failure notification.
+        _, bus = connect(config)
+        for epoch in (1, 2):
+            message = bus.wait([f"transition/{epoch}"], timeout=config["launch_timeout_s"])[0]
+            arrival = journal.event("notification", epoch=epoch, slot=slot, command=message)
+            notifications.put((epoch, arrival))
+    except Exception as error:
+        notifications.put(error)
+
+
 def run(config, slot, initial_epoch):
     parent_death_signal()
     import torch
@@ -102,17 +115,9 @@ def run(config, slot, initial_epoch):
         validate_world(epoch)
 
     notifications = queue.Queue()
-
-    def listen():
-        try:
-            for epoch in range(initial_epoch + 1, 3):
-                message = bus.wait([f"transition/{epoch}"], timeout=config["launch_timeout_s"])[0]
-                arrival = journal.event("notification", epoch=epoch, slot=slot, command=message)
-                notifications.put((epoch, arrival))
-        except Exception as error:
-            notifications.put(error)
-
-    threading.Thread(target=listen, daemon=True, name="cpu-failure-notification").start()
+    if initial_epoch == 0:
+        threading.Thread(target=listen, args=(config, slot, journal, notifications),
+                         daemon=True, name="cpu-failure-notification").start()
     if initial_epoch == 2:
         bus.wait(["build/2"])
     build(initial_epoch)

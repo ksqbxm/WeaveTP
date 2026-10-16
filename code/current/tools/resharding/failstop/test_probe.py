@@ -118,6 +118,7 @@ class ControlTests(unittest.TestCase):
                 self.assertEqual(sig, 9)
                 self.assertEqual(contexts[record["pid"]], record["gpu_uuid"])
                 sup.workers[record["slot"]][0].returncode = -9
+                return True
 
             snapshots = [{"gpus": first}] + [{"gpus": empty, "end_local": t} for t in range(3)]
             with patch.object(supervisor, "signal_registered", side_effect=kill) as send, patch.object(supervisor, "gpu_snapshot", side_effect=snapshots):
@@ -164,6 +165,12 @@ class ControlTests(unittest.TestCase):
         self.assertEqual((late["gpu_reclaim_s"], late["reclaim_wait_s"], late["rejoin_join_s"]), (11, 2, 7))
         with self.assertRaises(RuntimeError):
             common.join_timing(1, 12, 10, 11, 17)
+        # A calibrated SL3061 spawn estimate may slightly exceed the SL3060
+        # receipt timestamp; this is not evidence of reversed causal order.
+        estimated = common.join_timing(1, 4, 10, 15.001, 15)
+        self.assertEqual(estimated["rejoin_join_s"], 5)
+        with self.assertRaises(RuntimeError):
+            common.join_timing(1, 4, 16, 17, 15)
 
     def test_summary_never_hides_failed_or_missing_launches(self):
         results = [{**c, "status": "passed", "metrics": {"abort_s": c["index"] + 1}} for c in run_probe.matrix("cpu")]
@@ -180,13 +187,17 @@ class ControlTests(unittest.TestCase):
     def test_outer_timeout_is_failure_and_cleans_registered_children(self):
         with tempfile.TemporaryDirectory() as directory:
             config = {**common.DEFAULTS, "output": str(Path(directory) / "case"),
-                      "node": "SL3060", "launch": "cpu", "kind": "idle"}
+                      "node": "SL3061", "launch": "cpu", "kind": "idle"}
             child = Mock()
             child.wait.side_effect = subprocess.TimeoutExpired("probe", 1)
             children = Mock()
             children.spawn.return_value = child, {}
             children.children = []
-            with patch.object(run_probe, "Children", return_value=children), patch.object(run_probe, "cleanup_registered") as cleanup:
+            service = Mock(children=[])
+            with patch.object(run_probe, "Children", side_effect=[children, service]), \
+                    patch.object(run_probe, "connect", return_value=(Mock(), Mock())), \
+                    patch.object(run_probe, "exchange_terminal"), \
+                    patch.object(run_probe, "cleanup_registered") as cleanup:
                 result = run_probe.run_case(config)
             self.assertEqual(result["status"], "failed")
             self.assertIn("timeout", result["reason"])
@@ -232,6 +243,25 @@ class ReclaimTests(unittest.TestCase):
 
 
 class SafetyTests(unittest.TestCase):
+    def test_foreground_mps_queries_real_pipe_and_preserves_original_alias(self):
+        with tempfile.TemporaryDirectory() as directory:
+            original, explicit = Path(directory) / "a_pipe", Path(directory) / "z_pipe"
+            for pipe in (original, explicit):
+                pipe.mkdir()
+                (pipe / "nvidia-cuda-mps-control.pid").write_text("123")
+            raw = "123 root nvidia-cuda-mps /usr/bin/nvidia-cuda-mps-control -f\n"
+            with patch.dict(safety.os.environ, {"CUDA_MPS_PIPE_DIRECTORY": str(original)}), \
+                    patch.object(Path, "read_bytes", return_value=b""), \
+                    patch.object(safety, "command", side_effect=[raw, "456\n", ""]) as command:
+                mps = safety.mps_snapshot(Path(directory) / "raw", {"gpus": []}, str(explicit))
+            self.assertEqual(mps["state"], "queried")
+            self.assertEqual(mps["servers"], [456])
+            self.assertEqual(mps["clients"], [])
+            self.assertTrue(mps["original_pipe_has_service"])
+            self.assertEqual([c.args[2] for c in command.call_args_list[1:]],
+                             ["get_server_list\n", "get_client_list 456\n"])
+            self.assertEqual(command.call_args.args[3]["CUDA_MPS_PIPE_DIRECTORY"], str(explicit))
+
     def test_mps_error_text_is_not_an_empty_client_list(self):
         self.assertEqual(safety.parse_pids("12\n34\n"), {12, 34})
         self.assertEqual(safety.parse_pids("\n"), set())
@@ -246,9 +276,14 @@ class SafetyTests(unittest.TestCase):
                     safety.command(["nvidia-cuda-mps-control"], Path(directory) / "raw.jsonl", "get_server_list\n")
 
     def test_unlocatable_mps_daemon_stops_case(self):
-        with tempfile.TemporaryDirectory() as directory, patch.object(safety, "command", return_value="123 root nvidia-cuda-mps /usr/bin/nvidia-cuda-mps-control -d\n"), patch.object(Path, "read_bytes", side_effect=PermissionError), patch.object(Path, "exists", return_value=False):
-            with self.assertRaisesRegex(RuntimeError, "cannot locate"):
-                safety.mps_snapshot(Path(directory) / "raw", {"gpus": []})
+        for mode in ("-d", "-f", "--static-partitioning", ""):
+            raw = f"123 root nvidia-cuda-mps /usr/bin/nvidia-cuda-mps-control {mode}\n"
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory, \
+                    patch.object(safety, "command", return_value=raw), \
+                    patch.object(Path, "read_bytes", side_effect=PermissionError), \
+                    patch.object(Path, "exists", return_value=False):
+                with self.assertRaisesRegex(RuntimeError, "cannot locate"):
+                    safety.mps_snapshot(Path(directory) / "raw", {"gpus": []})
 
     def test_context_check_requires_independent_worker_pid_and_correct_uuid(self):
         gpu = {"uuid": "GPU-a", "util_percent": 0, "processes": [{"pid": 20, "name": "python"}]}
@@ -264,7 +299,7 @@ class SafetyTests(unittest.TestCase):
     def test_pidfd_identity_and_gpu_checks_precede_signal(self):
         record = {"pid": 42, "start_ticks": 123, "launch": "cpu", "role": "worker", "gpu_uuid": "GPU-a"}
         environment = b"WEAVETP_PROBE_LAUNCH=cpu\0WEAVETP_PROBE_ROLE=worker\0"
-        with patch.object(safety.os, "pidfd_open", return_value=9, create=True), patch.object(safety.os, "close") as close, patch.object(safety.signal, "pidfd_send_signal", create=True) as send, patch.object(safety, "start_ticks", return_value=123), patch.object(Path, "read_bytes", return_value=environment):
+        with patch.object(safety.os, "pidfd_open", return_value=9, create=True), patch.object(safety.os, "close") as close, patch.object(safety.signal, "pidfd_send_signal", create=True) as send, patch.object(safety, "start_ticks", return_value=123), patch.object(Path, "read_bytes", return_value=environment), patch.object(safety.select, "select", return_value=([], [], [])):
             safety.signal_registered(record, signal.SIGTERM, {42: "GPU-a"})
             send.assert_called_once_with(9, signal.SIGTERM)
             close.assert_called_once_with(9)

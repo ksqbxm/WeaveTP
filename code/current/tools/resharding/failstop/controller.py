@@ -118,8 +118,8 @@ def control(config, bus, journal, check):
     actual_spawn = min(r["start"]["t"] for r in replacements)
     for record in spawned[1]:
         if record["slot"] in victims:
-            require(record["start"]["t_local"] >= max(v["confirmed_t"] for v in reclaimed["cards"].values())
-                    - calibrations["SL3061"]["chosen"]["offset"], "spawn precedes local reclaim confirmation")
+            require(record["start"]["t_local"] >= max(v["confirmed_t_local"] for v in reclaimed["cards"].values()),
+                    "spawn precedes local reclaim confirmation")
     publish("cuda_verified/2")
     publish("transition/2", membership=membership(rows, 2), epoch=2)
     abort2 = wait([f"aborted/2/{s}" for s in survivors])
@@ -130,15 +130,11 @@ def control(config, bus, journal, check):
     publish("finish")
     wait([f"done/{s}" for s in range(16)])
     wait([f"clean/{n}" for n in NODES], config["reclaim_timeout_s"] + config["stage_timeout_s"])
-    timing = join_timing(t_fail, reclaim_received, request, spawn, ready2)
-    # Full reclaim uses calibrated physical samples; receipt delay is separately retained.
-    timing["gpu_reclaim_s"] = reclaimed["t_done"] - t_fail
-    timing["gpu_reclaim_interval"] = [t_fail, reclaimed["t_done"]]
-    timing["reclaim_wait_s"] = max(0, reclaimed["t_done"] - request)
+    timing = join_timing(t_fail, reclaimed["t_done"], request, actual_spawn, ready2)
     timing["reclaim_receipt_delay_s"] = reclaim_received - reclaimed["t_done"]
     timing.update(t_rejoin_request=request, t_rejoin_start=actual_spawn,
                   t_spawn_command=spawn, t_world16_ready=ready2,
-                  rejoin_delay_s=actual_spawn - request, spawn_control_delay_s=actual_spawn - spawn)
+                  spawn_control_delay_s=actual_spawn - spawn)
     metrics = {k: v for k, v in timing.items() if k.endswith("_s")}
     for name, aborts, built, ready in (("shrink", abort1, build1, ready1), ("rejoin", abort2, build2, ready2)):
         metrics[f"abort_{name}_s"] = max(r["end"]["t"] for r in aborts) - min(r["start"]["t"] for r in aborts)
@@ -164,7 +160,6 @@ def control(config, bus, journal, check):
               "prefixes": ["inherited_by_shrink_group" if config["kind"] == "shrink" and e == 1
                            else prefix(config["launch"], e) for e in range(3)],
               "real_integration": "requires_user_confirmation"}
-    write_json(root / "events_actual.json", result)
     return result
 
 
@@ -173,13 +168,11 @@ def run(config):
     journal = Journal(root / "controller.jsonl", config["node"], "controller" if config["node"] == NODES[0] else "node_launcher")
     children = Children(config, root, journal)
     journal.event("process_start")
-    bus, store = None, None
+    bus = None
     result = {"status": "failed", "kind": config["kind"], "launch": config["launch"]}
     try:
         argv = [sys.executable, str(HERE / "supervisor.py"), "--config", str(root / "config.json")]
-        if config["node"] == NODES[0]:
-            children.spawn([*argv, "--role", "store"], "store")
-        store, bus = connect(config)
+        _, bus = connect(config)
         supervisor, _ = children.spawn(argv, "supervisor")
         if config["node"] == NODES[0]:
             def check():
@@ -187,14 +180,9 @@ def run(config):
                     require(child.poll() in (None, 0), f"{record['role']} exited {child.returncode}")
 
             result = control(config, bus, journal, check)
-            # Both supervisors must exit cleanly before terminating the store service.
             require(supervisor.wait(timeout=30) == 0, "SL3060 supervisor exit failed")
-            bus.wait(["node1_exit"], timeout=30)
-            store.set("store_stop", "1")
-            require(children.children[0][0].wait(timeout=30) == 0, "store exit failed")
         else:
             require(supervisor.wait(timeout=config["launch_timeout_s"] - 30) == 0, "SL3061 supervisor failed")
-            bus.put("node1_exit", journal.event("node1_clean_exit"))
             result["status"] = "passed"
     except BaseException:
         result.update(status="failed", traceback=traceback.format_exc())
@@ -209,7 +197,7 @@ def run(config):
         except Exception:
             result.update(status="failed", cleanup_error=traceback.format_exc())
         write_json(root / "control_process_lifecycle.json", [r for _, r in children.children])
-        write_json(root / "result.json", result)
+        write_json(root / "controller_result.json", result)
         journal.event("process_exit", status=result["status"])
     return 0 if result["status"] == "passed" else 1
 

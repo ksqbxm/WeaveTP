@@ -114,7 +114,7 @@ class Supervisor:
             require(child.poll() is None, "fault target already exited")
             signals[slot] = self.journal.event("kill_sent", slot=slot, target_pid=child.pid,
                                               gpu_uuid=record["gpu_uuid"])
-            signal_registered(record, signal.SIGKILL, contexts)
+            require(signal_registered(record, signal.SIGKILL, contexts), "fault target exited before signal")
             self.killed[slot] = True
         self.bus.put("kill_sent", signals)
         for slot in victims:
@@ -130,19 +130,20 @@ class Supervisor:
         while time.monotonic() < deadline:
             self.check_alive()
             sample = gpu_snapshot(self.root / "reclaim_gpu_raw.jsonl")
-            done = tracker.update(sample["gpus"], True, sample["end_local"] + self.journal.offset)
+            done = tracker.update(sample["gpus"], True, sample["end_local"])
             append_json(self.root / "gpu_reclaim_samples.jsonl", {**sample,
                         "t": sample["end_local"] + self.journal.offset,
                         "clock_error_s": self.journal.error, "streak": tracker.streak,
-                        "confirmed": tracker.confirmed})
+                        "confirmed_local": tracker.confirmed})
             if done:
                 details = {}
                 for slot in victims:
                     uuid = self.config["topology"][slot]["gpu_uuid"]
                     details[uuid] = {"baseline": selected[uuid], "kill": signals[slot],
-                                     "confirmed_t": tracker.confirmed[uuid],
-                                     "gpu_reclaim_s": tracker.confirmed[uuid] - signals[slot]["t"]}
-                result = {"cards": details, "t_done": max(tracker.confirmed.values()),
+                                     "confirmed_t_local": tracker.confirmed[uuid],
+                                     "confirmed_t": tracker.confirmed[uuid] + self.journal.offset,
+                                     "gpu_reclaim_s": tracker.confirmed[uuid] - signals[slot]["t_local"]}
+                result = {"cards": details, "t_done": max(tracker.confirmed.values()) + self.journal.offset,
                           "clock_error_s": self.journal.error}
                 write_json(self.root / "gpu_reclaim.json", result)
                 self.bus.put("reclaimed", result)

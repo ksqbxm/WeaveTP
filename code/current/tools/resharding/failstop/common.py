@@ -172,7 +172,9 @@ def baseline_ranges(samples, config):
 
 
 def join_timing(kill, reclaim_done, request, spawn, ready):
-    require(kill <= reclaim_done <= spawn <= ready and request <= spawn, "invalid join intervals")
+    # Check order within each clock domain. Calibrated cross-node estimates can
+    # differ by the recorded clock error; causal gates enforce cross-node order.
+    require(kill <= request <= ready and reclaim_done <= spawn, "invalid join intervals")
     return {"gpu_reclaim_s": reclaim_done - kill,
             "reclaim_wait_s": max(0, reclaim_done - request),
             "rejoin_join_s": ready - request,

@@ -1,6 +1,7 @@
 """Real TCPStore + concurrent CPU actors exercise controller gates, never CUDA."""
 
 import json
+import queue
 import tempfile
 import threading
 import time
@@ -11,10 +12,78 @@ from unittest.mock import patch
 
 import common
 import controller
+import run_probe
 import torch.distributed as dist
+import worker
 
 
 class ProtocolTests(unittest.TestCase):
+    def test_notification_arrives_while_pg_store_connection_is_blocked(self):
+        with tempfile.TemporaryDirectory() as directory:
+            tcp_store = dist.TCPStore
+            server = tcp_store("127.0.0.1", 0, world_size=None, is_master=True,
+                               wait_for_workers=False, timeout=timedelta(seconds=5), use_libuv=False)
+            config = {**common.DEFAULTS, "master": "127.0.0.1", "port": server.port,
+                      "launch": "cpu_notify", "startup_timeout_s": 5, "launch_timeout_s": 5}
+            # Windows CPU test runtime lacks libuv; production connection code is unchanged.
+            with patch.object(dist, "TCPStore", side_effect=lambda *a, **k: tcp_store(*a, **k, use_libuv=False)):
+                pg_store, _ = common.connect(config)
+                control = common.Bus(dist.PrefixStore("control/cpu_notify/", server))
+                started, finished = threading.Event(), threading.Event()
+                notifications = queue.Queue()
+                journal = common.Journal(Path(directory) / "notify.jsonl", "SL3060", "worker")
+
+                def rendezvous():
+                    started.set()
+                    pg_store.get("pg/missing_rank")
+                    finished.set()
+
+                blocked = threading.Thread(target=rendezvous, daemon=True)
+                listener = threading.Thread(target=worker.listen,
+                                            args=(config, 1, journal, notifications), daemon=True)
+                blocked.start()
+                try:
+                    self.assertTrue(started.wait(1))
+                    time.sleep(0.05)
+                    listener.start()
+                    for epoch in (1, 2):
+                        control.put(f"transition/{epoch}", {"epoch": epoch})
+                        self.assertEqual(notifications.get(timeout=2)[0], epoch)
+                        self.assertFalse(finished.is_set())
+                finally:
+                    server.set("pg/missing_rank", "release")
+                    blocked.join(timeout=5)
+                    listener.join(timeout=5)
+                self.assertFalse(blocked.is_alive() or listener.is_alive())
+
+    def test_terminal_exchange_propagates_peer_cleanup_failure(self):
+        for peer_status in ("passed", "failed"):
+            with self.subTest(peer_status=peer_status):
+                server = dist.TCPStore("127.0.0.1", 0, world_size=None, is_master=True,
+                                      wait_for_workers=False, timeout=timedelta(seconds=5), use_libuv=False)
+                client = dist.TCPStore("127.0.0.1", server.port, world_size=None, is_master=False,
+                                      timeout=timedelta(seconds=5), use_libuv=False)
+                local, remote = common.Bus(server), common.Bus(client)
+                errors = []
+
+                def peer():
+                    try:
+                        run_probe.exchange_terminal({"node": "SL3061"}, remote, {"status": peer_status})
+                    except RuntimeError as error:
+                        errors.append(str(error))
+
+                thread = threading.Thread(target=peer, daemon=True)
+                thread.start()
+                if peer_status == "passed":
+                    run_probe.exchange_terminal({"node": "SL3060"}, local, {"status": "passed"})
+                    self.assertTrue(local.get("terminal_received"))
+                else:
+                    with self.assertRaisesRegex(RuntimeError, "SL3061 terminal failure"):
+                        run_probe.exchange_terminal({"node": "SL3060"}, local, {"status": "passed"})
+                thread.join(timeout=5)
+                self.assertFalse(thread.is_alive())
+                self.assertEqual(len(errors), int(peer_status == "failed"))
+
     def test_real_store_prefix_isolation_and_missing_key_timeout(self):
         server = dist.TCPStore("127.0.0.1", 0, world_size=None, is_master=True,
                                wait_for_workers=False, timeout=timedelta(seconds=5), use_libuv=False)
@@ -98,7 +167,8 @@ class ProtocolTests(unittest.TestCase):
                 remote.wait(["rejoin_request"])
                 reclaimed = time.monotonic()
                 remote.put("reclaimed", {"t_done": reclaimed,
-                                         "cards": {rows[s]["gpu_uuid"]: {"confirmed_t": reclaimed} for s in victims}})
+                                         "cards": {rows[s]["gpu_uuid"]: {"confirmed_t": reclaimed,
+                                                                          "confirmed_t_local": reclaimed} for s in victims}})
                 remote.wait(["spawn"])
                 returned = {s: cuda(s, 2) for s in victims}
                 for slot, data in returned.items():

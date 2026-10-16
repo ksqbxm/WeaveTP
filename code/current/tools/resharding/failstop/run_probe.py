@@ -11,7 +11,7 @@ import time
 import traceback
 from pathlib import Path
 
-from common import DEFAULTS, NODES, Journal, prefix, require, summarize, write_json
+from common import DEFAULTS, NODES, Journal, connect, prefix, require, summarize, write_json
 from safety import Children, check_gpu_processes, gpu_snapshot, mps_snapshot, signal_registered
 
 HERE = Path(__file__).resolve().parent
@@ -24,16 +24,18 @@ def matrix(suite, optional_shrink=False):
             for kind, offset in (("idle", 0), ("inflight", 10)) for repeat in range(10)]
 
 
-def cleanup_registered(root, journal):
-    """Last resort after the bounded child launcher exits; only task-owned records."""
+def cleanup_registered(root, journal, exclude_pids=()):
+    """Confirm descendants exited; the owned store stays up for terminal exchange."""
     errors, signalled = [], []
     registry = root / "registered_processes.jsonl"
     records = [json.loads(line) for line in registry.read_text().splitlines()] if registry.exists() else []
     for record in reversed(records):
+        if record["pid"] in exclude_pids:
+            continue
         try:
-            signal_registered(record, signal.SIGKILL)
-            signalled.append(record["pid"])
-            journal.event("timeout_cleanup_signal", target_pid=record["pid"])
+            if signal_registered(record, signal.SIGKILL, wait_timeout=10):
+                signalled.append(record["pid"])
+                journal.event("cleanup_exit_confirmed", target_pid=record["pid"])
         except (ProcessLookupError, FileNotFoundError):
             continue
         except Exception as error:
@@ -42,19 +44,41 @@ def cleanup_registered(root, journal):
     return signalled
 
 
+def exchange_terminal(config, bus, result):
+    node = config["node"]
+    bus.put(f"terminal/{node}", result)
+    peer = NODES[1] if node == NODES[0] else NODES[0]
+    terminal = bus.wait([f"terminal/{peer}"], timeout=30)[0]
+    require(terminal["status"] == "passed", f"{peer} terminal failure: {terminal}")
+    require(result["status"] == "passed", "local launch failed")
+    if node == NODES[1]:
+        bus.put("terminal_received", True)
+    else:
+        # SL3061 must consume our result before its store connection disappears.
+        bus.wait(["terminal_received"], timeout=30)
+
+
 def run_case(config):
     root = Path(config["output"])
     root.mkdir()
     write_json(root / "config.json", config)
     journal = Journal(root / "suite_guard.jsonl", config["node"], "suite_guard")
     children = Children(config, root, journal)
-    child, _ = children.spawn([sys.executable, str(HERE / "controller.py"),
-                               "--config", str(root / "config.json")], "launch_controller")
+    service = Children(config, root, journal)
+    store, bus = None, None
+    deadline = time.monotonic() + config["launch_timeout_s"]
+    result = {"status": "failed"}
     try:
-        code = child.wait(timeout=config["launch_timeout_s"])
-        result_path = root / "result.json"
+        if config["node"] == NODES[0]:
+            service.spawn([sys.executable, str(HERE / "supervisor.py"), "--config",
+                           str(root / "config.json"), "--role", "store"], "store")
+        store, bus = connect(config)
+        child, _ = children.spawn([sys.executable, str(HERE / "controller.py"),
+                                   "--config", str(root / "config.json")], "launch_controller")
+        code = child.wait(timeout=max(0, deadline - time.monotonic()))
+        result_path = root / "controller_result.json"
         result = json.loads(result_path.read_text()) if result_path.exists() else {
-            "status": "failed", "reason": "launcher exited without result.json"}
+            "status": "failed", "reason": "controller exited without controller_result.json"}
         if code != 0:
             result.update(status="failed", returncode=code)
     except BaseException:
@@ -62,13 +86,31 @@ def run_case(config):
     finally:
         try:
             children.cleanup()
-            remaining = cleanup_registered(root, journal)
+        except Exception:
+            result.update(status="failed", controller_cleanup_error=traceback.format_exc())
+        try:
+            remaining = cleanup_registered(root, journal, [p.pid for p, _ in service.children])
             require(not remaining or result["status"] != "passed", f"passing launch left live registered PIDs: {remaining}")
         except Exception:
             result.update(status="failed", cleanup_error=traceback.format_exc())
-        write_json(root / "launcher_lifecycle.json", [r for _, r in children.children])
+        try:
+            require(bus is not None, "control store unavailable for terminal exchange")
+            exchange_terminal(config, bus, result)
+            if config["node"] == NODES[0]:
+                store.set("store_stop", "1")
+                require(service.children[0][0].wait(timeout=30) == 0, "store exit failed")
+        except Exception:
+            result.update(status="failed", terminal_error=traceback.format_exc())
+        finally:
+            try:
+                service.cleanup()
+            except Exception:
+                result.update(status="failed", store_cleanup_error=traceback.format_exc())
+        write_json(root / "launcher_lifecycle.json", [r for _, r in children.children + service.children])
     result.update(kind=config["kind"], launch=config["launch"])
     write_json(root / "result.json", result)
+    if config["node"] == NODES[0]:
+        write_json(root / "events_actual.json", result)
     return result
 
 

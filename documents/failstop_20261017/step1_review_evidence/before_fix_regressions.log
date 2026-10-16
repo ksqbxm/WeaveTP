@@ -1,0 +1,73 @@
+test_unlocatable_mps_daemon_stops_case (test_probe.SafetyTests.test_unlocatable_mps_daemon_stops_case) ... 
+  test_unlocatable_mps_daemon_stops_case (test_probe.SafetyTests.test_unlocatable_mps_daemon_stops_case) (mode='-f') ... FAIL
+  test_unlocatable_mps_daemon_stops_case (test_probe.SafetyTests.test_unlocatable_mps_daemon_stops_case) (mode='--static-partitioning') ... FAIL
+  test_unlocatable_mps_daemon_stops_case (test_probe.SafetyTests.test_unlocatable_mps_daemon_stops_case) (mode='') ... FAIL
+test_foreground_mps_queries_real_pipe_and_preserves_original_alias (test_probe.SafetyTests.test_foreground_mps_queries_real_pipe_and_preserves_original_alias) ... ERROR
+test_spawn_registration_failure_reaps_owned_child (test_cleanup.CleanupTests.test_spawn_registration_failure_reaps_owned_child) ... 
+  test_spawn_registration_failure_reaps_owned_child (test_cleanup.CleanupTests.test_spawn_registration_failure_reaps_owned_child) (step='start_ticks') ... FAIL
+  test_spawn_registration_failure_reaps_owned_child (test_cleanup.CleanupTests.test_spawn_registration_failure_reaps_owned_child) (step='append_json') ... FAIL
+
+======================================================================
+ERROR: test_foreground_mps_queries_real_pipe_and_preserves_original_alias (test_probe.SafetyTests.test_foreground_mps_queries_real_pipe_and_preserves_original_alias)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\ksqbx\.codex\worktrees\failstop\WeaveTP_代码与实验资料_20260920\code\current\tools\resharding\failstop\test_probe.py", line 256, in test_foreground_mps_queries_real_pipe_and_preserves_original_alias
+    mps = safety.mps_snapshot(Path(directory) / "raw", {"gpus": []}, str(explicit))
+  File "safety_before_review.py", line 94, in mps_snapshot
+  File "C:\Users\ksqbx\.codex\worktrees\failstop\WeaveTP_代码与实验资料_20260920\code\current\tools\resharding\failstop\common.py", line 29, in require
+    raise RuntimeError(message)
+RuntimeError: stale/unmatched MPS PID file: C:\Users\ksqbx\AppData\Local\Temp\tmp5n2hce2p\a_pipe\nvidia-cuda-mps-control.pid
+
+======================================================================
+FAIL: test_unlocatable_mps_daemon_stops_case (test_probe.SafetyTests.test_unlocatable_mps_daemon_stops_case) (mode='-f')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\ksqbx\.codex\worktrees\failstop\WeaveTP_代码与实验资料_20260920\code\current\tools\resharding\failstop\test_probe.py", line 285, in test_unlocatable_mps_daemon_stops_case
+    with self.assertRaisesRegex(RuntimeError, "cannot locate"):
+         ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: RuntimeError not raised
+
+======================================================================
+FAIL: test_unlocatable_mps_daemon_stops_case (test_probe.SafetyTests.test_unlocatable_mps_daemon_stops_case) (mode='--static-partitioning')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\ksqbx\.codex\worktrees\failstop\WeaveTP_代码与实验资料_20260920\code\current\tools\resharding\failstop\test_probe.py", line 285, in test_unlocatable_mps_daemon_stops_case
+    with self.assertRaisesRegex(RuntimeError, "cannot locate"):
+         ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: RuntimeError not raised
+
+======================================================================
+FAIL: test_unlocatable_mps_daemon_stops_case (test_probe.SafetyTests.test_unlocatable_mps_daemon_stops_case) (mode='')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\ksqbx\.codex\worktrees\failstop\WeaveTP_代码与实验资料_20260920\code\current\tools\resharding\failstop\test_probe.py", line 285, in test_unlocatable_mps_daemon_stops_case
+    with self.assertRaisesRegex(RuntimeError, "cannot locate"):
+         ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: RuntimeError not raised
+
+======================================================================
+FAIL: test_spawn_registration_failure_reaps_owned_child (test_cleanup.CleanupTests.test_spawn_registration_failure_reaps_owned_child) (step='start_ticks')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\ksqbx\.codex\worktrees\failstop\WeaveTP_代码与实验资料_20260920\code\current\tools\resharding\failstop\test_cleanup.py", line 26, in test_spawn_registration_failure_reaps_owned_child
+    child.kill.assert_called_once()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\ksqbx\miniforge3\Lib\unittest\mock.py", line 958, in assert_called_once
+    raise AssertionError(msg)
+AssertionError: Expected 'kill' to have been called once. Called 0 times.
+
+======================================================================
+FAIL: test_spawn_registration_failure_reaps_owned_child (test_cleanup.CleanupTests.test_spawn_registration_failure_reaps_owned_child) (step='append_json')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\ksqbx\.codex\worktrees\failstop\WeaveTP_代码与实验资料_20260920\code\current\tools\resharding\failstop\test_cleanup.py", line 26, in test_spawn_registration_failure_reaps_owned_child
+    child.kill.assert_called_once()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\ksqbx\miniforge3\Lib\unittest\mock.py", line 958, in assert_called_once
+    raise AssertionError(msg)
+AssertionError: Expected 'kill' to have been called once. Called 0 times.
+
+----------------------------------------------------------------------
+Ran 3 tests in 0.019s
+
+FAILED (failures=5, errors=1)
