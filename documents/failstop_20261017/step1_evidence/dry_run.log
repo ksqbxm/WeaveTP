@@ -1,0 +1,140 @@
+{
+  "node": "SL3060",
+  "defaults": {
+    "sample_s": 0.1,
+    "stable_samples": 3,
+    "memory_slack_mib": 8,
+    "baseline_noise_mib": 8,
+    "reclaim_timeout_s": 120,
+    "stage_timeout_s": 120,
+    "startup_timeout_s": 600,
+    "launch_timeout_s": 1200,
+    "tensor_elements": 262144,
+    "repair_wait_s": 0
+  },
+  "cases": [
+    {
+      "launch": "cpu_dryrun_idle_00",
+      "kind": "idle",
+      "index": 0
+    },
+    {
+      "launch": "cpu_dryrun_idle_01",
+      "kind": "idle",
+      "index": 1
+    },
+    {
+      "launch": "cpu_dryrun_idle_02",
+      "kind": "idle",
+      "index": 2
+    },
+    {
+      "launch": "cpu_dryrun_idle_03",
+      "kind": "idle",
+      "index": 3
+    },
+    {
+      "launch": "cpu_dryrun_idle_04",
+      "kind": "idle",
+      "index": 4
+    },
+    {
+      "launch": "cpu_dryrun_idle_05",
+      "kind": "idle",
+      "index": 5
+    },
+    {
+      "launch": "cpu_dryrun_idle_06",
+      "kind": "idle",
+      "index": 6
+    },
+    {
+      "launch": "cpu_dryrun_idle_07",
+      "kind": "idle",
+      "index": 7
+    },
+    {
+      "launch": "cpu_dryrun_idle_08",
+      "kind": "idle",
+      "index": 8
+    },
+    {
+      "launch": "cpu_dryrun_idle_09",
+      "kind": "idle",
+      "index": 9
+    },
+    {
+      "launch": "cpu_dryrun_inflight_00",
+      "kind": "inflight",
+      "index": 10
+    },
+    {
+      "launch": "cpu_dryrun_inflight_01",
+      "kind": "inflight",
+      "index": 11
+    },
+    {
+      "launch": "cpu_dryrun_inflight_02",
+      "kind": "inflight",
+      "index": 12
+    },
+    {
+      "launch": "cpu_dryrun_inflight_03",
+      "kind": "inflight",
+      "index": 13
+    },
+    {
+      "launch": "cpu_dryrun_inflight_04",
+      "kind": "inflight",
+      "index": 14
+    },
+    {
+      "launch": "cpu_dryrun_inflight_05",
+      "kind": "inflight",
+      "index": 15
+    },
+    {
+      "launch": "cpu_dryrun_inflight_06",
+      "kind": "inflight",
+      "index": 16
+    },
+    {
+      "launch": "cpu_dryrun_inflight_07",
+      "kind": "inflight",
+      "index": 17
+    },
+    {
+      "launch": "cpu_dryrun_inflight_08",
+      "kind": "inflight",
+      "index": 18
+    },
+    {
+      "launch": "cpu_dryrun_inflight_09",
+      "kind": "inflight",
+      "index": 19
+    }
+  ],
+  "ports": [
+    29750,
+    29751,
+    29752,
+    29753,
+    29754,
+    29755,
+    29756,
+    29757,
+    29758,
+    29759,
+    29760,
+    29761,
+    29762,
+    29763,
+    29764,
+    29765,
+    29766,
+    29767,
+    29768,
+    29769
+  ],
+  "output": "\\data\\ubuntu\\lxh\\weavetp\\acceptance\\step01_real_probe\\cpu_dryrun\\SL3060"
+}

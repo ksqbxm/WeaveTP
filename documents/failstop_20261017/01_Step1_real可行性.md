@@ -1,6 +1,6 @@
 # Step 1：real fail-stop 独立可行性验证
 
-状态：待实现、待服务器 GPU 验收。测试标识：`step01_real_probe`。
+状态：已实现、CPU 已验证、服务器 GPU 待验收。测试标识：`step01_real_probe`。
 
 ## 1. 必读与范围
 
@@ -82,4 +82,6 @@ NVIDIA 文档说明管道变量控制连接位置，并列出绕开 MPS 的设�
 
 ## 7. 验收登记
 
-实现 SHA：待填。CPU：未运行。GPU：未运行。20 次结果：待回传。用户 real 集成确认：待确认。
+2026-10-17：独立 real 玩具探针已实现；23 项 CPU 测试通过，无跳过；isort、Ruff F、编译及 dry-run 通过。实现与证据见 [Step1_实现与验证.md](Step1_实现与验证.md)，固定交付 SHA 与两节点命令见 [Step1_服务器命令.md](Step1_服务器命令.md)。
+
+GPU：未运行。20 次结果：待回传。Linux PID/MPS/CUDA/NCCL 可行性：待服务器验证。用户 real 集成确认：待确认。

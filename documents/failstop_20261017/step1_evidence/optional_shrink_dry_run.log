@@ -1,0 +1,26 @@
+{
+  "node": "SL3061",
+  "defaults": {
+    "sample_s": 0.1,
+    "stable_samples": 3,
+    "memory_slack_mib": 8,
+    "baseline_noise_mib": 8,
+    "reclaim_timeout_s": 120,
+    "stage_timeout_s": 120,
+    "startup_timeout_s": 600,
+    "launch_timeout_s": 1200,
+    "tensor_elements": 262144,
+    "repair_wait_s": 0
+  },
+  "cases": [
+    {
+      "launch": "cpu_shrink_shrink",
+      "kind": "shrink",
+      "index": 20
+    }
+  ],
+  "ports": [
+    29770
+  ],
+  "output": "\\data\\ubuntu\\lxh\\weavetp\\acceptance\\step01_real_probe\\cpu_shrink\\SL3061"
+}
