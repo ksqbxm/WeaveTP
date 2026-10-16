@@ -1,0 +1,37 @@
+{
+  "implementation_commit": "a609198fa5316d091e06f15d31314eb9d7bd57e1",
+  "bash_syntax": [
+    {
+      "bash_block": 1,
+      "exit_code": 0,
+      "diagnostics": ""
+    },
+    {
+      "bash_block": 2,
+      "exit_code": 0,
+      "diagnostics": ""
+    },
+    {
+      "bash_block": 3,
+      "exit_code": 0,
+      "diagnostics": ""
+    },
+    {
+      "bash_block": 4,
+      "exit_code": 0,
+      "diagnostics": ""
+    },
+    {
+      "bash_block": 5,
+      "exit_code": 0,
+      "diagnostics": ""
+    },
+    {
+      "bash_block": 6,
+      "exit_code": 0,
+      "diagnostics": ""
+    }
+  ],
+  "relative_links": "passed",
+  "executed_on_servers": false
+}
