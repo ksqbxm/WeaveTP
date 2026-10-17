@@ -79,7 +79,8 @@ def main():
     run = args.log_dir
     conn = stream = child = None
     restore = False
-    status = {'step': 2, 'node': args.node, 'quick_mode': True, 'shared_gpu_mode': True, 'result': 'FAIL'}
+    status = {'step': 2, 'node': args.node, 'quick_mode': True, 'correctness_only': True,
+              'shared_gpu_mode': True, 'timing_valid': False, 'accepted': False, 'result': 'FAIL'}
     lock = (args.log_dir.parent / f'{args.node}.lock').open('w')
 
     def git(*argv):
@@ -106,7 +107,7 @@ def main():
         entry = args.repo / 'code/current/tools/resharding/failstop/run_topology.py'
         argv = [sys.executable, '-B', str(entry), '--node', args.node, '--suite-id', suite,
                 '--output', str(run), '--mode', 'both', '--rounds', '1', '--real-launches', '1',
-                '--quick', '--allow-foreign-gpu-processes', '--budget-seconds', str(max(1, deadline - time.monotonic() - 45))]
+                '--quick', '--correctness-only', '--budget-seconds', str(max(1, deadline - time.monotonic() - 45))]
         child = subprocess.Popen(argv)
         code = child.wait(timeout=max(1, deadline - time.monotonic() - 40))
         if code:
@@ -115,7 +116,8 @@ def main():
                 status['failed_cases'] = [r for r in json.loads(progress.read_text()) if r['status'] != 'passed']
             raise RuntimeError(f'topology suite exited {code}; inspect per-round worker_error/controller_result logs')
         summary = json.loads((run / args.node / 'summary.json').read_text())
-        if not (summary['all_cases_passed'] and summary['quick_mode'] and
+        if not (summary['all_cases_passed'] and summary['quick_mode'] and summary['correctness_only'] and
+                summary['shared_gpu_mode'] and not summary['timing_valid'] and not summary['accepted'] and
                 summary['emulate'] == summary['real'] == 'passed'):
             raise RuntimeError('incomplete emulate/real correctness matrix')
         status['result'] = 'PASS'

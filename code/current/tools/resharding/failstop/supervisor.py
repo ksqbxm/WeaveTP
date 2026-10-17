@@ -166,6 +166,15 @@ class Supervisor:
             time.sleep(self.config["sample_s"])
         raise TimeoutError("GPU memory/process reclamation did not become stable")
 
+    def rejoin_preflight(self, baselines):
+        victims = failed_slots(self.config["topology"])
+        expected = {p.pid: r["gpu_uuid"] for s, (p, r) in self.workers.items() if s not in victims}
+        before_spawn, _ = self.inspect("rejoin_pre_spawn", expected)
+        for gpu in before_spawn["gpus"]:
+            if not self.config["shared_gpu_mode"] and gpu["uuid"] in {self.config["topology"][s]["gpu_uuid"] for s in victims}:
+                require(gpu["used_mib"] <= baselines[gpu["uuid"]]["threshold_mib"],
+                        "reclaimed GPU memory rose before spawn")
+
     def run(self):
         node = self.config["node"]
         # Controller midpoint clock calibration, all on CPU TCPStore.
@@ -199,12 +208,7 @@ class Supervisor:
         self.wait(["spawn"], timeout=self.config["launch_timeout_s"])
         if node == "SL3061":
             victims = failed_slots(self.config["topology"])
-            expected = {p.pid: r["gpu_uuid"] for s, (p, r) in self.workers.items() if s not in victims}
-            before_spawn, _ = self.inspect("rejoin_pre_spawn", expected)
-            for gpu in before_spawn["gpus"]:
-                if not self.config["shared_gpu_mode"] and gpu["uuid"] in {self.config["topology"][s]["gpu_uuid"] for s in victims}:
-                    require(gpu["used_mib"] <= baselines[gpu["uuid"]]["threshold_mib"],
-                            "reclaimed GPU memory rose before spawn")
+            self.rejoin_preflight(baselines)
             self.start_workers(victims, 2)
             self.transition("reclaimed", "rejoined")
             self.verify_contexts(victims, 2)

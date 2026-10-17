@@ -13,6 +13,7 @@ SHARED_GPU_NOTE = "与其他任务共享 GPU，仅用于正确性和可行性判
 FAIL_COORDS = {(0, 0), (0, 1), (1, 0), (1, 1)}  # (ep, etp)
 DEFAULTS = {
     "shared_gpu_mode": False,
+    "quick_mode": False,
     "repeats": 10,
     "sample_s": 0.1,
     "stable_samples": 3,

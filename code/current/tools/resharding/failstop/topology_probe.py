@@ -16,6 +16,11 @@ from megatron.core.failstop import FaultBackend, FaultSession, replica_group_spe
 
 
 class EmulateSupervisor(Supervisor):
+    def rejoin_preflight(self, baselines):
+        # Released tensors do not destroy a live worker's CUDA context or its
+        # prebuilt groups. All eight registered contexts must still be present.
+        self.inspect('rejoin_pre_spawn', {p.pid: r['gpu_uuid'] for p, r in self.workers.values()})
+
     def kill_and_reclaim(self, baselines, allowed):
         self.transition('running', 'reclaimed')
         self.bus.put('emulate_release/0', True)
@@ -52,7 +57,7 @@ def control(config, bus, journal, check):
     preflight = wait([f'preflight/{n}' for n in NODES])
     for node, report in zip(NODES, preflight):
         require(report['host'].split('.')[0].upper() == node, 'wrong physical host')
-        for key in ('commit', 'launch', 'mode', 'rounds', 'port', 'shared_gpu_mode', 'quick_mode'):
+        for key in ('commit', 'launch', 'mode', 'rounds', 'port', 'shared_gpu_mode', 'quick_mode', 'correctness_only'):
             require(report['config'][key] == config[key], f'node config mismatch: {key}')
     rows = topology(dict(zip(NODES, [r['gpus'] for r in preflight])))
     victims = failed_slots(rows)

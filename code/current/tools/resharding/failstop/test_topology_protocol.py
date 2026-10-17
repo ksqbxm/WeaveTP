@@ -178,7 +178,8 @@ class Simulation:
 
     def run(self):
         self.config = {**common.DEFAULTS, 'output': str(self.root), 'launch': 'cpu_full', 'commit': 'cpu',
-                       'mode': self.mode, 'rounds': self.rounds, 'quick_mode': True, 'port': 1, 'stage_timeout_s': 8}
+                       'mode': self.mode, 'rounds': self.rounds, 'quick_mode': True, 'correctness_only': True,
+                       'shared_gpu_mode': True, 'port': 1, 'stage_timeout_s': 8}
         sim = self
         class Journal(common.Journal):
             def event(self, stage, **fields):

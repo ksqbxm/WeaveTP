@@ -55,6 +55,12 @@ def worker(rank, directory):
     for work in dist.batch_isend_irecv(ops):
         work.wait()
     assert recv.item() == dist.get_global_rank(group, peer)
+    # Only EP0 has a reversed requested TP order. EP must pair the actual
+    # TP coordinates after new_group sorting, not the requested positions.
+    ordered = build_replica_pg_collections([((1, 0, 2, 3), 2, 2, 2)], backend='gloo')[0]
+    value = torch.tensor(ordered.local_ranks['tp'])
+    dist.all_reduce(value, group=ordered.ep)
+    assert value.item() == 2 * ordered.local_ranks['tp'], 'EP paired different actual TP coordinates'
     (directory / f'rank{rank}.json').write_text(json.dumps({'status': 'passed', 'groups': logs}))
     dist.destroy_process_group()
 
@@ -76,7 +82,7 @@ def main():
                 assert child.wait(timeout=90) == 0, 'CPU PG worker failed'
             for rank in range(4):
                 assert json.loads((root / f'rank{rank}.json').read_text())['status'] == 'passed'
-            print('CPU GLOO PASS: 4/4 processes; ordered groups, collective sums, pointer rebind, subgroup P2P')
+            print('CPU GLOO PASS: 4/4 processes; ordered groups, TP/EP coordinate pairing, collective sums, pointer rebind, subgroup P2P')
         finally:
             for child in children:
                 if child.poll() is None:

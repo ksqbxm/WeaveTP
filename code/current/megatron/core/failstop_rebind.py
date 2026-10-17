@@ -23,20 +23,22 @@ class ModelBinding:
         self.model, self.groups, self.resources = model, groups, resources
         self.source_metadata = copy.deepcopy(source_metadata)
         self.forward_ready = True
+        self.generation = resources.generation
         self.log = []
         self.layout = {name: (dist.get_rank(getattr(groups, name)),
                               dist.get_world_size(getattr(groups, name)))
                        for name in ('tp', 'ep', 'expt_tp', 'cp', 'pp')}
         self._entered = 0
-        self.hooks = (model.register_forward_pre_hook(self._enter),
+        self.hooks = (model.register_forward_pre_hook(self._enter, prepend=True),
                       model.register_forward_hook(self._exit, always_call=True))
 
     def _enter(self, module, args):
         self.resources.lock.acquire()
-        if not (self.forward_ready and self.resources.ready):
-            self.resources.lock.release()
-            raise RuntimeError('forward on a source-only model or unavailable world')
+        # The always-call exit hook also runs when this pre-hook raises. Count
+        # that entry so a rejected recursive call cannot unlock its caller.
         self._entered += 1
+        require(self.forward_ready and self.resources.ready and self.generation == self.resources.generation,
+                'forward on a source-only model or stale/unavailable world')
 
     def _exit(self, module, args, output):
         if self._entered:
@@ -60,6 +62,17 @@ class ModelBinding:
             require(source_only or new_layout == self.layout,
                     'different shard coordinates require a migrated target, not in-place relabeling')
             require(new_layout['ep'] == self.layout['ep'], 'EP expert ownership must stay fixed')
+            objects = list(self.objects())
+            # Validate every object before changing any reference. These are
+            # the current native module fields, not obsolete option aliases.
+            for _, obj in objects:
+                config = getattr(obj, 'config', None)
+                require(getattr(config, 'cuda_graph_impl', 'none') == 'none' and
+                        not getattr(obj, 'cuda_graphs', None) and
+                        getattr(obj, 'cudagraph_manager', None) is None,
+                        'captured CUDA graphs cannot be rebound')
+                require(getattr(obj, '_comm_manager', None) is None,
+                        'external dispatcher manager must be closed before rebind')
             pointers = [(name, tensor.data_ptr()) for name, tensor in self.model.named_parameters()]
             pointers += [('buffer:' + name, tensor.data_ptr()) for name, tensor in self.model.named_buffers()]
             replacements = {}
@@ -71,15 +84,7 @@ class ModelBinding:
                     require(replacements[id(old)] is new, 'ambiguous aliased group replacement')
                 replacements[id(old)] = new
             changes = []
-            for name, obj in self.objects():
-                config = getattr(obj, 'config', None)
-                require(not getattr(config, 'enable_cuda_graph', False) and
-                        not getattr(obj, 'cuda_graphs', None), 'captured CUDA graphs cannot be rebound')
-                # Flex/DeepEP managers hold communicator-owned handles. Native
-                # allgather/alltoall dispatchers have no such external manager.
-                require(getattr(obj, 'handle', None) is None and
-                        getattr(obj, 'dispatcher_manager', None) is None,
-                        'external dispatcher handle must be closed before rebind')
+            for name, obj in objects:
                 for attr, old in list(vars(obj).items()):
                     if old is self.groups:
                         setattr(obj, attr, groups)
@@ -108,6 +113,7 @@ class ModelBinding:
                     require(value is not self.groups and id(value) not in replacements,
                             f'stale process group reference: {name}.{attr}')
             self.groups, self.forward_ready = groups, not source_only
+            self.generation = self.resources.generation
             report = {'changes': changes, 'tensor_pointers': pointers, 'source_only': source_only,
                       'source_layout': self.layout, 'bound_layout': new_layout}
             self.log.append(report)

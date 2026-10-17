@@ -135,9 +135,12 @@ def run_case(config):
                 result.update(status="failed", store_cleanup_error=traceback.format_exc())
         write_json(root / "launcher_lifecycle.json", [r for _, r in children.children + service.children])
     result.update(kind=config["kind"], launch=config["launch"], shared_gpu_mode=config["shared_gpu_mode"],
-                  repeats=config["repeats"], quick_mode=config["repeats"] < 10,
+                  quick_mode=config["quick_mode"],
                   pidfd_open_impl=config["pidfd_open_impl"], pidfd_send_signal_impl=config["pidfd_send_signal_impl"],
                   timing_note=SHARED_GPU_NOTE if config["shared_gpu_mode"] else "exclusive GPU acceptance")
+    for key in ("repeats", "correctness_only", "timing_valid"):
+        if key in config:
+            result[key] = config[key]
     write_json(root / "result.json", result)
     if config["node"] == NODES[0]:
         write_json(root / "events_actual.json", result)

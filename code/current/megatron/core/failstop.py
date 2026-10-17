@@ -69,6 +69,7 @@ class EpochResources:
         self.dispositions = []
         self.key = None
         self.ready = False
+        self.generation = 0
 
     @contextmanager
     def forward(self, key):
@@ -79,6 +80,7 @@ class EpochResources:
     def invalidate(self, abort=None):
         with self.lock:
             self.ready = False
+            self.generation += 1
             if abort is not None:
                 abort()  # Must finish abort before discarding any old Work.
                 disposition = "discarded_after_abort"
@@ -94,8 +96,9 @@ class EpochResources:
             self.key = None
 
     def activate(self, key):
-        require(not self.pending, "cannot activate with old pending work")
-        self.key, self.ready = key, True
+        with self.lock:
+            require(not self.pending, "cannot activate with old pending work")
+            self.key, self.ready = key, True
 
 
 class FaultSession:
@@ -116,11 +119,12 @@ class FaultSession:
         self.failed = tuple(r['slot'] for r in rows if r['replica'] == 'EDP0' and r['etp'] in (0, 1))
         self.members = tuple(range(16))
         self.previous = self.members
-        self.local_orders = local_orders or {
+        self.local_orders = local_orders if local_orders is not None else {
             ep: tuple(r['slot'] for r in rows if r['replica'] == 'EDP0' and
                       r['ep'] == ep and r['slot'] not in self.failed) for ep in range(2)}
+        require(set(self.local_orders) == {0, 1}, 'invalid local order EP keys')
         for ep, order in self.local_orders.items():
-            require(set(order) == {r['slot'] for r in rows if r['replica'] == 'EDP0' and
+            require(len(order) == 2 and set(order) == {r['slot'] for r in rows if r['replica'] == 'EDP0' and
                                   r['ep'] == ep and r['slot'] not in self.failed}, "invalid local order")
         self.resources.activate(self.cache_key())
 
@@ -130,14 +134,14 @@ class FaultSession:
                             f"{self.launch}/{self.round}/{epoch}/{action}")
 
     def _change(self, action, ranks, event):
-        expected = "normal" if action == "fail" else "degraded"
-        require(self.state == expected, f"invalid transition {self.state} -> {action}")
-        require(event == self.event(action) and event.id not in self.seen, "stale/foreign control event")
-        # fail uses current world ranks; rejoin uses original ranks of absent devices.
-        victims = self.failed if action == "rejoin" else tuple(
-            r['new_rank'] for r in self.rank_map() if r['slot'] in self.failed)
-        require(len(ranks) == 4 and set(ranks) == set(victims), "incorrect fault coordinates")
         with self.resources.lock:
+            expected = "normal" if action == "fail" else "degraded"
+            require(self.state == expected, f"invalid transition {self.state} -> {action}")
+            require(event == self.event(action) and event.id not in self.seen, "stale/foreign control event")
+            # fail uses current world ranks; rejoin uses original ranks of absent devices.
+            victims = self.failed if action == "rejoin" else tuple(
+                r['new_rank'] for r in self.rank_map() if r['slot'] in self.failed)
+            require(len(ranks) == 4 and set(ranks) == set(victims), "incorrect fault coordinates")
             self.resources.ready = False
             self.state = "failed/recovering" if action == "fail" else "rejoining/expanding"
             getattr(self.backend, action)(self.failed, event)
@@ -161,13 +165,19 @@ class FaultSession:
         return self._change("rejoin", ranks, event or self.event("rejoin"))
 
     def complete(self):
-        require(self.state in ("failed/recovering", "rejoining/expanding"), "no transition to complete")
-        self.state = "degraded" if self.state == "failed/recovering" else "normal"
-        self.resources.activate(self.cache_key())
+        with self.resources.lock:
+            require(self.state in ("failed/recovering", "rejoining/expanding"), "no transition to complete")
+            self.resources.activate(self.cache_key())
+            self.state = "degraded" if self.state == "failed/recovering" else "normal"
 
     def next_round(self):
-        require(self.state == "normal" and self.epoch > 0, "round before full recovery")
-        self.round += 1
+        with self.resources.lock:
+            require(self.state == "normal" and self.epoch > 0 and self.resources.ready and not self.resources.pending,
+                    "round before full recovery")
+            self.round += 1
+            self.resources.plans.clear()
+            self.resources.groups.clear()
+            self.resources.activate(self.cache_key())
 
     def rank_map(self):
         result = []
@@ -242,13 +252,17 @@ def replica_group_specs(replicas):
         seen.update(ranks)
         dense = [ranks[i:i + tp] for i in range(0, n, tp)]
         expert = [ranks[i:i + etp] for i in range(0, n, etp)]
+        # new_group sorts each TP group. Pair DP/EP ranks by those actual
+        # coordinates, not by an input order that the backend will discard.
+        dense_order = tuple(r for group in dense for r in sorted(group))
+        expert_order = tuple(r for group in expert for r in sorted(group))
         groups = {
             'tp': dense, 'cp': [(r,) for r in ranks], 'pp': [(r,) for r in ranks],
-            'dp': [ranks[i::tp] for i in range(tp)], 'mp': dense, 'tp_cp': dense,
-            'dp_cp': [ranks[i::tp] for i in range(tp)], 'tp_dp_cp': [ranks],
-            'ep': [tuple(ranks[b + i + j * etp] for j in range(ep))
+            'dp': [dense_order[i::tp] for i in range(tp)], 'mp': dense, 'tp_cp': dense,
+            'dp_cp': [dense_order[i::tp] for i in range(tp)], 'tp_dp_cp': [ranks],
+            'ep': [tuple(expert_order[b + i + j * etp] for j in range(ep))
                    for b in range(0, n, etp * ep) for i in range(etp)],
-            'expt_tp': expert, 'expt_dp': [ranks[i::etp * ep] for i in range(etp * ep)],
+            'expt_tp': expert, 'expt_dp': [expert_order[i::etp * ep] for i in range(etp * ep)],
             'tp_ep': [ranks[b:b + etp * ep] for b in range(0, n, etp * ep)],
             'tp_ep_pp': [ranks[b:b + etp * ep] for b in range(0, n, etp * ep)],
             'embd': [(r,) for r in ranks], 'pos_embd': [(r,) for r in ranks],

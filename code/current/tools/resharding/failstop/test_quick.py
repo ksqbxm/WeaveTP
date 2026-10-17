@@ -24,7 +24,9 @@ class QuickTests(unittest.TestCase):
             run = root / 's2q_cpu'
             (run / 'SL3060').mkdir(parents=True)
             (run / 'SL3060' / 'summary.json').write_text(json.dumps({
-                'all_cases_passed': True, 'quick_mode': True, 'emulate': 'passed', 'real': 'passed'}))
+                'all_cases_passed': True, 'quick_mode': True, 'correctness_only': True,
+                'shared_gpu_mode': True, 'timing_valid': False, 'accepted': False,
+                'emulate': 'passed', 'real': 'passed'}))
             state, calls = {'head': 'a' * 40}, []
             def git(argv, **kwargs):
                 args = argv[3:]
