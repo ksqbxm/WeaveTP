@@ -3,6 +3,7 @@
 import argparse
 import csv
 import json
+import math
 import os
 import signal
 import subprocess
@@ -22,7 +23,15 @@ from common import (
     summarize,
     write_json,
 )
-from safety import Children, check_gpu_processes, gpu_snapshot, mps_snapshot, signal_registered
+from safety import (
+    Children,
+    check_data_space,
+    check_gpu_processes,
+    gpu_snapshot,
+    mps_snapshot,
+    pidfd_implementations,
+    signal_registered,
+)
 
 HERE = Path(__file__).resolve().parent
 
@@ -79,6 +88,7 @@ def run_case(config):
     deadline = time.monotonic() + config["launch_timeout_s"]
     result = {"status": "failed"}
     try:
+        check_data_space(config["min_free_disk_gb"], root / "disk_space.jsonl")
         if config["node"] == NODES[0]:
             service.spawn([sys.executable, str(HERE / "supervisor.py"), "--config",
                            str(root / "config.json"), "--role", "store"], "store")
@@ -118,6 +128,7 @@ def run_case(config):
                 result.update(status="failed", store_cleanup_error=traceback.format_exc())
         write_json(root / "launcher_lifecycle.json", [r for _, r in children.children + service.children])
     result.update(kind=config["kind"], launch=config["launch"], shared_gpu_mode=config["shared_gpu_mode"],
+                  pidfd_open_impl=config["pidfd_open_impl"], pidfd_send_signal_impl=config["pidfd_send_signal_impl"],
                   timing_note=SHARED_GPU_NOTE if config["shared_gpu_mode"] else "exclusive GPU acceptance")
     write_json(root / "result.json", result)
     if config["node"] == NODES[0]:
@@ -135,11 +146,15 @@ def main():
     parser.add_argument("--mps-pipe", help="actual existing service pipe, for read-only queries only")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--preflight-only", action="store_true")
+    parser.add_argument("--min-free-disk-gb", type=float, default=5,
+                        help="minimum free /data space in decimal GB (default: 5)")
     parser.add_argument("--allow-foreign-gpu-processes", action="store_true",
                         help="share GPUs for correctness only; process-based reclamation, timings are not formal data")
     parser.add_argument("--optional-shrink", action="store_true", help="one separate capability launch; never counts toward 20/20")
     args = parser.parse_args()
     shared = args.allow_foreign_gpu_processes
+    require(math.isfinite(args.min_free_disk_gb) and args.min_free_disk_gb >= 0,
+            "--min-free-disk-gb must be finite and nonnegative")
     cases = matrix(args.suite_id, args.optional_shrink)
     for case in cases:
         prefix(case["launch"], 0)
@@ -148,11 +163,12 @@ def main():
             "output must be an absolute /data path")
     if args.dry_run:
         print(json.dumps({"node": args.node, "defaults": DEFAULTS, "cases": cases, "shared_gpu_mode": shared,
+                          "min_free_disk_gb": args.min_free_disk_gb,
                           "ports": [args.port_base + c["index"] for c in cases],
                           "output": str(args.output / args.node)}, indent=2))
         return 0
     require(sys.platform == "linux", "GPU runner requires Linux pidfd and /proc")
-    require(hasattr(os, "pidfd_open") and hasattr(signal, "pidfd_send_signal"), "Linux pidfd Python support required")
+    pidfd_impl = pidfd_implementations()
     require(Path("/data").is_mount(), "/data must be mounted before writing experiment output")
     require(args.output.resolve().is_relative_to(Path("/data").resolve()), "output symlink escapes /data")
     root = args.output / args.node
@@ -161,6 +177,7 @@ def main():
     dirty = subprocess.check_output(["git", "status", "--porcelain"], cwd=HERE, text=True)
     require(not dirty, "server repository must be clean at the delivered commit")
     write_json(root / "invocation.json", {"argv": sys.argv, "commit": commit, "defaults": DEFAULTS,
+                                         **pidfd_impl, "min_free_disk_gb": args.min_free_disk_gb,
                                          "shared_gpu_mode": shared,
                                          "pid": os.getpid(), "start_monotonic": time.monotonic(), "node": args.node,
                                          "original_environment": {k: v for k, v in os.environ.items()
@@ -174,10 +191,12 @@ def main():
     os.environ["CUDA_CACHE_PATH"] = str(root / "cuda_cache")
     if args.preflight_only:
         try:
+            disk = check_data_space(args.min_free_disk_gb, root / "disk_space.jsonl")
             snapshot = gpu_snapshot(root / "preflight_raw.jsonl")
-            mps = mps_snapshot(root / "preflight_raw.jsonl", snapshot, args.mps_pipe)
+            mps = mps_snapshot(root / "preflight_raw.jsonl", snapshot, args.mps_pipe, shared)
             foreign = check_gpu_processes(snapshot, mps, shared_gpu_mode=shared)
             write_json(root / "preflight.json", {"status": "passed", "snapshot": snapshot, "mps": mps,
+                                                 **pidfd_impl, "disk_space": disk,
                                                  "shared_gpu_mode": shared, "foreign": foreign})
             return 0
         except Exception:
@@ -191,6 +210,7 @@ def main():
                             "shared_gpu_mode": shared})
             continue
         config = {**DEFAULTS, **case, "output": str(root / case["launch"]), "node": args.node,
+                  **pidfd_impl, "min_free_disk_gb": args.min_free_disk_gb,
                   "master": args.master, "port": args.port_base + case["index"],
                   "mps_pipe": args.mps_pipe, "commit": commit, "shared_gpu_mode": shared}
         print(f"Starting {case['launch']} on {args.node}", flush=True)

@@ -25,6 +25,7 @@ Step 1 交付后即推进本步模式无关的本地拷贝修复、主机库、p
 - 每节点独立 CPU owner 从 checkpoint 加载一次，持有一份共享 mmap 和元数据；worker attach 同一份 backing，各自 cudaHostRegister 注册 pinned，不各自持有完整权重。
 - owner 不属于 worker kill 范围，worker 退出不 unlink 全局共享库。显式记录 owner PID、node、backing 标识、checkpoint hash、总字节、加载峰值和每个 worker attach/register/unregister 生命周期。
 - 加载前核对 RAM、共享空间、memlock/注册能力及临时加载峰值。避免先完整加载多份再宣称共享，预算不足时报错并报告，不静默改为逐 worker 加载。
+- 加载前实测 `/dev/shm` 可用字节并与本次 backing、元数据和加载临时峰值比较；SL3061 用户核查仅余约 43 GB，不能按标称容量估算。提供完整库与按需分片两种显式模式，按需模式只加载可能需要的分片（例如故障副本可能缺失的部分），加载前确定覆盖清单，不先完整加载再裁剪。报告各模式预计/实际 backing、峰值与注册字节；预算不足在读取权重前拒绝。CPU 测试覆盖空间不足、按需清单覆盖和无完整库临时副本。此项在 Step 3 实现，Step 1 不加载主机库。
 - 库内切片按 dtype、形状、参数名、global expert id、分片范围索引；保持权重只读。跨机不共享同一个 mmap，目标使用目标节点的 host source。
 - 新 real worker 只读结构元数据创建 TP4 空目标，权重填充经过统一 planner 和传输任务；记录初始化/H2D 实际字节，不能遗漏预加载流量。
 

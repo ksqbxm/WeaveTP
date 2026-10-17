@@ -1,14 +1,77 @@
 """Read-only GPU/MPS inspection and signalling of registered child processes."""
 
+import ctypes
+import json
 import os
+import platform
 import select
+import shutil
 import signal
 import subprocess
+import sys
 import time
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
 from common import append_json, require
+
+
+def pidfd_implementations():
+    implementations = {}
+    for name, module, number in (("pidfd_open", os, 434), ("pidfd_send_signal", signal, 424)):
+        native = callable(getattr(module, name, None))
+        require(native or (sys.platform == "linux" and platform.machine() == "x86_64"),
+                f"{name} syscall is supported only on x86_64 Linux")
+        implementations[name + "_impl"] = f"{module.__name__}.{name}" if native else f"syscall({number})"
+    return implementations
+
+
+def pidfd_syscall(number, *args):
+    require(sys.platform == "linux" and platform.machine() == "x86_64",
+            "pidfd syscall is supported only on x86_64 Linux")
+    libc = ctypes.CDLL(None, use_errno=True)
+    libc.syscall.restype = ctypes.c_long
+    result = libc.syscall(ctypes.c_long(number), *args)
+    if result == -1:
+        error = ctypes.get_errno()
+        raise OSError(error, os.strerror(error))
+    return result
+
+
+def pidfd_open(pid):
+    native = getattr(os, "pidfd_open", None)
+    return native(pid) if callable(native) else pidfd_syscall(434, ctypes.c_int(pid), ctypes.c_uint(0))
+
+
+def pidfd_send_signal(fd, sig):
+    native = getattr(signal, "pidfd_send_signal", None)
+    if callable(native):
+        native(fd, sig)
+    else:
+        pidfd_syscall(424, ctypes.c_int(fd), ctypes.c_int(sig), ctypes.c_void_p(), ctypes.c_uint(0))
+
+
+def check_data_space(min_free_gb, log):
+    usage = shutil.disk_usage("/data")
+    report = {"path": "/data", "total_bytes": usage.total, "used_bytes": usage.used,
+              "free_bytes": usage.free, "min_free_gb": min_free_gb, "gb_bytes": 1000000000}
+    print(json.dumps({"disk_space": report}), flush=True)
+    append_json(log, {"disk_space": report})
+    require(usage.free >= min_free_gb * 1000000000, f"insufficient /data space: {report}")
+    return report
+
+
+def verify_worker_context(gpu_uuid, log):
+    """Run inside the worker after allocation: MPS exposes its server PID, not the client PID."""
+    pipe = os.environ["CUDA_MPS_PIPE_DIRECTORY"]
+    require(not Path(pipe).exists(), "isolation pipe unexpectedly exists")
+    snapshot = gpu_snapshot(log)
+    contexts = [(g["uuid"], p) for g in snapshot["gpus"] for p in g["processes"]
+                if p["pid"] == os.getpid()]
+    require(len(contexts) == 1 and contexts[0][0] == gpu_uuid and "C" in contexts[0][1]["type"],
+            "worker lacks its own independent compute context on assigned GPU")
+    return {"pid": os.getpid(), "gpu_uuid": gpu_uuid, "independent_context": True,
+            "isolation_pipe": pipe, "process": contexts[0][1]}
 
 
 def command(argv, log, input_text=None, env=None):
@@ -62,8 +125,8 @@ def parse_pids(text):
     return {int(t) for t in tokens}
 
 
-def mps_snapshot(log, snapshot, explicit_pipe=None):
-    """Locate every daemon, validate its PID file, query using its real pipe."""
+def mps_snapshot(log, snapshot, explicit_pipe=None, shared_gpu_mode=False):
+    """Query real service pipes; shared mode records daemons whose pipe cannot be located."""
     raw = command(["ps", "-eo", "pid=,user=,comm=,args=", "-ww"], log)
     controls, servers = set(), set()
     for line in raw.splitlines():
@@ -90,16 +153,27 @@ def mps_snapshot(log, snapshot, explicit_pipe=None):
         except PermissionError:
             # A matching readable daemon PID file can still establish the pipe.
             pass
-    located, service_pipes = {}, set()
+    located, service_pipes, inaccessible_pipes = {}, set(), []
     for pipe in sorted(candidates):
         pidfile = Path(pipe) / "nvidia-cuda-mps-control.pid"
-        if pidfile.exists():
+        try:
             pid = int(pidfile.read_text().strip())
-            require(pid in controls, f"stale/unmatched MPS PID file: {pidfile}")
+        except FileNotFoundError:
+            continue
+        except PermissionError as error:
+            require(shared_gpu_mode, f"unreadable MPS PID file: {pidfile}: {error}")
+            inaccessible_pipes.append({"pipe": pipe, "reason": str(error)})
+            continue
+        if pid in controls:
             located[pid] = pipe
             service_pipes.add(pipe)
-    require(set(located) == controls, f"cannot locate actual MPS pipe for daemons {controls-set(located)}")
-    require(not servers or controls, "MPS server exists without an inspectable control daemon")
+        else:
+            require(shared_gpu_mode, f"stale/unmatched MPS PID file: {pidfile}")
+            inaccessible_pipes.append({"pipe": pipe, "reason": f"unmatched PID {pid}"})
+    missing = controls - set(located)
+    if not shared_gpu_mode:
+        require(not missing, f"cannot locate actual MPS pipe for daemons {missing}")
+        require(not servers or controls, "MPS server exists without an inspectable control daemon")
     clients, queried_servers, queries = set(), set(), []
     for pid, pipe in located.items():
         env = {**os.environ, "CUDA_MPS_PIPE_DIRECTORY": pipe}
@@ -115,19 +189,25 @@ def mps_snapshot(log, snapshot, explicit_pipe=None):
             per_server[server] = sorted(query(f"get_client_list {server}"))
             clients.update(per_server[server])
         queries.append({"control_pid": pid, "pipe": pipe, "servers": per_server})
-    require(servers <= queried_servers, f"unqueried MPS servers: {servers-queried_servers}")
+    if not shared_gpu_mode:
+        require(servers <= queried_servers, f"unqueried MPS servers: {servers-queried_servers}")
+    complete = not missing and servers <= queried_servers and not inaccessible_pipes
     result = {"original_pipe": original, "original_pipe_has_service": original in service_pipes,
-              "queries": queries, "servers": sorted(queried_servers), "clients": sorted(clients),
-              "state": "queried" if controls else "no_daemon_or_server_in_process_inventory"}
+              "queries": queries, "servers": sorted(servers | queried_servers), "clients": sorted(clients),
+              "skipped_daemons": [{"pid": pid, "reason": "actual pipe unavailable"} for pid in sorted(missing)],
+              "inaccessible_pipes": inaccessible_pipes, "unqueried_servers": sorted(servers - queried_servers),
+              "query_complete": complete,
+              "state": "partial" if not complete else "queried" if controls else "no_daemon_or_server_in_process_inventory"}
     append_json(log, {"mps_snapshot": result})
     return result
 
 
 def check_gpu_processes(snapshot, mps, expected=None, shared_gpu_mode=False, task_pids=()):
-    """expected maps PID to UUID; an MPS server is allowed only with no clients."""
+    """expected maps PID to UUID; only shared mode permits foreign MPS clients."""
     expected = expected or {}
     require(len(set(expected.values())) == len(expected), "worker GPU UUID assignment is not one-to-one")
-    require(not mps["clients"], f"existing MPS clients present: {mps['clients']}")
+    forbidden_clients = set(mps["clients"]) & (set(task_pids) | set(expected)) if shared_gpu_mode else set(mps["clients"])
+    require(not forbidden_clients, f"prohibited MPS clients present: {sorted(forbidden_clients)}")
     found, foreign = {}, {g["uuid"]: [] for g in snapshot["gpus"]}
     for gpu in snapshot["gpus"]:
         if not expected and not shared_gpu_mode:
@@ -156,7 +236,7 @@ def start_ticks(pid):
 def signal_registered(record, sig, gpu_processes=None, wait_timeout=None):
     """PID fd closes the check/signal PID reuse race; no PID from ps is signalled."""
     pid = record["pid"]
-    fd = os.pidfd_open(pid)
+    fd = pidfd_open(pid)
     try:
         if select.select([fd], [], [], 0)[0]:
             return False  # Exited, possibly still awaiting its parent's waitpid.
@@ -169,7 +249,7 @@ def signal_registered(record, sig, gpu_processes=None, wait_timeout=None):
         if gpu_processes is not None:
             require(record["role"] == "worker", "fault target must be a worker")
             require(gpu_processes.get(pid) == record["gpu_uuid"], "fault target GPU mismatch")
-        signal.pidfd_send_signal(fd, sig)
+        pidfd_send_signal(fd, sig)
         if wait_timeout is not None:
             require(select.select([fd], [], [], wait_timeout)[0], f"PID {pid} exit unconfirmed")
         return True
@@ -234,8 +314,6 @@ class Children:
 
 def parent_death_signal():
     """Linux worker exits if its local supervisor disappears, including SIGKILL."""
-    import ctypes
-
     parent = os.getppid()
     require(ctypes.CDLL(None, use_errno=True).prctl(1, signal.SIGKILL) == 0, "prctl failed")
     require(os.getppid() == parent and parent != 1, "supervisor exited before registration")

@@ -45,10 +45,15 @@ class SharedGpuTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             safety.check_gpu_processes(snapshot, self.mps, {10: "GPU-a"})
 
-    def test_mps_clients_still_rejected(self):
+    def test_foreign_mps_clients_allowed_only_in_shared_mode(self):
+        snapshot = {"gpus": [gpu([process(99)])]}
+        mps = {"clients": [99], "servers": []}
+        safety.check_gpu_processes(snapshot, mps, shared_gpu_mode=True)
         with self.assertRaisesRegex(RuntimeError, "MPS clients"):
-            safety.check_gpu_processes({"gpus": [gpu([process(99)])]},
-                                       {"clients": [99], "servers": []}, shared_gpu_mode=True)
+            safety.check_gpu_processes(snapshot, mps)
+        for expected, owned in (({99: "GPU-a"}, ()), ({}, (99,))):
+            with self.assertRaisesRegex(RuntimeError, "MPS clients"):
+                safety.check_gpu_processes(snapshot, mps, expected, True, owned)
 
     def test_nodes_must_agree_on_shared_mode_before_workers_start(self):
         with tempfile.TemporaryDirectory() as directory:

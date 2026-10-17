@@ -74,7 +74,8 @@ class CleanupTests(unittest.TestCase):
             with self.subTest(cleanup_failed=cleanup_failed), tempfile.TemporaryDirectory() as directory:
                 root = Path(directory) / "case"
                 config = {**common.DEFAULTS, "output": str(root), "node": "SL3060",
-                          "launch": "cpu", "kind": "idle"}
+                          "launch": "cpu", "kind": "idle", "min_free_disk_gb": 5,
+                          "pidfd_open_impl": "syscall(434)", "pidfd_send_signal_impl": "signal.pidfd_send_signal"}
                 child, store_child = Mock(pid=42), Mock(pid=43)
                 store_child.wait.return_value = 0
                 children = Mock(children=[])
@@ -96,6 +97,7 @@ class CleanupTests(unittest.TestCase):
                         raise RuntimeError("local launch failed")
 
                 with patch.object(run_probe, "Children", side_effect=[children, service]), \
+                        patch.object(run_probe, "check_data_space"), \
                         patch.object(run_probe, "connect", return_value=(Mock(), Mock())), \
                         patch.object(run_probe, "cleanup_registered", return_value=[]) as cleanup, \
                         patch.object(run_probe, "exchange_terminal", side_effect=exchange):
@@ -104,6 +106,7 @@ class CleanupTests(unittest.TestCase):
                 self.assertEqual(json.loads((root / "events_actual.json").read_text(encoding="utf-8")), result)
                 self.assertEqual(json.loads((root / "result.json").read_text(encoding="utf-8")), result)
                 self.assertEqual(result["metrics"]["value_s"], 1)
+                self.assertEqual(result["pidfd_open_impl"], "syscall(434)")
                 service.cleanup.assert_called_once()
 
 

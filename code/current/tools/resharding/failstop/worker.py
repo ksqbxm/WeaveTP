@@ -12,7 +12,7 @@ from datetime import timedelta
 from pathlib import Path
 
 from common import Journal, connect, failed_slots, membership, prefix, require, write_json
-from safety import parent_death_signal
+from safety import parent_death_signal, verify_worker_context
 
 
 def listen(config, slot, journal, notifications):
@@ -64,11 +64,14 @@ def run(config, slot, initial_epoch):
     reference = torch.arange(config["tensor_elements"], dtype=torch.int64) + slot * 1000000 + initial_epoch
     resident = reference.to("cuda")
     torch.cuda.synchronize()
+    context = verify_worker_context(row["gpu_uuid"], root / f"context_{slot}_epoch{initial_epoch}.jsonl")
+    runtime["context_verification"] = context
+    write_json(root / f"runtime_{slot}_epoch{initial_epoch}.json", runtime)
     pointer = resident.data_ptr()
     tensor_info = {"pointer": pointer, "shape": list(resident.shape), "dtype": str(resident.dtype),
                    "reference_sha256": hashlib.sha256(reference.numpy().tobytes()).hexdigest()}
     identity = journal.event("cuda_ready", slot=slot, gpu_uuid=row["gpu_uuid"],
-                             epoch=initial_epoch, tensor=tensor_info)
+                             epoch=initial_epoch, tensor=tensor_info, context_verification=context)
     bus.put(f"cuda/{initial_epoch}/{slot}", identity)
     bus.wait([f"cuda_verified/{initial_epoch}"])
 

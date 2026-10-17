@@ -188,7 +188,8 @@ class ControlTests(unittest.TestCase):
     def test_outer_timeout_is_failure_and_cleans_registered_children(self):
         with tempfile.TemporaryDirectory() as directory:
             config = {**common.DEFAULTS, "output": str(Path(directory) / "case"),
-                      "node": "SL3061", "launch": "cpu", "kind": "idle"}
+                      "node": "SL3061", "launch": "cpu", "kind": "idle", "min_free_disk_gb": 5,
+                      "pidfd_open_impl": "syscall(434)", "pidfd_send_signal_impl": "signal.pidfd_send_signal"}
             child = Mock()
             child.wait.side_effect = subprocess.TimeoutExpired("probe", 1)
             children = Mock()
@@ -196,6 +197,7 @@ class ControlTests(unittest.TestCase):
             children.children = []
             service = Mock(children=[])
             with patch.object(run_probe, "Children", side_effect=[children, service]), \
+                    patch.object(run_probe, "check_data_space"), \
                     patch.object(run_probe, "connect", return_value=(Mock(), Mock())), \
                     patch.object(run_probe, "exchange_terminal"), \
                     patch.object(run_probe, "cleanup_registered") as cleanup:

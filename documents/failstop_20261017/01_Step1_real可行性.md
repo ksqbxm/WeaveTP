@@ -23,8 +23,8 @@
 1. 在两台机器记录进程列表、GPU 进程、MPS 控制进程/server/client 列表及查询返回码。按安装版本选择只读查询；旧接口用 `get_server_list`、对每个 server 用 `get_client_list <PID>`。保存原始管道路径和结果。
 2. 查询使用真实服务管道；worker 的环境单独设置。不能只 unset 环境变量，因为客户端可能连接默认管道。
 3. 给本次 worker（包含回归新 worker）设置节点/launch 唯一、确认不存在且不创建的 `CUDA_MPS_PIPE_DIRECTORY`，在首次 CUDA 初始化前生效，以绕开已有服务。报告原设置是否会连接 SL3060 MPS、应用了何种隔离及前后结果。
-4. worker CUDA 初始化后再查 server/client 列表，确认本次所有 worker PID 均未连接，并记录其独立 GPU context。环境设置只是措施，实际查询才是验收证据。查询权限不足、管道无法定位、隔离后 CUDA 不可用均停止本 case 并报告，不修改服务或 GPU compute mode。
-5. 不发 quit、不 start/stop server、不杀 MPS，不调整别人的客户端。既存客户端若占用本次 GPU，预检拒绝该 case 并报告，不驱逐。
+4. worker CUDA 初始化后再查 server/client 列表，确认本次所有 worker PID 均未连接，并记录其独立 GPU context。环境设置只是措施，实际查询才是验收证据。独占模式查询权限不足、管道无法定位均停止。共享模式允许 foreign 客户端，无法定位管道的 daemon 记录 skipped_daemons 和 query_complete=false 并跳过；worker 在 CUDA 分配后查询 GPU 进程表，必须直接找到自身 PID 的唯一计算 context 且 UUID 正确。隔离后 CUDA 不可用或 context 证明失败仍停止，不修改服务或 GPU compute mode。
+5. 不发 quit、不 start/stop server、不杀 MPS，不调整别人的客户端。独占模式既存客户端若占用本次 GPU，预检拒绝；共享模式只记录 foreign 客户端，不驱逐。本测试 PID 出现在客户端列表仍失败。
 
 NVIDIA 文档说明管道变量控制连接位置，并列出绕开 MPS 的设置；实际效果仍须在服务器构建验证：[环境变量](https://docs.nvidia.com/deploy/topics/topic_5_2_2.html)、[绕开 MPS](https://docs.nvidia.com/deploy/mps/595/when-to-use-mps.html)、[只读控制接口](https://docs.nvidia.com/deploy/mps/appendix-tools-and-interface-reference.html)。
 
@@ -97,3 +97,5 @@ NVIDIA 文档说明管道变量控制连接位置，并列出绕开 MPS 的设�
 当前实现 SHA：`d69d5950819626b0cbd09bfa4e32ed4ebbe9396c`；新增默认关闭的共享 GPU 正确性开关，40 项 CPU 测试通过。运行见 [共享 GPU 命令](Step1_共享GPU服务器命令.md)，默认独占验收仍见 [服务器命令](Step1_服务器命令.md)。
 
 GPU：未运行。20 次结果：待回传。Linux PID/MPS/CUDA/NCCL 可行性：待服务器验证。用户 real 集成确认：待确认。
+
+- 2026-10-17 服务器环境适配：pidfd 原生 Python 接口缺失时仅在 x86_64 Linux 使用 syscall 434/424，不退回 os.kill；result.json 记录实现。`/data` 每轮启动前检查，`--min-free-disk-gb` 默认 5（十进制 GB），不足打印总量/已用/可用并失败。共享 MPS 规则按本次用户核查调整；Step 3 增补 `/dev/shm` 空间预检、按需分片加载及各模式占用报告。SL3061 拉取 GitHub，通过增量 bundle 分发 SL3060。

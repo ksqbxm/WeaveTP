@@ -62,7 +62,7 @@ class Supervisor:
     def inspect(self, name, expected=None):
         raw = self.root / f"{name}_raw.jsonl"
         snapshot = gpu_snapshot(raw)
-        mps = mps_snapshot(raw, snapshot, self.config.get("mps_pipe"))
+        mps = mps_snapshot(raw, snapshot, self.config.get("mps_pipe"), self.config["shared_gpu_mode"])
         foreign = check_gpu_processes(snapshot, mps, expected, self.config["shared_gpu_mode"], self.task_pids)
         if name == "preflight":
             self.foreign = foreign

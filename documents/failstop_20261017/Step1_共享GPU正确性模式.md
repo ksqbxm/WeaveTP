@@ -9,7 +9,7 @@
 - 预检和每轮 config 保存 `shared_gpu_mode`。两节点模式不一致，在启动 worker 前失败。
 - `preflight.json` 的 `foreign` 按 GPU UUID 保存 PID、名称、进程显存 MiB；MPS 空闲 server 也记录。`used_memory_raw` 保存原始值，N/A 记为 null，不能写成 0。
 - 后续检查保存 `foreign`、相对预检集合的 `new_foreign`。已有和新外部进程都不会导致共享模式失败；本测试 PID 必须出现在指定 UUID 上，缺失、错误 UUID、重复设备分配或已登记旧 worker 残留均失败。
-- MPS 查询、客户端拒绝条件和 worker 独立管道隔离不变。已有 MPS 客户端仍会使预检失败。
+- MPS 允许已有 foreign 客户端；无法定位真实管道的 daemon 记录后跳过查询，标记 query_complete=false，不能把未查询解释为空客户端列表。已定位管道查询失败仍停止。本测试 PID 出现在已查询客户端列表仍失败；每个 worker 在 CUDA 分配后核实自身 PID 在指定 GPU 上有独立计算 context，保留原始进程表与无效管道隔离证据。
 - 整卡基线只记录范围，`threshold_mib=null`；不因其他任务显存波动失败。kill 后和最终退出均检查全部已登记本测试 worker PID。进程已经退出且目标 GPU 表中没有本测试 PID，意味着表中本测试进程显存合计为 0；连续三个合格样本确认。仍有 PID 条目时，即使占用为 0 或 N/A 也不能通过。
 - `gpu_reclaim_samples.jsonl`、`cleanup_gpu_samples.jsonl` 保留整卡数据及每 GPU 的 `task_usage`（本测试 PID 列表、显存合计）。spawn 前复查继续阻止本测试进程残留，但忽略外部显存增长。最终清理包含旧 PID 和重新启动的新 PID。
 - kill 和异常清理只来自登记表；foreign 清单不进入信号目标。现有 `signal_registered` 的启动时间、launch、角色、GPU UUID 核对不变。
