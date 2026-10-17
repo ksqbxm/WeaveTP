@@ -1,8 +1,8 @@
 {
   "check": "router_determinism",
   "branch": "codex/failstop",
-  "code_commit": "36beb5ed481c8b5da6a00f49643e9c9e69598f51",
-  "manifest_commit": "2fbe24590d7f1d3715c1b4e5869ce9d45aaac004",
+  "code_commit": "ee0a899c839536a9d2f8b3f29040e8338f15059d",
+  "manifest_commit": "33eb887278dae21b14446f9805a63ab7e484c03f",
   "read_before_code": [
     "CODEX.md",
     "documents/failstop_20261017/00_总计划.md",
@@ -25,7 +25,7 @@
     "unittest": {
       "count": 10,
       "status": "passed",
-      "log": "cpu_tests_fix1.log",
+      "log": "cpu_tests_fix2.log",
       "command": "python -B -X utf8 -m unittest discover -s code/current/tools/resharding/correctness -p test_router_determinism.py -v"
     },
     "failstop_regression": {
@@ -34,10 +34,9 @@
       "note": "unchanged files; run on codex/failstop e40164f + this change"
     },
     "gpu": {
-      "status": "not_run",
-      "tp2": "not_run",
-      "tp4": "not_run",
-      "elapsed_budget_900s": "not_measured"
+      "fix1_manifest": "2fbe24590d7f1d3715c1b4e5869ce9d45aaac004",
+      "status": "PASS (SL3061, 123 s)",
+      "fix2_rerun": "not_run"
     }
   },
   "static_checks": {
@@ -61,15 +60,16 @@
   },
   "logs_sha256": {
     "cpu_tests.log": "0cc57b8c7afceb9f87f60c66d582b0ccd7ee24aff751809cf7c6b29e56e46c13",
-    "cpu_tests_fix1.log": "7c032f8209a8bc5fefc5edc233bd608d822423777a5fa6fb8a8e61f11b0cd243"
+    "cpu_tests_fix1.log": "7c032f8209a8bc5fefc5edc233bd608d822423777a5fa6fb8a8e61f11b0cd243",
+    "cpu_tests_fix2.log": "a9d47d23a168c22e2a95055c22f482b0661f6e026e363968e40d51656d0a74d2"
   },
   "bundle": {
-    "path": "C:/Users/ksqbx/.codex/worktrees/failstop/router_determinism_2fbe245.bundle",
-    "bytes": 969689,
-    "sha256": "fd821a98929e289e78efd41f7d5d4653e1e62f430268a21f82828fe580471ddc",
+    "path": "C:/Users/ksqbx/.codex/worktrees/failstop/router_determinism_33eb887.bundle",
+    "bytes": 977209,
+    "sha256": "4f632b574f3603cbe377580099a9e73404cb2fb2e0bf9671bd20607009ebac1a",
     "base": "f7d555998b45756998465924d733fd70e553d6b4",
-    "ref": "refs/heads/codex/router-determinism-2fbe245",
-    "head": "2fbe24590d7f1d3715c1b4e5869ce9d45aaac004",
+    "ref": "refs/heads/codex/router-determinism-33eb887",
+    "head": "33eb887278dae21b14446f9805a63ab7e484c03f",
     "verified": true
   },
   "first_delivery": {
@@ -98,6 +98,29 @@
       "isort": "passed",
       "ruff_F": "passed",
       "git_diff_check": "passed"
+    },
+    "server_result": {
+      "node": "SL3061",
+      "manifest_commit": "2fbe24590d7f1d3715c1b4e5869ce9d45aaac004",
+      "result": "PASS",
+      "elapsed_s": 123,
+      "tp2": "default=differs(logits step=0 rank=0), deterministic=bitwise",
+      "tp4": "default=differs(logits step=0 rank=0), deterministic=bitwise",
+      "source": "user report 2026-10-17; archive on the server"
     }
+  },
+  "fix2": {
+    "change": "compare_runs reports logits/routing_map/probs separately over identical-input steps; routing_map_differs in results",
+    "unittest": {
+      "count": 10,
+      "status": "passed",
+      "log": "cpu_tests_fix2.log"
+    },
+    "static_checks": {
+      "isort": "passed",
+      "ruff_F": "passed",
+      "git_diff_check": "passed"
+    },
+    "server_result": "not_run; needed to answer whether default-mode differences changed routing_map"
   }
 }

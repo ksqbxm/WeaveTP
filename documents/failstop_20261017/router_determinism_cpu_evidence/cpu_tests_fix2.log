@@ -1,0 +1,69 @@
+﻿python : test_real_megatron_parse_args_accepts_the_entry_arguments (test_router_determinism.CommandTests.test_real_mega
+tron_parse_args_accepts_the_entry_arguments) ... C:\Users\ksqbx\.codex\worktrees\failstop\WeaveTP_代码与实验资料_20260920\code
+\current\megatron\core\optimizer\__init__.py:25: UserWarning: Transformer Engine and Apex are not installed. Falling ba
+ck to Torch optimizers.
+At line:1 char:480
++ ... EADS = '1'; python -B -X utf8 -m unittest discover -s code/current/to ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (test_real_megat...rch optimizers.:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+  warnings.warn(
+C:\Users\ksqbx\.codex\worktrees\failstop\WeaveTP_代码与实验资料_20260920\code\current\megatron\core\distributed\fsdp\src\megat
+ron_fsdp\mixed_precision.py:115: UserWarning: Transformer Engine and Apex are not installed. Falling back to local impl
+ementations of multi_tensor_applier and multi_tensor_scale
+  warnings.warn(
+C:\Users\ksqbx\.codex\worktrees\failstop\WeaveTP_代码与实验资料_20260920\code\current\megatron\core\optimizer\optimizer.py:29:
+ UserWarning: Transformer Engine and Apex are not installed. Falling back to local implementations of multi_tensor_appl
+ier and multi_tensor_scale
+  warnings.warn(
+C:\Users\ksqbx\.codex\worktrees\failstop\WeaveTP_代码与实验资料_20260920\code\current\megatron\core\optimizer\clip_grads.py:32
+: UserWarning: Transformer Engine and Apex are not installed. Falling back to local implementations of multi_tensor_app
+lier, multi_tensor_l2norm, and multi_tensor_scale
+  warnings.warn(
+C:\Users\ksqbx\.codex\worktrees\failstop\WeaveTP_代码与实验资料_20260920\code\current\megatron\core\hyper_comm_grid.py:26: Use
+rWarning: absl.logging is not installed. Using logging.getLogger(__name__) instead. Please install absl.logging with `p
+ip install absl-py` to use absl.logging.
+  warnings.warn(
+C:\Users\ksqbx\.codex\worktrees\failstop\WeaveTP_代码与实验资料_20260920\code\current\megatron\core\inference\contexts\__init_
+_.py:9: DeprecationWarning: The following imports from `dynamic_context.py` will be removed in this file in `megatron-c
+ore` 0.14. The imports here result in a cyclic import issue that causes rotary embeddings to import from Apex rather th
+an Transformer Engine.
+  warnings.warn(
+C:\Users\ksqbx\.codex\worktrees\failstop\WeaveTP_代码与实验资料_20260920\code\current\megatron\training\utils.py:24: UserWarni
+ng: Transformer Engine and Apex are not installed. Falling back to local implementations of multi_tensor_applier and mu
+lti_tensor_l2norm
+  warnings.warn(
+C:\Users\ksqbx\.codex\worktrees\failstop\WeaveTP_代码与实验资料_20260920\code\current\megatron\core\models\backends.py:34: Use
+rWarning: Apex is not installed. Falling back to Torch Norm
+  warnings.warn("Apex is not installed. Falling back to Torch Norm")
+C:\Users\ksqbx\miniforge3\Lib\argparse.py:1499: DeprecationWarning: 'type' is deprecated as of Python 3.12 and will be 
+removed in Python 3.14.
+  action = action_class(**kwargs)
+C:\Users\ksqbx\.codex\worktrees\failstop\WeaveTP_代码与实验资料_20260920\code\current\megatron\core\models\gpt\gpt_layer_specs
+.py:68: UserWarning: Apex is not installed. Falling back to Torch Norm
+  warnings.warn("Apex is not installed. Falling back to Torch Norm")
+ok
+test_shell_entry_reads_pinned_sha_from_releases (test_router_determinism.CommandTests.test_shell_entry_reads_pinned_sha
+_from_releases) ... ok
+test_torchrun_command_pins_layout_native_router_and_checkpoint (test_router_determinism.CommandTests.test_torchrun_comm
+and_pins_layout_native_router_and_checkpoint) ... ok
+test_compare_runs_reports_each_tensor_class_until_inputs_diverge (test_router_determinism.CompareTests.test_compare_run
+s_reports_each_tensor_class_until_inputs_diverge) ... ok
+test_first_mismatch_reports_bits_of_one_ulp (test_router_determinism.CompareTests.test_first_mismatch_reports_bits_of_o
+ne_ulp) ... ok
+test_plan_lists_requirement_per_gpu_and_unestimated_items (test_router_determinism.EstimateTests.test_plan_lists_requir
+ement_per_gpu_and_unestimated_items) ... ok
+test_sharding_divides_dense_and_expert_parts_separately (test_router_determinism.EstimateTests.test_sharding_divides_de
+nse_and_expert_parts_separately) ... ok
+test_unsharded_total_matches_deepseek_v2_lite_parameter_count (test_router_determinism.EstimateTests.test_unsharded_tot
+al_matches_deepseek_v2_lite_parameter_count) ... ok
+test_shortage_names_gpu_and_requirement (test_router_determinism.PreflightTests.test_shortage_names_gpu_and_requirement
+) ... ok
+test_pass_requires_deterministic_mode_and_reports_default_mode (test_router_determinism.SummaryTests.test_pass_requires
+_deterministic_mode_and_reports_default_mode) ... ok
+
+----------------------------------------------------------------------
+Ran 10 tests in 5.458s
+
+OK
