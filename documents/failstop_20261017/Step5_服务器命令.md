@@ -224,3 +224,50 @@ ROOT=/data/ubuntu/lxh/weavetp/acceptance/step03_sources_and_transport
 ## 6. 失败与下一关口
 
 本批通过只表示：预检表与真实空闲显存一致、Megatron `--deterministic-mode` 下 DeepSeek-V2-Lite 两次独立加载在同输入同历史下逐位一致、默认模式耗时基线可得。它不是 A6/A7 通过，不改变 Step 5 "停在 A6/A7 用户确认关口" 的要求。下一批在 Step 3/4 GPU 通过后接入真实模型的 fail→shrink→rejoin→expand，把本批的参考记录与 `compare_records` 用于每个 A6 检查点。
+
+## 6. 真实模型 fail-stop 接入：A6 流程（GPU 未验证；待 Step 3、Step 4 两节点快验通过后运行）
+
+实现 `241fb75875c1b52ecd8b0e5f72d3775150f18d89`，见[实现与验证](Step5_实现与验证.md)"真实模型 fail-stop 接入第一批"。本流程四步：参考加载 → fail-stop launch → 重放参考 → 比较。所有进程在 `--deterministic-mode` 与 `NCCL_ALGO=Ring`、`CUBLAS_WORKSPACE_CONFIG=:4096:8` 下运行。本批没有 A7、没有多轮以外的 smoke，也不测量 Step 4 的重叠；`accepted` 固定为 false。
+
+1. **参考加载与参数 hash**（SL3061，8 卡，第 4 节正式运行 `--layouts tp2,tp4`）：输出 `$RUN/SL3061/tp2/reference/parameters_rank_{0..3}.json` 与 `tp4/reference/parameters_rank_{0..7}.json`，rank = coord + tp × ep。该目录即下面的 `REFERENCE_ROOT=$RUN/SL3061`。
+2. **冻结 profile**：Step 3 `--profile-only` launch 产出的 `profile.json`（16 卡身份必须与本次相同），两节点放在同一路径 `PROFILE=/data/ubuntu/lxh/weavetp/profiles/step3_<suite>.json`。
+3. **fail-stop launch**（两节点，先 SL3060；emulate 一次 launch 连续 5 轮，real 一次 launch；两节点 SUITE 相同）：
+
+```bash
+set -e
+cd /data
+mountpoint -q /data
+source /data/ubuntu/lxh/weavetp/env.sh
+test -z "$(git -C "$REPO" status --porcelain --untracked-files=no)"
+git -C "$REPO" checkout --detach 241fb75875c1b52ecd8b0e5f72d3775150f18d89
+export NODE=SL3060 SUITE=s5_a6_241fb75_r1
+export RUN="/data/ubuntu/lxh/weavetp/acceptance/step05_model_correctness/$SUITE"
+export ENTRY="$REPO/code/current/tools/resharding/failstop/run_failstop_model.py"
+export PROFILE=/data/ubuntu/lxh/weavetp/profiles/step3_<suite>.json
+export REFERENCE_ROOT=/data/ubuntu/lxh/weavetp/acceptance/step05_model_correctness/<参考运行 SUITE>/SL3061
+export REPO PYTHON
+test ! -e "$RUN"
+mkdir -p "$RUN"
+nohup bash -c 'rc=1; finish() { git -C "$REPO" checkout --detach f7d555998b45756998465924d733fd70e553d6b4 || rc=1; tar -czf "${RUN}_${NODE}.tar.gz" -C "$(dirname "$RUN")" "$(basename "$RUN")" || rc=1; printf "%s\n" "$rc" > "$RUN/$NODE.exit_code"; exit "$rc"; }; trap finish EXIT; "$PYTHON" -B "$ENTRY" launch --node "$NODE" --suite-id "$SUITE" --output "$RUN" --mode both --rounds 5 --real-launches 1 --profile-file "$PROFILE" --reference-root "$REFERENCE_ROOT"; rc=$?' > "$RUN/$NODE.nohup.log" 2>&1 < /dev/null &
+echo $! > "$RUN/$NODE.runner.pid"
+```
+
+SL3061 只改 `NODE=SL3061`。端口 29840 起与 Step 2–4 正式验收相同，不能与其他步同时启动。每个 launch 目录 `$RUN/$NODE/<launch>/` 含 `checkpoints/r<轮>/{phase0,shrink,final}/slot_<slot>.pt`、`kv/r<轮>/{prefix,delta}/coord_<c>.pt`、`source_plan_<轮>_{shrink,expand,delta}.json`、`model_checks_<slot>.json`、`async_phase_checks.json`、`rank_map.json`、`controller_result.json`。launch 内部已在每次 cutover 前完成目标权重 hash 与 KV 映射的逐位校验；任一失败即该 launch FAIL 并保留旧布局。
+
+4. **重放参考与比较**（SL3061，需要两节点的 launch 目录；先把 SL3060 的 `$RUN/SL3060/<launch>` 复制到 SL3061 同一 `$RUN` 下）：
+
+```bash
+source /data/ubuntu/lxh/weavetp/env.sh
+git -C "$REPO" checkout --detach 241fb75875c1b52ecd8b0e5f72d3775150f18d89
+export ENTRY="$REPO/code/current/tools/resharding/failstop/run_failstop_model.py"
+export RUN=/data/ubuntu/lxh/weavetp/acceptance/step05_model_correctness/s5_a6_241fb75_r1
+for L in "$RUN"/SL3061/*_emulate "$RUN"/SL3061/*_real_00; do
+  B=$(basename "$L")
+  "$PYTHON" -B "$ENTRY" specs --launch-roots "$RUN/SL3060/$B" "$RUN/SL3061/$B" --output "$RUN/a6_${B}_specs.json"
+  "$PYTHON" -B "$ENTRY" replay --specs "$RUN/a6_${B}_specs.json" --output "$RUN/a6_${B}_replay"
+  "$PYTHON" -B "$ENTRY" compare --launch-roots "$RUN/SL3060/$B" "$RUN/SL3061/$B" --replay-root "$RUN/a6_${B}_replay" --output "$RUN/a6_${B}_compare.json"
+done
+git -C "$REPO" checkout --detach f7d555998b45756998465924d733fd70e553d6b4
+```
+
+每个 launch 的最后一行 `A6 result=PASS checkpoints=N` 且两节点 launch 的 `summary.all_cases_passed=true` 才算本批 A6 通过；回传两节点 tar、`a6_*_specs.json`、`a6_*_compare.json` 与 replay 目录的 `result.json`/`torchrun_*.log`。失败标准：任一 checkpoint `differs`/`missing_reference`/`not_comparable`、launch 内权重 hash 或 KV 映射校验失败、超时、死锁。

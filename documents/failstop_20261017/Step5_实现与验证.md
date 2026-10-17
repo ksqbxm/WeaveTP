@@ -81,6 +81,34 @@ python -B -X utf8 -m pytest --noconftest code/current/tests/unit_tests/reshardin
 
 2026-10-18 服务器结果（用户回传）：SL3061 单节点快验，清单 `420eec3c405f9de846308283c436e71e7498430f`，suite `s5q_20261017T165421_80b77c92_single`，exit_code=0，tp2 与 tp4 的确定性参考/候选均逐位一致，step_time_ratio tp2=1.18、tp4=1.13（共享 GPU，只作开销评估）。该结果证明 Megatron `--deterministic-mode` 下 DeepSeek-V2-Lite 两次独立加载在同输入同历史下逐位一致、预检表与真实显存一致、默认模式耗时基线可得；它不是 A6/A7 通过。两节点形式在 SL3060 空出后用同一清单运行。
 
+## 真实模型 fail-stop 接入第一批（2026-10-18，代码与 CPU 测试）
+
+实现 `241fb75875c1b52ecd8b0e5f72d3775150f18d89`。用户在单节点快验通过后指示开始 fail→shrink→rejoin→expand 的真实模型接入，代码与 CPU 测试先做，上机仍需 Step 3、4 两节点快验先通过。写代码前复核了 CODEX.md、总计划、Step 5 文档与现有迁移代码：Megatron 自带规划器只在本地切片上工作且假定 reshard 组为 WORLD，live benchmark 的 cutover 用容差而非逐位，`ModelBinding.rebind` 不能把 TP4 模型贴成 TP2；因此真实模型接入沿用 Step 3 的 `Shard`/混合规划器/传输与 Step 4 的状态机，不改动 Megatron 规划器。
+
+| 文件 | 交付 |
+|---|---|
+| `model_shards.py` | 由 Megatron 参数属性（`tensor_model_parallel`/`partition_dim`/`partition_stride`）与副本坐标 (tp, coord, ep) 生成全局坐标的 `Shard`：stride-2（SwiGLU fc1、专家 fc1）拆成两个块分片；行并行按 dim 1；复制张量覆盖全形状、任一持有者可作源；`local_experts.<i>` 解析为全局专家 id `ep*32+i` 并写入 name/expert，EP 不换专家归属。静态 KV（`[S,B,heads/tp,dim]`，head 在 dim 2 连续）按 token 区间 `[start, stop)` 与本坐标 head 段生成分片；`map_kv_heads` 只用 head 算术从完整 TP2 快照得到 TP4 坐标的期望 KV（独立于规划器）。`model_local_orders`：存活卡 TP4 坐标 c 完整包含于 TP2 坐标 c//2，二者都落在坐标 1，由 `choose_local_order` 按稳定设备身份决定谁复用。 |
+| `model_worker.py` | 真实模型 worker，走 Step 4 的控制门（`async_probe.control`，按 probe 选择配置键与 local orders，模型探针不跑 Step 4 的 baseline 重放）。阶段 0：用副本自己的 `ProcessGroupCollection` 构建 TP4 模型并加载 checkpoint，逐参数 sha256 对照参考加载的 `parameters_rank_<coord+tp*ep>.json`，prefill 提示 + 若干 decode；缩容：存活卡建空 TP2 目标（NaN 毒化），全部活跃成员发布各自的源/目标分片，每个成员用同一全局快照建计划并参与每一波（EDP1 作为发送方），目标权重 sha256 全部等于 TP2 参考加载后才 cutover，再按"原 prompt + 已提交历史"重新 prefill；扩容：EDP0 四卡建空 TP4 目标与毒化 KV，TP2 存活卡发布 TP2 权重 + KV 前缀 `[0, prefix)`，传输后存活卡继续在 TP2 提交 `expand_delta_steps` 步，再传 KV 增量 `[prefix, length)`；目标 KV 逐位等于存活卡落盘快照的 head 映射后才 cutover，释放 TP2。每个服务实例落盘 checkpoint（prefill 的 token、decode 的 token、KV 快照目录、逐步 logits 位记录），`model_checks_<slot>.json` 记录事件、传输字节、内存、暂停。服务循环在静态 KV 用满后只轮询不再 decode。 |
+| `model_runtime.py` | Megatron 运行时（GPU）：按副本组构建模型、加载 checkpoint（在 16 卡世界上初始化 TP4×EP2×DP2 并行状态，固定场景下其坐标与副本坐标一致，由参数 hash 对照证明）、任意 token 序列 prefill、decode、KV 分配/安装、参数 sha256、standby 释放、显存查询。 |
+| `model_reference.py` | reference 角色额外写每 rank 的逐参数 sha256；新增 `replay` 角色：按 `model_checks.write_specs` 产出的规格，在同布局的独立进程中按记录的历史 prefill 或安装落盘 KV 快照的 head 映射，再按记录的 token decode，产出可与 launch 记录经 `compare_records` 比较的参考记录。 |
+| `model_checks.py`、`run_failstop_model.py` | A6 比较：launch 的每个 checkpoint 与同 id 的 replay 记录逐位比较，参考缺失、记录数不同、任一侧非确定性模式都判 FAIL。入口子命令 `launch`（两节点 fail-stop 启动，需冻结 profile 与参考 hash）、`specs`、`replay`、`compare`。 |
+
+### CPU 验证
+
+147 项 failstop 单测通过（新增 9 项），见 [cpu_tests_failstop_integration.log](step5_cpu_evidence/cpu_tests_failstop_integration.log)：
+
+- 分片推导：TP4 四个坐标恰好铺满每个全局张量，stride-2 块偏移正确，EP 专家 id 正确；缩容计划把存活卡残余 TP4 + EDP1 TP4 填进 TP2 目标后逐位等于全局张量切片，复制张量走本地拷贝，专家只取同 EP 源；KV 分片覆盖 token 区间与本坐标 head；head 映射等于直接切片。
+- 协议：真实 worker/控制门代码与 16 个 CPU actor 运行 emulate 两轮与 real 替代进程（fake 运行时：按真实布局规则分片的玩具参数与 KV，logits 是驻留权重、有效 KV 与 token 的精确整数函数），每个 checkpoint 经 `write_specs → replay → compare` 与独立重放逐位相等；篡改重放或缺失参考均 FAIL；三类计划文件（shrink/expand/delta）写出，缩容计划同时含本地复用与远程字节；16 个事件记录均含参数审计。
+- CPU 测试证明协议、规划器输入、传输记账、先校验后释放的顺序与 checkpoint 格式；不证明 DeepSeek 前向、NCCL 传输、显存与 Megatron 在 fail-stop 世界中的加载。
+
+### 服务器 GPU 待验证项
+
+1. Megatron 在两节点各 8 进程、经 TCPStore 建立的世界中 `initialize_megatron` 与 `load_checkpoint`：mpu 坐标与副本坐标一致（由参数 hash 对照把关）；real 模式 abort 后 `destroy_model_parallel`。
+2. 空目标模型（`pg_collection` 为副本组）构建与 `ModelBinding.rebind`（real 模式 world 重建后 TP2 服务模型换组）。
+3. 同步波次传输下 EDP1 的服务中断；Step 4 的服务/传输重叠不在本批测量。
+4. 主机库（Step 3 host owner）未接入真实模型来源；本批来源只有 GPU 分片。
+5. 阶段 0 之后每个 checkpoint 的 replay 需要在服务器上独立运行并比较（`run_failstop_model.py specs/replay/compare`）。
+
 ## 边界与未完成项
 
 - 本批的 candidate 是独立的新加载进程（`candidate_kind=fresh_checkpoint_load`），用于在真实模型上验证跨进程参考/候选比较合同（manifest、参数校验和、历史 hash、逐位）；它不是迁移后的被测模型。A6 各检查点的被测对象要等 Step 3/4 GPU 通过后接入真实模型的 fail→shrink→rejoin→expand。
