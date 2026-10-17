@@ -125,7 +125,9 @@ class Simulation(topology_test.Simulation):
                 get_world_size=lambda group=None: self.local.size if group is None else group.size(),
                 get_process_group_ranks=lambda group: list(group.members), get_backend=lambda: "fake",
                 all_reduce=self.reduce, all_gather=self.gather))
-            stack.enter_context(patch.object(worker.c10d, "_abort_process_group", lambda: None))
+            # PyTorch refuses to abort when no default group exists; a replacement must never call it.
+            stack.enter_context(patch.object(worker.c10d, "_abort_process_group",
+                lambda: common.require(getattr(self.local, "rank", None) is not None, "abort without a process group")))
             stack.enter_context(patch.object(async_probe.signal, "SIGKILL", 9, create=True))
             supervisors = [threading.Thread(target=self.supervisor, args=(node,), daemon=True) for node in common.NODES]
             for thread in supervisors:

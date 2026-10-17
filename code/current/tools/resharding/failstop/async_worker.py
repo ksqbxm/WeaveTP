@@ -10,7 +10,7 @@ from dataclasses import asdict
 from datetime import timedelta
 from pathlib import Path
 
-from async_state import ReplicaDriver, Request, interference, interval_overlap, recovery_queue
+from async_state import ReplicaDriver, Request, interference, interval_overlap
 from common import Journal, connect, require, write_json
 from safety import parent_death_signal, verify_worker_context
 
@@ -122,15 +122,16 @@ class Worker:
         pack = self.build(self.session, phase) if self.real else self.prebuilt[phase]
         self.session.adopt_group_order(pack["records"])
         self.pack = pack
-        if self.model is not None:
+        if self.model is not None and (self.healthy or phase == 2):
+            # Only a model that keeps serving is rebound; a shrink source is transport-only.
             pointer = self.model.weight.data_ptr()
-            self.model.groups = pack["service2"] if phase == 2 and not self.healthy else pack["target"]
+            self.model.groups = pack["target"] if self.healthy else pack["service2"]
             require(self.model.weight.data_ptr() == pointer, "rebind changed survivor pointer")
-            if phase == 2 and not self.healthy:
+            if not self.healthy:
                 require(self.model.groups.local_ranks["expt_tp"] == self.model.tp,
                         "rejoin changed the live TP2 shard coordinate")
-            self.journal.event("source_rebound", source_pointer=pointer, phase=phase,
-                               source_tp=self.model.tp, source_size=self.model.size)
+            self.journal.event("serving_model_rebound", pointer=pointer, phase=phase,
+                               tp=self.model.tp, size=self.model.size)
         return pack
 
     def collective_flag(self, flag):
@@ -157,6 +158,8 @@ class Worker:
             self.kv = torch.cat((self.kv, tail), dim=3)
             if phase == "expand" and not self.healthy:
                 self.compute_events.append((start, end))
+            if self.pauses and self.pauses[-1]["end_local"] is None:
+                self.pauses[-1]["end_local"] = submitted  # service resumed on the rebuilt world
             self.last_end = completed
         sample = {"phase": phase, "context": len(tokens), "tokens": list(tokens), "layout": self.model.size,
                   "seconds": completed - submitted, "gpu_ms": start.elapsed_time(end),
@@ -196,11 +199,14 @@ class Worker:
         self.bus.put(f"phase/{round_id}/{phase}/{self.slot}", report)
 
     def transition(self, phase, round_id):
+        """Members of the old world stop, abort it (real) and move the session; replacements never enter."""
         message = self.bus.wait([f"transition/{round_id}/{phase}"])[0]
-        paused = self.last_end
         if self.real:
             c10d._abort_process_group()
             require(not dist.is_initialized(), "old world still initialized after abort")
+            if self.healthy:
+                self.pauses.append({"phase": phase, "start_local": self.last_end,
+                                    "reason": "abort/world rebuild", "end_local": None})
         if phase == 1:
             self.session.fail(self.session.failed, ControlEvent(**message))
             if not self.healthy:
@@ -214,9 +220,6 @@ class Worker:
             self.serve_until(key, "shrink" if phase == 1 else "expand")
         else:
             self.bus.wait([key])
-        if self.real and paused is not None and self.healthy:
-            self.pauses.append({"phase": phase, "start_local": paused,
-                                "reason": "abort/world rebuild", "end_local": None})
 
     def report_transfer(self, transfer, phase):
         self.transfers.append({"phase": phase, "links": transfer.bytes, "intervals_ms": transfer.intervals,
@@ -240,10 +243,10 @@ class Worker:
             record = self.bus.wait([key])[0]
             if not self.healthy:
                 if self.victim:
-                    self.request = Request(**{**record["request"], "prompt": tuple(record["request"]["prompt"]), "generated": list(record["request"]["generated"])})
-                    self.driver.step, self.driver.collective_sequence = record["step"], record["sequence"]
-                    self.driver.layout, self.driver.state = 2, "serving"
-                require(json.loads(json.dumps(asdict(self.request))) == record["request"], "replica snapshot disagreement")
+                    self.request = Request.from_dict(record["request"])
+                    self.driver.join(self.session.epoch)
+                    self.driver.follow(record["step"], record["sequence"])
+                require(self.request == Request.from_dict(record["request"]), "replica snapshot disagreement")
                 snapshot = self.request.snapshot()
         target = target_kv = None
         if not self.healthy:
@@ -292,10 +295,9 @@ class Worker:
             current = self.bus.wait([f"delta/{round_id}"])[0]
             if not self.healthy:
                 if self.victim:
-                    self.request = Request(**{**current["request"], "prompt": tuple(current["request"]["prompt"]), "generated": list(current["request"]["generated"])})
-                    self.driver.step, self.driver.collective_sequence = current["step"], current["sequence"]
-                require(json.loads(json.dumps(asdict(self.request))) == current["request"], "final history disagreement")
-                snapshot.delta(self.request.snapshot())
+                    self.request = Request.from_dict(current["request"])
+                    self.driver.follow(current["step"], current["sequence"])
+                require(self.request == Request.from_dict(current["request"]), "final history disagreement")
                 new_length = len(self.request.tokens)
                 target_kv = torch.cat((target_kv, torch.full(
                     (*target_kv.shape[:3], new_length - prefix_length, target_kv.shape[4]),
@@ -309,9 +311,7 @@ class Worker:
             self.report_transfer(delta, f"{round_id}/2/delta")
         if not self.healthy:
             if phase == 1:
-                # Fault invalidates ALL EDP0 in-flight KV. Full prefill replays only input.
-                active, waiting = recovery_queue([self.request], [], len(self.request.tokens))
-                require(active == [self.request] and not waiting, "small-load recovery failed")
+                # Fault invalidates ALL EDP0 in-flight KV; full prefill rebuilds it from input only.
                 self.kv = None
                 target_kv = kv_reference(self.request.tokens, target.tp, target.size).to("cuda")
             def validate():
@@ -346,8 +346,6 @@ class Worker:
                 require(overlap > 0, "no measured CUDA service/transfer overlap")
         source_kv = None
         self.migration_bytes = 0
-        if self.healthy and self.real and self.pauses and self.pauses[-1]["end_local"] is None:
-            self.pauses[-1]["end_local"] = self.last_end
         self.step("recovered" if phase == 2 else "degraded")
         self.phase_report(round_id, phase)
         self.session.complete()
@@ -356,10 +354,11 @@ class Worker:
     def run(self):
         self.initialize()
         if self.initial_epoch == 2:
+            # A replacement has no old world to abort; it joins the session at the rejoin event.
             self.session.fail(self.session.failed)
             self.session.complete()
-            self.driver.layout = 2
-            self.transition(2, 0)
+            self.session.rejoin(self.session.failed, ControlEvent(**self.bus.wait(["transition/0/2"])[0]))
+            self.bus.wait(["build/0/2"])
             self.adopt(2)
             self.migrate(2, 0)
         else:

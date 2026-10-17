@@ -18,8 +18,11 @@ class AsyncStateTests(unittest.TestCase):
     def request(self):
         return Request("r0", 0, 1.5, (1, 2, 3))
 
-    def handle(self, value=None):
-        return SimpleNamespace(wait=lambda: value, done=lambda: False)
+    def handle(self, error=None):
+        def wait():
+            if error is not None:
+                raise RuntimeError(error)
+        return SimpleNamespace(wait=wait, done=lambda: False)
 
     def test_replicas_advance_independently_and_fault_blocks_commit(self):
         failed, healthy, request = ReplicaDriver("EDP0"), ReplicaDriver("EDP1"), self.request()
@@ -84,10 +87,23 @@ class AsyncStateTests(unittest.TestCase):
     def test_transport_failure_does_not_release(self):
         driver, request, released = ReplicaDriver("EDP0"), self.request(), []
         driver.fail(1)
-        driver.start_transfer(self.handle(False), target_layout=2)
-        with self.assertRaisesRegex(RuntimeError, "transport"):
+        driver.start_transfer(self.handle("transport aborted"), target_layout=2)
+        with self.assertRaisesRegex(RuntimeError, "transport aborted"):
             driver.cutover(request, validate=lambda: None, release=lambda: released.append(True))
-        self.assertFalse(released)
+        self.assertEqual((driver.state, released), ("failed", []))
+
+    def test_replacement_joins_degraded_replica_and_follows_committed_position(self):
+        driver, request = ReplicaDriver("EDP0"), self.request()
+        driver.join(3)
+        driver.follow(5, 5)
+        self.assertEqual((driver.epoch, driver.layout, driver.state, driver.step), (3, 2, "serving", 5))
+        driver.start_transfer(self.handle(), target_layout=4, snapshot=request.snapshot())
+        with self.assertRaisesRegex(RuntimeError, "regressed"):
+            driver.follow(4, 4)
+        with self.assertRaisesRegex(RuntimeError, "invalid join"):
+            driver.join(4)
+        with self.assertRaisesRegex(RuntimeError, "invalid join"):
+            ReplicaDriver("EDP1").join(1)
 
     def test_missing_delta_never_switches(self):
         driver, request = ReplicaDriver("EDP0"), self.request()

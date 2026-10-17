@@ -1,5 +1,7 @@
 """Replica-local state and completion contracts, independent of the source planner."""
 
+import math
+import statistics
 from dataclasses import dataclass, field
 
 
@@ -19,6 +21,12 @@ class Request:
     @property
     def tokens(self):
         return self.prompt + tuple(self.generated)
+
+    @staticmethod
+    def from_dict(record):
+        """Rebuild a JSON-transported request with its original field types."""
+        return Request(record["id"], record["order"], record["submitted_at"],
+                       tuple(record["prompt"]), list(record["generated"]))
 
     def snapshot(self):
         return History(self.id, len(self.generated), self.tokens)
@@ -103,6 +111,17 @@ class ReplicaDriver:
                 epoch > self.epoch and self.pending is None, "invalid fault boundary")
         self.state, self.epoch = "recovering", epoch
 
+    def join(self, epoch):
+        """An empty receiver joins the degraded TP2 replica without having served it."""
+        require(self.replica == "EDP0" and self.pending is None, "invalid join")
+        self.epoch, self.layout, self.state = epoch, 2, "serving"
+
+    def follow(self, step, sequence):
+        """Adopt the committed position published by the serving ranks of this replica."""
+        require(self.replica == "EDP0" and (step, sequence) >= (self.step, self.collective_sequence),
+                "replica position regressed")
+        self.step, self.collective_sequence = step, sequence
+
     def start_transfer(self, handle, *, target_layout, snapshot=None):
         require(self.pending is None, "overlapping layout transactions")
         require((self.state == "recovering" and target_layout == 2) or
@@ -115,19 +134,19 @@ class ReplicaDriver:
     def cutover(self, request, *, validate, release, delta_handle=None):
         """Fence transport and validate before release and publishing the layout.
 
-        An exception leaves the replica stopped, retaining its previous layout.
-        The adapter supplies final KV delta completion at the safe boundary.
+        Transport handles raise on failure. Any exception leaves the replica
+        stopped with its previous layout; the final KV delta is fenced here.
         """
         require(self.pending is not None, "cutover without migration")
-        target = 2 if self.state == "recovering" else 4
         require(self.state in ("recovering", "expanding"), "invalid cutover state")
+        target = 2 if self.state == "recovering" else 4
         self.state = "cutting"
         try:
-            require(self.pending.wait() is not False, "weight/prefix transport failed")
+            self.pending.wait()
             if self.snapshot is not None:
                 self.snapshot.delta(request.snapshot())
                 require(delta_handle is not None, "missing final KV delta fence")
-                require(delta_handle.wait() is not False, "KV delta transport failed")
+                delta_handle.wait()
             validate()
             release()
         except BaseException:
@@ -154,9 +173,6 @@ def interval_overlap(compute, transfer):
 
 
 def distribution(values):
-    import math
-    import statistics
-
     require(bool(values), "missing timing samples")
     values = sorted(values)
     return {"count": len(values), "mean": statistics.mean(values),

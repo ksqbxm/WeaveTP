@@ -109,8 +109,7 @@ class Transfer:
         self.task, self.bytes, self.intervals = 0, [], []
         self.completed = False
 
-    def piece(self, src_slot, dst_slot, source, target, count, identity):
-        size = count
+    def piece(self, src_slot, dst_slot, source, target, size, identity):
         if self.slot == src_slot:
             self.service.submit_send(source, self.ranks.index(self.rows[dst_slot]["new_rank"]), self.task)
         if self.slot == dst_slot:
@@ -174,7 +173,7 @@ class Transfer:
 
     def wait(self):
         if self.completed:
-            return True
+            return
         self.handle.wait()
         if self.events:
             self.intervals = [(self.anchor.elapsed_time(a), self.anchor.elapsed_time(b)) for a, b in self.events]
@@ -185,4 +184,3 @@ class Transfer:
             link.update(submitted_local=self.submitted_local, completed_local=self.completed_local,
                         seconds=elapsed, effective_bytes_per_second=link["bytes"] / elapsed)
         self.completed = True
-        return True

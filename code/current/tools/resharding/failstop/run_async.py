@@ -10,42 +10,10 @@ import sys
 import time
 from pathlib import Path
 
-from common import DEFAULTS, NODES, SHARED_GPU_NOTE, require, write_json
+from common import DEFAULTS, NODES, require, write_json
 from run_probe import repository_commit, run_case
+from run_topology import cases, summarize
 from safety import check_data_space, pidfd_implementations
-
-
-def cases(mode, rounds, real_launches, suite):
-    require(rounds > 0 and real_launches > 0, 'round/launch counts must be positive')
-    result = []
-    if mode in ('emulate', 'both'):
-        result.append({'mode': 'emulate', 'rounds': rounds, 'launch': suite + '_emulate'})
-    if mode in ('real', 'both'):
-        result.extend({'mode': 'real', 'rounds': 1, 'launch': f'{suite}_real_{i:02d}'}
-                      for i in range(real_launches))
-    return result
-
-
-def summarize(selected, results, *, quick, correctness_only):
-    modes = {}
-    for mode in ('emulate', 'real'):
-        expected = [c['launch'] for c in selected if c['mode'] == mode]
-        observed = [r for r in results if r['mode'] == mode]
-        if not expected:
-            modes[mode] = 'pending'
-        elif [r['launch'] for r in observed] == expected and all(r['status'] == 'passed' for r in observed):
-            modes[mode] = 'passed'
-        else:
-            modes[mode] = 'failed'
-    passed = len(results) == len(selected) and all(modes[c['mode']] == 'passed' for c in selected)
-    full_matrix = modes['emulate'] == modes['real'] == 'passed' and any(
-        c['mode'] == 'emulate' and c['rounds'] >= 5 for c in selected)
-    return {'status': 'passed' if passed else 'failed', 'all_cases_passed': passed,
-            'accepted': passed and full_matrix and not (quick or correctness_only),
-            'quick_mode': quick, 'correctness_only': correctness_only,
-            'shared_gpu_mode': correctness_only, 'timing_valid': not (quick or correctness_only),
-            'timing_note': SHARED_GPU_NOTE if correctness_only else 'exclusive GPU validation',
-            'results': results, **modes}
 
 
 def main(argv=None):
@@ -63,7 +31,8 @@ def main(argv=None):
     parser.add_argument('--port-base', type=int, default=29880)
     parser.add_argument('--min-free-disk-gb', type=float, default=5)
     parser.add_argument('--budget-seconds', type=float, default=1200)
-    parser.add_argument('--weight-elements', type=int, default=1048576)
+    parser.add_argument('--weight-elements', type=int, default=8388608,
+                        help='float32 elements per full expert weight; large enough that the TP2->TP4 transfer spans several decode steps')
     parser.add_argument('--memory-budget-mib', type=int, default=2048)
     parser.add_argument('--dry-run', action='store_true')
     args = parser.parse_args(argv)
