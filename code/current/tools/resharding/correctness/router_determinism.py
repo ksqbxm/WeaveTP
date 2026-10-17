@@ -46,19 +46,31 @@ def first_mismatch(reference, candidate):
             'candidate': {'value': candidate.reshape(-1)[flat].item(), 'bits': bits(b[flat])}}
 
 
+TENSORS = ('logits', 'routing_map', 'probs')
+
+
 def compare_runs(reference, candidate):
-    """Step-ordered comparison of logits, then per-layer routing_map and probs."""
+    """First bitwise mismatch of each tensor class over the steps whose inputs are still identical.
+
+    Once the greedy tokens diverge, later steps consume different inputs, so differences
+    there are consequences of the earlier divergence rather than new nondeterminism.
+    """
+    result = {tensor: None for tensor in TENSORS}
+    compared = 0
     for step, (ref, cand) in enumerate(zip(reference, candidate)):
-        for tensor in ('logits',):
-            mismatch = first_mismatch(ref[tensor], cand[tensor])
-            if mismatch:
-                return {'step': step, 'tensor': tensor, **mismatch}
+        compared = step + 1
+        if result['logits'] is None and (mismatch := first_mismatch(ref['logits'], cand['logits'])):
+            result['logits'] = {'step': step, **mismatch}
         for layer in sorted(ref['routing']):
             for tensor in ('routing_map', 'probs'):
-                mismatch = first_mismatch(ref['routing'][layer][tensor], cand['routing'][layer][tensor])
-                if mismatch:
-                    return {'step': step, 'tensor': f'layer{layer}.{tensor}', **mismatch}
-    return None
+                if result[tensor] is None and (mismatch := first_mismatch(ref['routing'][layer][tensor],
+                                                                          cand['routing'][layer][tensor])):
+                    result[tensor] = {'step': step, 'layer': layer, **mismatch}
+        if ref['token'] != cand['token']:
+            break
+    result.update(bitwise=all(result[t] is None for t in TENSORS), steps_with_identical_input=compared,
+                  greedy_tokens_diverged=compared < len(reference))
+    return result
 
 
 def coverage(run):
@@ -95,9 +107,10 @@ def run_sequence(live, model, args, capture, layers):
     def record(logits):
         if set(capture) != set(layers):
             raise RuntimeError(f'router hooks fired for layers {sorted(capture)}, expected {sorted(layers)}')
-        records.append({'logits': logits.detach().clone(), 'routing': dict(capture)})
+        token = int(logits.reshape(-1, logits.shape[-1])[-1].argmax())
+        records.append({'logits': logits.detach().clone(), 'routing': dict(capture), 'token': token})
         capture.clear()
-        return int(logits.reshape(-1, logits.shape[-1])[-1].argmax())
+        return token
 
     capture.clear()
     token = record(live._prefill(model, context, args))
@@ -173,12 +186,12 @@ def main():
             for _ in range(args.rd_repeats):
                 records, kv_bytes = run_sequence(live, model, args, capture, routers)
                 runs.append(records)
-            mismatches = [compare_runs(runs[0], run) for run in runs[1:]]
-            row.update(bitwise=all(m is None for m in mismatches), repeats=len(runs),
-                       first_mismatch=next((m for m in mismatches if m), None), expert_coverage=coverage(runs[0]),
-                       kv_cache_bytes=kv_bytes, logits_shape=list(runs[0][0]['logits'].shape),
-                       logits_dtype=str(runs[0][0]['logits'].dtype),
-                       greedy_tokens=[int(r['logits'].reshape(-1, r['logits'].shape[-1])[-1].argmax()) for r in runs[0]])
+            comparisons = [compare_runs(runs[0], run) for run in runs[1:]]
+            row.update(bitwise=all(c['bitwise'] for c in comparisons), repeats=len(runs),
+                       mismatch=next((c for c in comparisons if not c['bitwise']), None),
+                       expert_coverage=coverage(runs[0]), kv_cache_bytes=kv_bytes,
+                       logits_shape=list(runs[0][0]['logits'].shape), logits_dtype=str(runs[0][0]['logits'].dtype),
+                       greedy_tokens=[[r['token'] for r in run] for run in runs])
         except Exception:
             row.update(bitwise=False, error=traceback.format_exc())
         report['modes'][mode] = row
@@ -196,9 +209,12 @@ def main():
         for mode in modes:
             rows = [r['modes'][mode] for r in reports]
             errors = [f"rank {r['rank']}: {r['modes'][mode]['error']}" for r in reports if r['modes'][mode].get('error')]
-            first = next(({'rank': r['rank'], **r['modes'][mode]['first_mismatch']} for r in reports
-                          if r['modes'][mode].get('first_mismatch')), None)
-            result['modes'][mode] = {'bitwise': all(row['bitwise'] for row in rows), 'first_mismatch': first,
+            mismatch = next(({'rank': r['rank'], **r['modes'][mode]['mismatch']} for r in reports
+                             if r['modes'][mode].get('mismatch')), None)
+            result['modes'][mode] = {'bitwise': all(row['bitwise'] for row in rows), 'mismatch': mismatch,
+                                     # Routing is affected only if a routing_map differed on identical inputs.
+                                     'routing_map_differs': any(r['modes'][mode].get('mismatch', {}) and
+                                                                r['modes'][mode]['mismatch']['routing_map'] for r in reports),
                                      'error': '\n'.join(errors) if errors else None,
                                      'expert_coverage_rank0': rows[0].get('expert_coverage')}
         args.rd_output.mkdir(parents=True, exist_ok=True)

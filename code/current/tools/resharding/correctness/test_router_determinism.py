@@ -65,46 +65,58 @@ class CompareTests(unittest.TestCase):
         self.assertEqual(mismatch['candidate']['bits'], '0x3f81')
         self.assertEqual(gpu.first_mismatch(a, a.float())['kind'], 'shape/dtype')
 
-    def test_compare_runs_orders_logits_before_routing_and_names_layer(self):
-        def run(flip_layer=None, flip_logits=False):
+    def test_compare_runs_reports_each_tensor_class_until_inputs_diverge(self):
+        def run(flip_routing_step=None, logits_step=None, token_step=None, steps=3):
             records = []
-            for step in range(2):
+            for step in range(steps):
                 routing_map = torch.zeros(4, 8, dtype=torch.bool)
                 routing_map[:, :2] = True
-                if flip_layer is not None and step == 1:
+                if flip_routing_step == step:
                     routing_map[0, 7] = True
                 logits = torch.zeros(1, 1, 16, dtype=torch.bfloat16)
-                if flip_logits and step == 1:
-                    logits[0, 0, 3] = 1
-                records.append({'logits': logits, 'routing': {5: {'routing_map': routing_map, 'probs': torch.zeros(4, 8, dtype=torch.bfloat16)}}})
+                if logits_step == step:
+                    logits.view(torch.int16)[0, 0, 3] = 1  # low bit only; argmax unchanged
+                token = 9 if token_step == step else 0
+                records.append({'logits': logits, 'token': token,
+                                'routing': {5: {'routing_map': routing_map, 'probs': torch.zeros(4, 8, dtype=torch.bfloat16)}}})
             return records
-        self.assertIsNone(gpu.compare_runs(run(), run()))
-        self.assertEqual(gpu.compare_runs(run(), run(flip_layer=5))['tensor'], 'layer5.routing_map')
-        self.assertEqual(gpu.compare_runs(run(), run(flip_logits=True, flip_layer=5))['tensor'], 'logits')
-        self.assertEqual(gpu.coverage(run(flip_layer=5)), {5: [0, 1, 7]})
+        same = gpu.compare_runs(run(), run())
+        self.assertTrue(same['bitwise'])
+        self.assertEqual((same['steps_with_identical_input'], same['greedy_tokens_diverged']), (3, False))
+        both = gpu.compare_runs(run(), run(flip_routing_step=2, logits_step=0))
+        self.assertFalse(both['bitwise'])
+        self.assertEqual((both['logits']['step'], both['routing_map']['step'], both['routing_map']['layer'], both['probs']), (0, 2, 5, None))
+        # A greedy-token divergence at step 1 stops the comparison before the later routing change.
+        diverged = gpu.compare_runs(run(), run(token_step=1, flip_routing_step=2))
+        self.assertEqual((diverged['routing_map'], diverged['steps_with_identical_input'], diverged['greedy_tokens_diverged']), (None, 2, True))
+        self.assertEqual(gpu.coverage(run(flip_routing_step=1)), {5: [0, 1, 7]})
 
 
 class SummaryTests(unittest.TestCase):
     def result(self, default_bitwise, deterministic_bitwise, match=True, error=None):
+        mismatch = {'rank': 2, 'logits': {'step': 1}, 'routing_map': None, 'probs': {'step': 3, 'layer': 12},
+                    'steps_with_identical_input': 5}
         return {'parameter_bytes_match': match, 'modes': {
-            'default': {'bitwise': default_bitwise, 'first_mismatch': None if default_bitwise else
-                        {'tensor': 'logits', 'step': 1, 'rank': 2}},
-            'deterministic': {'bitwise': deterministic_bitwise, 'error': error, 'first_mismatch': None if deterministic_bitwise or error else
-                              {'tensor': 'layer3.probs', 'step': 0, 'rank': 0}}}}
+            'default': {'bitwise': default_bitwise, 'routing_map_differs': False,
+                        'mismatch': None if default_bitwise else mismatch},
+            'deterministic': {'bitwise': deterministic_bitwise, 'error': error, 'routing_map_differs': False,
+                              'mismatch': None if deterministic_bitwise or error else mismatch}}}
 
     def test_pass_requires_deterministic_mode_and_reports_default_mode(self):
         modes = ['default', 'deterministic']
         summary = driver.summarize(['tp2', 'tp4'], {'tp2': self.result(False, True), 'tp4': self.result(True, True)}, modes)
         self.assertEqual(summary['result'], 'PASS')
-        self.assertIn('default=differs(logits step=1 rank=2)', summary['layouts']['tp2']['verdict'])
-        self.assertFalse(summary['layouts']['tp2']['default_mode_bitwise'])
+        self.assertIn('default=differs(logits step=1; routing_map same; probs step=3 layer=12; rank=2; identical-input steps=5)',
+                      summary['layouts']['tp2']['verdict'])
+        self.assertEqual((summary['layouts']['tp2']['default_mode_bitwise'], summary['layouts']['tp2']['default_routing_map_differs']),
+                         (False, False))
         self.assertEqual(driver.summarize(['tp2', 'tp4'], {'tp2': self.result(True, True)}, modes)['result'], 'FAIL')
         self.assertEqual(driver.summarize(['tp2'], {'tp2': self.result(True, False)}, modes)['result'], 'FAIL')
         self.assertEqual(driver.summarize(['tp2'], {'tp2': self.result(True, True, match=False)}, modes)['result'], 'FAIL')
         failed = driver.summarize(['tp2'], {'tp2': self.result(True, False, error='RuntimeError: scatter_add_cuda_kernel does not have a deterministic implementation')}, modes)
         self.assertEqual(failed['result'], 'FAIL')
         self.assertIn('scatter_add_cuda_kernel', failed['layouts']['tp2']['verdict'])
-        self.assertEqual(driver.summarize(['tp2'], {'tp2': {'parameter_bytes_match': True, 'modes': {'default': {'bitwise': True, 'first_mismatch': None}}}}, ['default'])['result'], 'PASS')
+        self.assertEqual(driver.summarize(['tp2'], {'tp2': {'parameter_bytes_match': True, 'modes': {'default': {'bitwise': True, 'mismatch': None}}}}, ['default'])['result'], 'PASS')
 
 
 class CommandTests(unittest.TestCase):

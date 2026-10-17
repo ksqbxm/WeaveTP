@@ -155,8 +155,11 @@ def layout_verdict(result):
         elif row['bitwise']:
             parts.append(f'{mode}=bitwise')
         else:
-            first = row['first_mismatch']
-            parts.append(f"{mode}=differs({first['tensor']} step={first['step']} rank={first['rank']})")
+            mismatch = row['mismatch']
+            detail = '; '.join(f"{tensor} step={m['step']}" + (f" layer={m['layer']}" if 'layer' in m else '')
+                               if (m := mismatch[tensor]) else f'{tensor} same'
+                               for tensor in ('logits', 'routing_map', 'probs'))
+            parts.append(f"{mode}=differs({detail}; rank={mismatch['rank']}; identical-input steps={mismatch['steps_with_identical_input']})")
     return ', '.join(parts)
 
 
@@ -174,7 +177,8 @@ def summarize(layouts, results, modes):
         ok = result['parameter_bytes_match'] and all(not r.get('error') for r in result['modes'].values()) and deterministic_ok
         rows[layout] = {'status': 'passed' if ok else 'failed', 'verdict': layout_verdict(result),
                         'parameter_bytes_match': result['parameter_bytes_match'],
-                        'default_mode_bitwise': result['modes'].get('default', {}).get('bitwise')}
+                        'default_mode_bitwise': result['modes'].get('default', {}).get('bitwise'),
+                        'default_routing_map_differs': result['modes'].get('default', {}).get('routing_map_differs')}
         passed = passed and ok
     return {'result': 'PASS' if passed else 'FAIL', 'layouts': rows, 'modes': list(modes),
             'suspect_operators_when_default_differs': SUSPECT_OPERATORS,
