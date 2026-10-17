@@ -1,0 +1,19 @@
+{
+  "status": "CPU_passed_GPU_pending",
+  "failstop_tests": 99,
+  "packing_and_source_search_tests": 56,
+  "gloo_processes": 4,
+  "ast_files": 22,
+  "shell_syntax": "passed",
+  "isort": "passed",
+  "gpu_validation": "not_run",
+  "quick_300s_server_budget": "not_run",
+  "initial_failures_resolved": [
+    "missing einops/psutil/scipy in local Python; installed required CPU dependencies",
+    "historical tests charged local transfers to network; revised local expectations and retained frozen remote-only equivalence"
+  ],
+  "python": "3.13.12",
+  "torch": "2.14.0+cpu",
+  "server_runtime_required": "PyTorch 2.11 / NCCL 2.28",
+  "test_scope": "CPU doubles cover protocol and bytes, not CUDA registration/NCCL performance"
+}

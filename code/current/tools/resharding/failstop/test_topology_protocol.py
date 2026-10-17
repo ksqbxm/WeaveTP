@@ -25,8 +25,10 @@ class Killed(BaseException):
 
 
 class Simulation:
-    def __init__(self, mode, root, rounds):
+    def __init__(self, mode, root, rounds, extra_config=None):
         self.mode, self.root, self.rounds = mode, root, rounds
+        self.extra_config = extra_config or {}
+        self.cuda_stream = None
         self.local = threading.local()
         self.cv = threading.Condition()
         self.messages, self.ops = {}, {}
@@ -123,6 +125,8 @@ class Simulation:
         self.local.identity = slot, epoch
         self.local.pid = 10000 + slot + epoch * 100
         config = {**self.config, 'node': self.rows[slot]['node'], 'clock': {'offset': 0, 'error': 0}, 'topology': self.rows}
+        if self.extra_config:
+            config['output'] = str(self.root / self.rows[slot]['node'])
         try:
             worker.run(config, slot, epoch)
         except Killed:
@@ -179,7 +183,7 @@ class Simulation:
     def run(self):
         self.config = {**common.DEFAULTS, 'output': str(self.root), 'launch': 'cpu_full', 'commit': 'cpu',
                        'mode': self.mode, 'rounds': self.rounds, 'quick_mode': True, 'correctness_only': True,
-                       'shared_gpu_mode': True, 'port': 1, 'stage_timeout_s': 8}
+                       'shared_gpu_mode': True, 'port': 1, 'stage_timeout_s': 8, **self.extra_config}
         sim = self
         class Journal(common.Journal):
             def event(self, stage, **fields):
@@ -193,7 +197,7 @@ class Simulation:
             stack.enter_context(patch.object(torch, '__version__', '2.11.0'))
             stack.enter_context(patch.multiple(torch.cuda, set_device=lambda *_: None, device_count=lambda: 1,
                 get_device_properties=lambda _: SimpleNamespace(uuid=self.rows[self.local.identity[0]]['gpu_uuid']),
-                synchronize=lambda: None, empty_cache=lambda: None, current_stream=lambda: None))
+                synchronize=lambda: None, empty_cache=lambda: None, current_stream=lambda: self.cuda_stream))
             stack.enter_context(patch.object(torch.cuda.nccl, 'version', lambda: (2, 28, 0)))
             for name in ('empty', 'tensor', 'full'):
                 original = getattr(torch, name)

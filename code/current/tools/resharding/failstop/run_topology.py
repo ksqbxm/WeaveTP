@@ -48,7 +48,7 @@ def summarize(selected, results, *, quick, correctness_only):
             'results': results, **modes}
 
 
-def main(argv=None):
+def main(argv=None, *, step=2, profile_only=False):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--node', choices=NODES, required=True)
     parser.add_argument('--suite-id', required=True)
@@ -64,12 +64,14 @@ def main(argv=None):
     parser.add_argument('--min-free-disk-gb', type=float, default=5)
     parser.add_argument('--budget-seconds', type=float, default=1200)
     parser.add_argument('--dry-run', action='store_true')
+    if step == 3:
+        parser.add_argument('--host-library-mode', choices=('full', 'on-demand'), default='on-demand')
     args = parser.parse_args(argv)
     correctness_only = args.correctness_only or args.quick
     mode_flags = {'quick_mode': args.quick, 'correctness_only': correctness_only,
                   'shared_gpu_mode': correctness_only, 'timing_valid': not correctness_only}
     require(bool(re.fullmatch(r'[A-Za-z0-9_-]{1,65}', args.suite_id)), 'invalid suite id')
-    selected = cases(args.mode, args.rounds, args.real_launches, args.suite_id)
+    selected = cases(args.mode, 1 if profile_only else args.rounds, args.real_launches, args.suite_id)
     require(math.isfinite(args.budget_seconds) and args.budget_seconds > 0 and
             1024 <= args.port_base <= 65536 - len(selected), 'invalid budget/port')
     require(math.isfinite(args.min_free_disk_gb) and args.min_free_disk_gb >= 0, 'invalid free disk threshold')
@@ -77,7 +79,9 @@ def main(argv=None):
             'output must be under /data')
     if args.dry_run:
         print(json.dumps({'cases': selected, **mode_flags,
-                          'output': str(args.output), 'node': args.node}, indent=2))
+                          'output': str(args.output), 'node': args.node, 'step': step,
+                          'profile_only': profile_only,
+                          **({'host_library_mode': args.host_library_mode} if step == 3 else {})}, indent=2))
         return 0
     require(sys.platform == 'linux' and Path('/data').is_mount(), 'requires Linux and mounted /data')
     require(args.output.resolve().is_relative_to(Path('/data').resolve()), 'output escapes /data')
@@ -104,7 +108,7 @@ def main(argv=None):
             write_json(root / 'progress.json', results)
             continue
         config = {**{k: v for k, v in DEFAULTS.items() if k != 'repeats'}, **case,
-                  'probe': 'step02_topology_rebind', 'kind': case['mode'],
+                  'probe': 'step03_sources_and_transport' if step == 3 else 'step02_topology_rebind', 'kind': case['mode'],
                   'node': args.node, 'output': str(root / case['launch']), 'master': args.master,
                   'port': args.port_base + index, 'commit': commit, 'mps_pipe': None,
                   **mode_flags,
@@ -113,14 +117,23 @@ def main(argv=None):
                   'stage_timeout_s': min(120 if correctness_only else 60, remaining - 20),
                   'reclaim_timeout_s': min(120 if correctness_only else 60, remaining - 20),
                   'launch_timeout_s': remaining}
+        if step == 3:
+            config.update(host_library_mode=args.host_library_mode, source_width=4096 if args.quick else 262144,
+                          profile_only=profile_only)
         print(f"Starting {case['launch']} mode={case['mode']} rounds={case['rounds']}", flush=True)
         result = run_case(config)
         results.append({**case, **result})
         write_json(root / 'progress.json', results)
     summary = {**summarize(selected, results, quick=args.quick, correctness_only=correctness_only), 'commit': commit}
+    pauses = [r['metrics']['edp1_rejoin_pause_s'] for r in results if r['mode'] == 'real' and 'metrics' in r and
+              r['metrics'].get('edp1_rejoin_pause_s') is not None]
+    summary['edp1_rejoin_pause_s'] = max(pauses) if pauses else None
+    summary['profile_only'] = profile_only
+    if profile_only:
+        summary['accepted'] = False
     passed = summary['all_cases_passed']
     write_json(root / 'summary.json', summary)
-    print(f"STEP 2 result={'PASS' if passed else 'FAIL'} correctness_only={correctness_only} logs={root}", flush=True)
+    print(f"STEP {step} result={'PASS' if passed else 'FAIL'} edp1_rejoin_pause_s={summary['edp1_rejoin_pause_s']} correctness_only={correctness_only} logs={root}", flush=True)
     return 0 if passed else 1
 
 

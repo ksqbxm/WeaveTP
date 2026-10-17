@@ -160,8 +160,14 @@ def test_twenty_items_and_deep_iterative_dfs():
     assert len(limits.best) == 1200
 
 
-def test_default_hash_and_stats_match_frozen_planner():
+def test_remote_default_hash_and_stats_match_frozen_planner():
     data = fixture()
+    # Step 3 intentionally fixes the frozen planner's local L/S/D accounting.
+    # Remote-only inputs must still produce exactly the historical plan/stats.
+    data['dst_params'] = {**{r: {} for r in range(4)}, **{
+        r + 4: {name: replace(meta, owner_rank=r + 4, data_parallel_group_ranks=[r + 4])
+                for name, meta in params.items()} for r, params in data['dst_params'].items()}}
+    data['kwargs']['source_bandwidth_gbps'] = {(s, d): 50.0 for s in range(4) for d in range(4, 8)}
     old, current, explicit = replay(data, reference()), replay(data), replay(data, algorithm="greedy")
     assert fingerprint(old) == fingerprint(current) == fingerprint(explicit)
     for before, after, measured in zip(old, current, explicit):
@@ -330,7 +336,8 @@ def test_solver_routes_and_global_gate(algorithm):
     stats = rejected[0].source_route_stats
     json.dumps(stats, allow_nan=False)
     assert not stats["global_gate_accepted"]
-    assert stats["source_search"]["plan_validation"]["remote_tasks"] > 0
+    # A valid local source now costs zero, so this fixture needs no remote tasks.
+    assert stats["source_search"]["plan_validation"]["remote_tasks"] == 0
     assert stats["source_search"]["gate_outcome"] in ("rejected", "no_change")
     assert stats["source_search"]["cached_plan_predicted_H_s"] == stats["source_search"]["predicted_default_H_s"]
 
@@ -339,7 +346,7 @@ def test_tp_dedup_ep_and_fixed_loads():
     data = fixture()
     original = instance(data)
     assert len(original.inc) == 4
-    assert sum(original.base) == pytest.approx(3 * 4 * (16 * 8 / 1e9 + 5e-6))
+    assert sum(original.base) == 0  # Fixed small local copies consume no L/S/D.
     for metadata in data["src_params"].values():
         metadata.extend(list(metadata))
     doubled = instance(data)

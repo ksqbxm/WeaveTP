@@ -478,6 +478,9 @@ def _source_metadata_transfer_seconds(
     )
     seconds_by_pair: dict[tuple[int, int], float] = {}
     for src_rank, _src_slice, dst_slice in transfers:
+        if int(src_rank) == int(dst_rank):
+            # Local work still appears in the transfer plan, but consumes no L/S/D.
+            continue
         num_bytes = _slice_numel(tuple(dst_metadata.shape), dst_slice) * dst_metadata.element_size
         pair = (int(src_rank), int(dst_rank))
         gbps = max(float(bandwidth_gbps.get(pair, 1.0)), 1.0e-9)

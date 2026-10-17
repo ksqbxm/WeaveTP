@@ -57,8 +57,9 @@ def control(config, bus, journal, check):
     preflight = wait([f'preflight/{n}' for n in NODES])
     for node, report in zip(NODES, preflight):
         require(report['host'].split('.')[0].upper() == node, 'wrong physical host')
-        for key in ('commit', 'launch', 'mode', 'rounds', 'port', 'shared_gpu_mode', 'quick_mode', 'correctness_only'):
-            require(report['config'][key] == config[key], f'node config mismatch: {key}')
+        for key in ('commit', 'launch', 'mode', 'rounds', 'port', 'shared_gpu_mode', 'quick_mode', 'correctness_only',
+                    'probe', 'host_library_mode', 'source_width', 'profile_only'):
+            require(report['config'].get(key) == config.get(key), f'node config mismatch: {key}')
     rows = topology(dict(zip(NODES, [r['gpus'] for r in preflight])))
     victims = failed_slots(rows)
     publish('topology', rows)
@@ -68,21 +69,37 @@ def control(config, bus, journal, check):
     publish('cuda_verified/0')
     backend = FaultBackend(config['mode'], fail=lambda *_: None, rejoin=lambda *_: None)
     session = FaultSession(rows, config['launch'], backend, local_orders=toy_local_orders(rows))
-    reports, maps = {}, {}
+    reports, maps, rejoin_timings = {}, {}, []
 
     def validate(round_id, phase):
         members = session.current_world()['membership']
         session.adopt_group_order([{'replica': replica, 'field': field, 'actual': sorted(ranks)}
                                    for replica, field, ranks in replica_group_specs(session.replicas())])
-        values = wait([f'phase/{round_id}/{phase}/{s}' for s in members])
+        timeout = config['launch_timeout_s'] - 30 if phase == 0 and config.get('probe') == 'step03_sources_and_transport' else None
+        values = wait([f'phase/{round_id}/{phase}/{s}' for s in members], timeout)
+        if config.get('probe') == 'step03_sources_and_transport':
+            require(len({r['sources']['profile_sha256'] for r in values}) == 1, 'workers used different profiles')
         mapping = sorted((r for r in session.rank_map() if r['active']), key=lambda r: r['new_rank'])
         expected_ids = [[r['slot'], initial[r['slot']]['pid']] for r in mapping]
         for s, report in zip(members, values):
             require(report['slot'] == s and report['identities'] == expected_ids, 'actual membership/PID mismatch')
             require(report['rank_map'] == session.rank_map(), 'actual group mapping mismatch')
             require(report['checks_passed'], 'worker correctness check failed')
+            if config.get('probe') == 'step03_sources_and_transport':
+                source = report['sources']
+                require(source is not None, 'missing Step 3 transport evidence')
+                if phase:
+                    require(source['bitwise'] and source['normalized_replay_equal'], 'Step 3 correctness failed')
+                before = reports.get('0/0', [])
+                if before:
+                    original = next(r['sources'] for r in before if r['slot'] == s)
+                    require(source['owner_pid'] == original['owner_pid'] and source['backing'] == original['backing'],
+                            'host owner/backing changed across fault')
             if config['mode'] == 'real' and phase == 2 and s in victims:
                 require(report['empty_receiver'] and not report['used_as_source'], 'replacement was not an empty receiver')
+                if config.get('probe') == 'step03_sources_and_transport':
+                    require(report['sources']['initial_h2d_bytes'] == report['sources']['sent_bytes'] == 0,
+                            'replacement preloaded weights or acted as a source')
         reports[f'{round_id}/{phase}'] = values
         maps[f'{round_id}/{phase}'] = session.rank_map()
         write_json(root / 'rank_map.json', maps)
@@ -90,6 +107,8 @@ def control(config, bus, journal, check):
 
     for round_id in range(config['rounds']):
         validate(round_id, 0)
+        if config.get('profile_only'):
+            break
         if round_id == 0:
             publish('kill')
             if config['mode'] == 'real':
@@ -115,11 +134,14 @@ def control(config, bus, journal, check):
         publish(f'build/{round_id}/1')
         validate(round_id, 1)
         session.complete()
+        progress_before = wait([f'serving/{round_id}/{s}' for s in members])
+        request_t = time.monotonic()
         if round_id == 0:
             if config['mode'] == 'real':
                 publish('rejoin_request')
                 wait(['reclaimed'], config['reclaim_timeout_s'])
             publish('spawn')
+            preparation_start = time.monotonic()
             wait([f'verified/2/{n}' for n in NODES], config['startup_timeout_s'])
             returned = dict(zip(victims, wait([f'cuda/2/{s}' for s in victims])))
             require(all(returned[s]['empty_receiver'] for s in victims), 'rejoin target prefilled')
@@ -129,15 +151,32 @@ def control(config, bus, journal, check):
             publish('cuda_verified/2')
         else:
             publish(f'emulate_rejoin/{round_id}')
+            preparation_start = time.monotonic()
             wait([f'empty/{round_id}/{s}' for s in victims])
         # Each replica progresses on its own TP/EP groups, without a world barrier.
-        wait([f'serving/{round_id}/{s}' for s in members])
+        progress_after = wait([f'prepared_service/{round_id}/{s}' for s in members])
+        require(all(b['step'] > a['step'] for a, b in zip(progress_before, progress_after)),
+                'survivor did not advance during background rejoin preparation')
+        prepared_t = time.monotonic()
         event = session.event('rejoin')
         session.rejoin(victims, event)
         publish(f'transition/{round_id}/2', asdict(event))
         wait([f'aborted/{round_id}/2/{s}' for s in members])
         publish(f'build/{round_id}/2')
+        wait([f'world16_service/{round_id}/{r["slot"]}' for r in rows if r['replica'] == 'EDP1'])
+        world16_ready_t = time.monotonic()
         validate(round_id, 2)
+        pauses = [{'slot': r['slot'], 'seconds': r['rejoin_resumed']['t_local'] - r['last_service']['t_local'],
+                   'validation_gap_s': r['t_local'] - r['last_service']['t_local'],
+                   'interval_local': [r['last_service']['t_local'], r['rejoin_resumed']['t_local']]}
+                  for r in reports[f'{round_id}/2'] if rows[r['slot']]['replica'] == 'EDP1']
+        rejoin_timings.append({'round': round_id, 'rejoin_join_s': world16_ready_t - request_t,
+                              'rejoin_validation_wall_s': time.monotonic() - request_t,
+                              'rejoin_preparation_s': prepared_t - preparation_start,
+                              'edp1_rejoin_pause_s': max(r['seconds'] for r in pauses),
+                              'edp1_rejoin_validation_gap_s': max(r['validation_gap_s'] for r in pauses),
+                              'pauses': pauses, 'service_before': progress_before, 'service_after': progress_after,
+                              'pause_semantics': 'last local service to first correct service after world16/group validation; synchronous migration probe gap reported separately'})
         session.complete()
         if round_id + 1 < config['rounds']:
             session.next_round()
@@ -145,6 +184,9 @@ def control(config, bus, journal, check):
     publish('finish')
     wait([f'done/{s}' for s in range(16)])
     wait([f'clean/{n}' for n in NODES], config['reclaim_timeout_s'] + config['stage_timeout_s'])
+    metrics = {'edp1_rejoin_pause_s': max((r['edp1_rejoin_pause_s'] for r in rejoin_timings), default=None)}
+    publish('topology_metrics', metrics)
     return {'status': 'passed', 'mode': config['mode'], 'rounds': config['rounds'],
+            'metrics': metrics, 'rejoin_timings': rejoin_timings,
             'epochs': reports, 'rank_maps': maps, 'shared_gpu_mode': config['shared_gpu_mode'],
             'quick_mode': config['quick_mode'], 'commit': config['commit']}

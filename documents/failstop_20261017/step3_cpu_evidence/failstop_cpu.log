@@ -1,0 +1,193 @@
+C:\Users\ksqbx\.codex\worktrees\failstop\WeaveTP_������ʵ������_20260920\code\current\megatron\core\optimizer\__init__.py:25: UserWarning: Transformer Engine and Apex are not installed. Falling back to Torch optimizers.
+  warnings.warn(
+C:\Users\ksqbx\.codex\worktrees\failstop\WeaveTP_������ʵ������_20260920\code\current\megatron\core\distributed\fsdp\src\megatron_fsdp\mixed_precision.py:115: UserWarning: Transformer Engine and Apex are not installed. Falling back to local implementations of multi_tensor_applier and multi_tensor_scale
+  warnings.warn(
+C:\Users\ksqbx\.codex\worktrees\failstop\WeaveTP_������ʵ������_20260920\code\current\megatron\core\optimizer\optimizer.py:29: UserWarning: Transformer Engine and Apex are not installed. Falling back to local implementations of multi_tensor_applier and multi_tensor_scale
+  warnings.warn(
+C:\Users\ksqbx\.codex\worktrees\failstop\WeaveTP_������ʵ������_20260920\code\current\megatron\core\optimizer\clip_grads.py:32: UserWarning: Transformer Engine and Apex are not installed. Falling back to local implementations of multi_tensor_applier, multi_tensor_l2norm, and multi_tensor_scale
+  warnings.warn(
+C:\Users\ksqbx\.codex\worktrees\failstop\WeaveTP_������ʵ������_20260920\code\current\megatron\core\hyper_comm_grid.py:26: UserWarning: absl.logging is not installed. Using logging.getLogger(__name__) instead. Please install absl.logging with `pip install absl-py` to use absl.logging.
+  warnings.warn(
+C:\Users\ksqbx\.codex\worktrees\failstop\WeaveTP_������ʵ������_20260920\code\current\megatron\core\models\backends.py:34: UserWarning: Apex is not installed. Falling back to Torch Norm
+  warnings.warn("Apex is not installed. Falling back to Torch Norm")
+[W1017 18:05:35.000000000 socket.cpp:764] [c10d] The client socket has failed to connect to [ksqbxm]:2921 (system error: 10049 - �����������У�������ĵ�ַ��Ч��).
+[W1017 18:05:35.000000000 socket.cpp:764] [c10d] The client socket has failed to connect to [ksqbxm]:2921 (system error: 10049 - �����������У�������ĵ�ַ��Ч��).
+{
+  "fault_coordinates": [
+    {
+      "slot": 8,
+      "node": "SL3061",
+      "gpu_uuid": "GPU-SL3061-0",
+      "gpu_index": 0,
+      "replica": "EDP0",
+      "ep": 0,
+      "etp": 0
+    },
+    {
+      "slot": 9,
+      "node": "SL3061",
+      "gpu_uuid": "GPU-SL3061-1",
+      "gpu_index": 1,
+      "replica": "EDP0",
+      "ep": 0,
+      "etp": 1
+    },
+    {
+      "slot": 12,
+      "node": "SL3061",
+      "gpu_uuid": "GPU-SL3061-4",
+      "gpu_index": 4,
+      "replica": "EDP0",
+      "ep": 1,
+      "etp": 0
+    },
+    {
+      "slot": 13,
+      "node": "SL3061",
+      "gpu_uuid": "GPU-SL3061-5",
+      "gpu_index": 5,
+      "replica": "EDP0",
+      "ep": 1,
+      "etp": 1
+    }
+  ]
+}
+[W1017 18:05:36.000000000 socket.cpp:764] [c10d] The client socket has failed to connect to [ksqbxm]:2926 (system error: 10049 - �����������У�������ĵ�ַ��Ч��).
+[W1017 18:05:36.000000000 socket.cpp:764] [c10d] The client socket has failed to connect to [ksqbxm]:2926 (system error: 10049 - �����������У�������ĵ�ַ��Ч��).
+{
+  "fault_coordinates": [
+    {
+      "slot": 8,
+      "node": "SL3061",
+      "gpu_uuid": "GPU-SL3061-0",
+      "gpu_index": 0,
+      "replica": "EDP0",
+      "ep": 0,
+      "etp": 0
+    },
+    {
+      "slot": 9,
+      "node": "SL3061",
+      "gpu_uuid": "GPU-SL3061-1",
+      "gpu_index": 1,
+      "replica": "EDP0",
+      "ep": 0,
+      "etp": 1
+    },
+    {
+      "slot": 12,
+      "node": "SL3061",
+      "gpu_uuid": "GPU-SL3061-4",
+      "gpu_index": 4,
+      "replica": "EDP0",
+      "ep": 1,
+      "etp": 0
+    },
+    {
+      "slot": 13,
+      "node": "SL3061",
+      "gpu_uuid": "GPU-SL3061-5",
+      "gpu_index": 5,
+      "replica": "EDP0",
+      "ep": 1,
+      "etp": 1
+    }
+  ]
+}
+[W1017 18:05:37.000000000 socket.cpp:764] [c10d] The client socket has failed to connect to [ksqbxm]:2933 (system error: 10049 - �����������У�������ĵ�ַ��Ч��).
+[W1017 18:05:37.000000000 socket.cpp:764] [c10d] The client socket has failed to connect to [ksqbxm]:2933 (system error: 10049 - �����������У�������ĵ�ַ��Ч��).
+{
+  "fault_coordinates": [
+    {
+      "slot": 8,
+      "node": "SL3061",
+      "gpu_uuid": "GPU-SL3061-0",
+      "gpu_index": 0,
+      "replica": "EDP0",
+      "ep": 0,
+      "etp": 0
+    },
+    {
+      "slot": 9,
+      "node": "SL3061",
+      "gpu_uuid": "GPU-SL3061-1",
+      "gpu_index": 1,
+      "replica": "EDP0",
+      "ep": 0,
+      "etp": 1
+    },
+    {
+      "slot": 12,
+      "node": "SL3061",
+      "gpu_uuid": "GPU-SL3061-4",
+      "gpu_index": 4,
+      "replica": "EDP0",
+      "ep": 1,
+      "etp": 0
+    },
+    {
+      "slot": 13,
+      "node": "SL3061",
+      "gpu_uuid": "GPU-SL3061-5",
+      "gpu_index": 5,
+      "replica": "EDP0",
+      "ep": 1,
+      "etp": 1
+    }
+  ]
+}
+[W1017 18:05:38.000000000 socket.cpp:764] [c10d] The client socket has failed to connect to [ksqbxm]:2939 (system error: 10049 - �����������У�������ĵ�ַ��Ч��).
+[W1017 18:05:38.000000000 socket.cpp:764] [c10d] The client socket has failed to connect to [ksqbxm]:2939 (system error: 10049 - �����������У�������ĵ�ַ��Ч��).
+{
+  "fault_coordinates": [
+    {
+      "slot": 8,
+      "node": "SL3061",
+      "gpu_uuid": "GPU-SL3061-0",
+      "gpu_index": 0,
+      "replica": "EDP0",
+      "ep": 0,
+      "etp": 0
+    },
+    {
+      "slot": 9,
+      "node": "SL3061",
+      "gpu_uuid": "GPU-SL3061-1",
+      "gpu_index": 1,
+      "replica": "EDP0",
+      "ep": 0,
+      "etp": 1
+    },
+    {
+      "slot": 12,
+      "node": "SL3061",
+      "gpu_uuid": "GPU-SL3061-4",
+      "gpu_index": 4,
+      "replica": "EDP0",
+      "ep": 1,
+      "etp": 0
+    },
+    {
+      "slot": 13,
+      "node": "SL3061",
+      "gpu_uuid": "GPU-SL3061-5",
+      "gpu_index": 5,
+      "replica": "EDP0",
+      "ep": 1,
+      "etp": 1
+    }
+  ]
+}
+[W1017 18:05:39.000000000 socket.cpp:764] [c10d] The client socket has failed to connect to [ksqbxm]:2944 (system error: 10049 - �����������У�������ĵ�ַ��Ч��).
+[W1017 18:05:39.000000000 socket.cpp:764] [c10d] The client socket has failed to connect to [ksqbxm]:2944 (system error: 10049 - �����������У�������ĵ�ַ��Ч��).
+[W1017 18:05:39.000000000 socket.cpp:764] [c10d] The client socket has failed to connect to [ksqbxm]:2944 (system error: 10049 - �����������У�������ĵ�ַ��Ч��).
+[W1017 18:05:39.000000000 socket.cpp:764] [c10d] The client socket has failed to connect to [ksqbxm]:2951 (system error: 10049 - �����������У�������ĵ�ַ��Ч��).
+[W1017 18:05:39.000000000 socket.cpp:764] [c10d] The client socket has failed to connect to [ksqbxm]:2951 (system error: 10049 - �����������У�������ĵ�ַ��Ч��).
+[W1017 18:05:39.000000000 socket.cpp:764] [c10d] The client socket has failed to connect to [ksqbxm]:2956 (system error: 10049 - �����������У�������ĵ�ַ��Ч��).
+[W1017 18:05:39.000000000 socket.cpp:764] [c10d] The client socket has failed to connect to [ksqbxm]:2956 (system error: 10049 - �����������У�������ĵ�ַ��Ч��).
+[W1017 18:05:39.000000000 socket.cpp:764] [c10d] The client socket has failed to connect to [ksqbxm]:2961 (system error: 10049 - �����������У�������ĵ�ַ��Ч��).
+[W1017 18:05:39.000000000 socket.cpp:764] [c10d] The client socket has failed to connect to [ksqbxm]:2961 (system error: 10049 - �����������У�������ĵ�ַ��Ч��).
+----------------------------------------------------------------------
+Ran 99 tests in 12.380s
+
+OK

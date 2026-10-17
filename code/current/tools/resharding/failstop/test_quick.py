@@ -16,7 +16,7 @@ import run_topology
 
 
 class QuickTests(unittest.TestCase):
-    def run_driver(self, *, failure=None, peer='PASS'):
+    def run_driver(self, *, failure=None, peer='PASS', step=2):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             logs = root / 'kickoff' / 'local'
@@ -26,7 +26,7 @@ class QuickTests(unittest.TestCase):
             (run / 'SL3060' / 'summary.json').write_text(json.dumps({
                 'all_cases_passed': True, 'quick_mode': True, 'correctness_only': True,
                 'shared_gpu_mode': True, 'timing_valid': False, 'accepted': False,
-                'emulate': 'passed', 'real': 'passed'}))
+                'emulate': 'passed', 'real': 'passed', 'edp1_rejoin_pause_s': None if failure == 'metric' else 0.5}))
             state, calls = {'head': 'a' * 40}, []
             def git(argv, **kwargs):
                 args = argv[3:]
@@ -50,7 +50,7 @@ class QuickTests(unittest.TestCase):
             with contextlib.ExitStack() as stack:
                 stack.enter_context(patch.dict(sys.modules, fcntl=SimpleNamespace(LOCK_EX=1, LOCK_NB=2, flock=Mock())))
                 stack.enter_context(patch.object(sys, 'argv', ['quick_driver', '--node', 'SL3060', '--sha', 'a' * 40,
-                                                              '--repo', str(root), '--log-dir', str(logs)]))
+                                                              '--repo', str(root), '--log-dir', str(logs), '--step', str(step)]))
                 stack.enter_context(patch.object(subprocess, 'check_output', side_effect=git))
                 stack.enter_context(patch.object(subprocess, 'Popen', return_value=child))
                 stack.enter_context(patch.object(quick_driver, 'rendezvous', return_value=(conn, stream, 's2q_cpu')))
@@ -77,10 +77,16 @@ class QuickTests(unittest.TestCase):
         self.assertTrue(result['quick_mode'] and result['shared_gpu_mode'])
 
     def test_failure_paths_never_print_pass(self):
-        for failure in ('suite', 'restore', 'package', 'dirty', 'timeout'):
+        for failure in ('suite', 'restore', 'package', 'dirty', 'timeout', 'metric'):
             with self.subTest(failure=failure):
                 self.assertEqual(self.run_driver(failure=failure)['result'], 'FAIL')
         self.assertEqual(self.run_driver(peer='FAIL')['result'], 'FAIL')
+
+    def test_step3_reports_rejoin_pause(self):
+        result = self.run_driver(step=3)
+        self.assertEqual(result['result'], 'PASS')
+        self.assertEqual(result['step'], 3)
+        self.assertEqual(result['edp1_rejoin_pause_s'], 0.5)
 
     def test_default_and_quick_case_matrices(self):
         cases = run_topology.cases('both', 5, 3, 'test')

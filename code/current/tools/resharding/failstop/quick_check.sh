@@ -11,12 +11,14 @@ while (($#)); do
     *) echo "Unknown argument: $1" >&2; exit 2 ;;
   esac
 done
-[[ "$STEP" == 2 && ( "$NODE" == SL3060 || "$NODE" == SL3061 ) ]]
+[[ ( "$STEP" == 2 || "$STEP" == 3 ) && ( "$NODE" == SL3060 || "$NODE" == SL3061 ) ]]
 HERE="$REPO/code/current/tools/resharding/failstop"
-SHA=$("$PYTHON" -c 'import json,sys; print(json.load(open(sys.argv[1]))["step2"])' "$HERE/releases.json")
+SHA=$("$PYTHON" -c 'import json,sys; print(json.load(open(sys.argv[1]))["step"+sys.argv[2]])' "$HERE/releases.json" "$STEP")
 [[ "$SHA" =~ ^[0-9a-f]{40}$ ]]
-mkdir -p /data/ubuntu/lxh/weavetp/acceptance/step02_topology_rebind/kickoff
-LOGDIR=$(mktemp -d "/data/ubuntu/lxh/weavetp/acceptance/step02_topology_rebind/kickoff/${NODE}_$(date -u +%Y%m%dT%H%M%SZ)_XXXXXX")
-nohup "$PYTHON" -B "$HERE/quick_driver.py" --node "$NODE" --sha "$SHA" --repo "$REPO" --log-dir "$LOGDIR" > "$LOGDIR/nohup.log" 2>&1 < /dev/null &
+NAME=step02_topology_rebind
+[[ "$STEP" != 3 ]] || NAME=step03_sources_and_transport
+mkdir -p "/data/ubuntu/lxh/weavetp/acceptance/$NAME/kickoff"
+LOGDIR=$(mktemp -d "/data/ubuntu/lxh/weavetp/acceptance/$NAME/kickoff/${NODE}_$(date -u +%Y%m%dT%H%M%SZ)_XXXXXX")
+nohup "$PYTHON" -B "$HERE/quick_driver.py" --step "$STEP" --node "$NODE" --sha "$SHA" --repo "$REPO" --log-dir "$LOGDIR" > "$LOGDIR/nohup.log" 2>&1 < /dev/null &
 printf '%s\n' "$!" > "$LOGDIR/driver.pid"
-printf 'Started Step 2. Start the peer within 60 seconds.\nLog: %s/nohup.log\n' "$LOGDIR"
+printf 'Started Step %s. Start the peer within 60 seconds.\nLog: %s/nohup.log\n' "$STEP" "$LOGDIR"

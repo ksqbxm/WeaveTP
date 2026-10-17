@@ -41,6 +41,7 @@ class Supervisor:
         self.workers, self.killed = {}, {}
         self.foreign = {}
         self.state = "preflight"
+        self.host_owner = None
 
     def transition(self, expected, target):
         require(self.state == expected, f"invalid supervisor transition {self.state} -> {target}")
@@ -48,6 +49,8 @@ class Supervisor:
         self.state = target
 
     def check_alive(self):
+        if self.host_owner is not None:
+            require(self.host_owner[0].poll() is None, 'host owner exited before workers finished')
         for slot, (child, record) in self.workers.items():
             if slot not in self.killed:
                 require(child.poll() is None, f"unexpected worker exit: slot={slot}, pid={child.pid}, rc={child.returncode}")
@@ -90,8 +93,8 @@ class Supervisor:
                    "TORCH_FR_DUMP_TEMP_FILE": str(self.root / f"flight_{slot}_"),
                    "TORCH_NCCL_TRACE_BUFFER_SIZE": "10000"}
             child, record = self.children.spawn(
-                [sys.executable, str(HERE / ("topology_worker.py" if self.config.get("probe") ==
-                                            "step02_topology_rebind" else "worker.py")),
+                [sys.executable, str(HERE / ("topology_worker.py" if self.config.get("probe") in
+                                            ("step02_topology_rebind", "step03_sources_and_transport") else "worker.py")),
                  "--config", str(self.root / "worker_config.json"),
                  "--slot", str(slot), "--epoch", str(epoch)],
                 "worker", row["gpu_uuid"], env,
@@ -197,31 +200,42 @@ class Supervisor:
                                           "pid": os.getpid(), "config": self.config})
         self.config["topology"] = self.wait(["topology"])[0]
         write_json(self.root / "worker_config.json", self.config)
+        if self.config.get('probe') == 'step03_sources_and_transport':
+            self.host_owner = self.children.spawn(
+                [sys.executable, str(HERE / 'host_owner.py'), '--config', str(self.root / 'worker_config.json')],
+                'host_owner')
         slots = [r["slot"] for r in self.config["topology"] if r["node"] == node]
         self.wait(["start"])
         self.transition("preflight", "running")
         self.start_workers(slots, 0)
         self.verify_contexts(slots, 0)
-        if node == "SL3061":
-            self.wait(["kill"], timeout=self.config["launch_timeout_s"])
-            self.kill_and_reclaim(baselines, mps["servers"])
-        self.wait(["spawn"], timeout=self.config["launch_timeout_s"])
-        if node == "SL3061":
-            victims = failed_slots(self.config["topology"])
-            self.rejoin_preflight(baselines)
-            self.start_workers(victims, 2)
-            self.transition("reclaimed", "rejoined")
-            self.verify_contexts(victims, 2)
-        else:
-            expected = {p.pid: r["gpu_uuid"] for p, r in self.workers.values()}
-            self.inspect("mps_after_cuda_epoch2", expected)
-            self.bus.put(f"verified/2/{node}", self.journal.event("mps_verified", epoch=2))
-        self.bus.put(f"spawned/{node}", [r for _, r in self.workers.values()])
+        if not self.config.get('profile_only'):
+            if node == "SL3061":
+                self.wait(["kill"], timeout=self.config["launch_timeout_s"])
+                self.kill_and_reclaim(baselines, mps["servers"])
+            self.wait(["spawn"], timeout=self.config["launch_timeout_s"])
+            if node == "SL3061":
+                victims = failed_slots(self.config["topology"])
+                self.rejoin_preflight(baselines)
+                self.start_workers(victims, 2)
+                self.transition("reclaimed", "rejoined")
+                self.verify_contexts(victims, 2)
+            else:
+                expected = {p.pid: r["gpu_uuid"] for p, r in self.workers.values()}
+                self.inspect("mps_after_cuda_epoch2", expected)
+                self.bus.put(f"verified/2/{node}", self.journal.event("mps_verified", epoch=2))
+            self.bus.put(f"spawned/{node}", [r for _, r in self.workers.values()])
         self.wait(["finish"], timeout=self.config["launch_timeout_s"])
         for child, record in self.workers.values():
             require(child.wait(timeout=self.config["stage_timeout_s"]) == 0,
                     f"worker failed at exit: {child.pid}")
             self.children.exited(child, record, "normal")
+        if self.host_owner is not None:
+            self.bus.put(f'host_stop/{node}', True)
+            child, record = self.host_owner
+            require(child.wait(timeout=30) == 0, 'host owner cleanup failed')
+            self.children.exited(child, record, 'normal')
+            self.host_owner = None
         # Cleanup evidence covers all eight GPUs, including the returned workers.
         tracker = Reclaim(baselines, mps["servers"], self.config, self.task_pids)
         deadline = time.monotonic() + self.config["reclaim_timeout_s"]
@@ -260,7 +274,7 @@ def main():
         journal.event("process_exit")
         return
     _, bus = connect(config)
-    if config.get("probe") == "step02_topology_rebind" and config["mode"] == "emulate":
+    if config.get("probe") in ("step02_topology_rebind", "step03_sources_and_transport") and config["mode"] == "emulate":
         from topology_probe import EmulateSupervisor
 
         supervisor = EmulateSupervisor(config, bus, journal)

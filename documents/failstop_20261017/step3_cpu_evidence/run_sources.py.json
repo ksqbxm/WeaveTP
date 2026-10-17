@@ -1,0 +1,23 @@
+{
+  "cases": [
+    {
+      "mode": "emulate",
+      "rounds": 1,
+      "launch": "s3_cpu_emulate"
+    },
+    {
+      "mode": "real",
+      "rounds": 1,
+      "launch": "s3_cpu_real_00"
+    }
+  ],
+  "quick_mode": true,
+  "correctness_only": true,
+  "shared_gpu_mode": true,
+  "timing_valid": false,
+  "output": "\\data\\s3_cpu",
+  "node": "SL3060",
+  "step": 3,
+  "profile_only": false,
+  "host_library_mode": "on-demand"
+}

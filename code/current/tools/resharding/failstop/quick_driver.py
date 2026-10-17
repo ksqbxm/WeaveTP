@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import math
 import re
 import signal
 import socket
@@ -29,7 +30,7 @@ def receive(stream):
     return json.loads(data)
 
 
-def rendezvous(node, sha, port=29839):
+def rendezvous(node, sha, port=29839, step=2):
     """SL3060 owns the run ID; neither node uses an independent suite timestamp."""
     handshake_deadline = time.monotonic() + 60
     if node == 'SL3060':
@@ -42,9 +43,9 @@ def rendezvous(node, sha, port=29839):
         conn.settimeout(max(1, handshake_deadline - time.monotonic()))
         stream = conn.makefile('rwb')
         request = receive(stream)
-        if request != {'node': 'SL3061', 'sha': sha, 'step': 2}:
+        if request != {'node': 'SL3061', 'sha': sha, 'step': step}:
             raise RuntimeError('peer step/SHA/node mismatch')
-        suite = 's2q_' + datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S') + '_' + uuid.uuid4().hex[:8]
+        suite = f's{step}q_' + datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S') + '_' + uuid.uuid4().hex[:8]
         send(stream, {'suite': suite, 'sha': sha})
     else:
         deadline = time.monotonic() + 60
@@ -58,9 +59,9 @@ def rendezvous(node, sha, port=29839):
                 time.sleep(0.25)
         conn.settimeout(max(1, handshake_deadline - time.monotonic()))
         stream = conn.makefile('rwb')
-        send(stream, {'node': node, 'sha': sha, 'step': 2})
+        send(stream, {'node': node, 'sha': sha, 'step': step})
         reply = receive(stream)
-        if reply['sha'] != sha or not re.fullmatch(r's2q_[A-Za-z0-9_]+', reply['suite']):
+        if reply['sha'] != sha or not re.fullmatch(rf's{step}q_[A-Za-z0-9_]+', reply['suite']):
             raise RuntimeError('invalid peer run ID/SHA')
         suite = reply['suite']
     return conn, stream, suite
@@ -71,6 +72,7 @@ def main():
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--node', choices=('SL3060', 'SL3061'), required=True)
+    parser.add_argument('--step', choices=(2, 3), type=int, default=2)
     parser.add_argument('--sha', required=True)
     parser.add_argument('--repo', type=Path, required=True)
     parser.add_argument('--log-dir', type=Path, required=True)
@@ -79,9 +81,10 @@ def main():
     run = args.log_dir
     conn = stream = child = None
     restore = False
-    status = {'step': 2, 'node': args.node, 'quick_mode': True, 'correctness_only': True,
+    status = {'step': args.step, 'node': args.node, 'quick_mode': True, 'correctness_only': True,
               'shared_gpu_mode': True, 'timing_valid': False, 'accepted': False, 'result': 'FAIL'}
-    lock = (args.log_dir.parent / f'{args.node}.lock').open('w')
+    # Steps share a checkout, so all quick steps must hold the same local lock.
+    lock = (args.repo / '.failstop_quick.lock').open('w')
 
     def git(*argv):
         return subprocess.check_output(['git', '-C', str(args.repo), *argv], text=True, stderr=subprocess.STDOUT).strip()
@@ -99,12 +102,12 @@ def main():
             raise RuntimeError('checkout identity mismatch')
         print('Waiting for peer: timeout=60s; total quick budget=300s', flush=True)
         status['peer_wait_start'] = time.monotonic()
-        conn, stream, suite = rendezvous(args.node, args.sha)
+        conn, stream, suite = rendezvous(args.node, args.sha, step=args.step)
         status['peer_wait_s'] = time.monotonic() - status['peer_wait_start']
         run = args.log_dir.parent.parent / suite
         status['suite'], status['run'] = suite, str(run)
         (args.log_dir / 'run_path.txt').write_text(str(run) + '\n')
-        entry = args.repo / 'code/current/tools/resharding/failstop/run_topology.py'
+        entry = args.repo / 'code/current/tools/resharding/failstop' / ('run_sources.py' if args.step == 3 else 'run_topology.py')
         argv = [sys.executable, '-B', str(entry), '--node', args.node, '--suite-id', suite,
                 '--output', str(run), '--mode', 'both', '--rounds', '1', '--real-launches', '1',
                 '--quick', '--correctness-only', '--budget-seconds', str(max(1, deadline - time.monotonic() - 45))]
@@ -120,6 +123,10 @@ def main():
                 summary['shared_gpu_mode'] and not summary['timing_valid'] and not summary['accepted'] and
                 summary['emulate'] == summary['real'] == 'passed'):
             raise RuntimeError('incomplete emulate/real correctness matrix')
+        pause = summary.get('edp1_rejoin_pause_s')
+        if not isinstance(pause, (int, float)) or not math.isfinite(pause) or pause < 0:
+            raise RuntimeError('missing or invalid edp1_rejoin_pause_s')
+        status['edp1_rejoin_pause_s'] = pause
         status['result'] = 'PASS'
     except BaseException:
         status.update(result='FAIL', error=traceback.format_exc())
@@ -175,7 +182,7 @@ def main():
         code = 0 if status['result'] == 'PASS' else 1
         (args.log_dir / 'exit_code').write_text(str(code) + '\n')
         print(json.dumps(status, indent=2), flush=True)
-        print(f"QUICK CHECK step=2 result={status['result']} (emulate shrink/expand, real shrink/expand) shared_gpu_mode=true logs={run}", flush=True)
+        print(f"QUICK CHECK step={args.step} result={status['result']} (emulate shrink/expand, real shrink/expand) shared_gpu_mode=true edp1_rejoin_pause_s={status.get('edp1_rejoin_pause_s')} logs={run}", flush=True)
         lock.close()
     return code
 

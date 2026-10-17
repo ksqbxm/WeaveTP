@@ -64,6 +64,12 @@ def run(config, slot, initial_epoch):
     require(str(torch.cuda.get_device_properties(0).uuid).removeprefix('GPU-') == row['gpu_uuid'].removeprefix('GPU-'), 'GPU UUID mismatch')
     context_tensor = torch.empty(1, device='cuda')
     context = verify_worker_context(row['gpu_uuid'], root / f'context_{slot}_epoch{initial_epoch}.jsonl')
+    source_runtime = None
+    if config.get('probe') == 'step03_sources_and_transport':
+        from source_runtime import SourceRuntime
+
+        source_runtime = SourceRuntime(config, slot, initial_epoch, bus, journal)
+    torch.cuda.synchronize()
     bus.put(f'cuda/{initial_epoch}/{slot}', journal.event('cuda_ready', slot=slot, gpu_uuid=row['gpu_uuid'],
             epoch=initial_epoch, empty_receiver=initial_epoch == 2, context_verification=context))
     bus.wait([f'cuda_verified/{initial_epoch}'])
@@ -139,6 +145,8 @@ def run(config, slot, initial_epoch):
             last_service = journal.event('replica_service', step=steps, until=key, slot=slot)
             if report:
                 bus.put(f'serving/{round_id}/{slot}', last_service)
+                if bus.has('cuda_verified/2' if round_id == 0 else f'emulate_rejoin/{round_id}'):
+                    bus.put(f'prepared_service/{round_id}/{slot}', last_service)
             elif bus.has('kill' if round_id == 0 else f'emulate_release/{round_id}'):
                 bus.put(f'healthy_progress/{round_id}/{slot}', last_service)
             stop = torch.tensor([int(bus.has(key))], device='cuda', dtype=torch.int64)
@@ -174,6 +182,15 @@ def run(config, slot, initial_epoch):
         identities = torch.tensor([slot, os.getpid()], dtype=torch.int64, device='cuda')
         collected = [torch.empty_like(identities) for _ in session.members]
         dist.all_gather(collected, identities, group=data)
+        rejoin_resumed = None
+        if phase == 2 and row['replica'] == 'EDP1':
+            # The rebuilt world and rebound model are usable before the Step 3
+            # synchronous transport probe. Measure an actual resumed service step.
+            session.resources.activate(session.cache_key())
+            original(torch.empty(0 if row['ep'] == 0 else 1, device='cuda'))
+            rejoin_resumed = journal.event('edp1_rejoin_resumed', slot=slot, round=round_id)
+            bus.put(f'world16_service/{round_id}/{slot}', rejoin_resumed)
+            session.resources.ready = False
         empty = phase == 2 and victim
         bytes_sent, bytes_received, markers = 0, 0, 0
         if phase:
@@ -224,6 +241,7 @@ def run(config, slot, initial_epoch):
                 serving_model, serving_binding = original, binding
         else:
             serving_model, serving_binding = original, binding
+        source_report = source_runtime.validate(session, data, phase, round_id) if source_runtime else None
         source_check()
         snapshot = session.rank_map()
         if phase:
@@ -235,7 +253,7 @@ def run(config, slot, initial_epoch):
             checks_passed=True, identities=[x.cpu().tolist() for x in collected], rank_map=snapshot,
             groups=records, source_pointer=original_pointer, empty_receiver=empty,
             used_as_source=bytes_sent > 0, data_sent_bytes=bytes_sent, data_received_bytes=bytes_received,
-            marker_bytes=markers, last_service=last_service,
+            marker_bytes=markers, last_service=last_service, rejoin_resumed=rejoin_resumed, sources=source_report,
             rebind=[] if binding is None else binding.log)
         bus.put(f'phase/{round_id}/{phase}/{slot}', report)
 
@@ -249,6 +267,8 @@ def run(config, slot, initial_epoch):
     else:
         for round_id in range(config['rounds']):
             validate(0, round_id, build(session) if real else prebuilt[0])
+            if config.get('profile_only'):
+                break
             if row['replica'] == 'EDP1':
                 service_until(f'transition/{round_id}/1', round_id)
             elif victim:
@@ -261,6 +281,8 @@ def run(config, slot, initial_epoch):
                 if serving_binding is not None and serving_binding is not binding:
                     serving_binding.close()
                 original = binding = serving_model = serving_binding = None
+                if source_runtime:
+                    source_runtime.release()
                 original_pointer = None
                 torch.cuda.synchronize()
                 torch.cuda.empty_cache()
@@ -289,6 +311,8 @@ def run(config, slot, initial_epoch):
                 bus.wait([f'next/{round_id}'])
                 session.next_round()
     bus.wait(['finish'])
+    if source_runtime:
+        source_runtime.close()
     session.resources.invalidate(c10d._abort_process_group if real else dist.destroy_process_group)
     bus.put(f'done/{slot}', journal.event('worker_done', slot=slot))
 

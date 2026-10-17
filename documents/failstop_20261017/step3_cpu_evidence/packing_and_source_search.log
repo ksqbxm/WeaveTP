@@ -1,0 +1,133 @@
+.............................Bandwidth-aware source assignment: decisions=8 multi_source=8 proposed=0 changed_from_default=0 rerouted_bytes=0 exclude_local_fallbacks=0 rejected_total=0 rejected_low_gain=0 rejected_small=0 rejected_no_dynamic_gain=0 rejected_global=0 min_gain_pct=10.00 min_contention_gain_pct=0.00 min_global_gain_pct=5.00 reroute_penalty_us=20.00 min_bytes=1024 accepted_gain_mean_pct=0.00 accepted_contention_gain_mean_pct=0.00 baseline_projected_critical_s=0.000013 candidate_projected_critical_s=0.000013 projected_global_gain_pct=0.00 global_gate_accepted=False
+Bandwidth-aware source assignment: decisions=8 multi_source=8 proposed=0 changed_from_default=0 rerouted_bytes=0 exclude_local_fallbacks=0 rejected_total=0 rejected_low_gain=0 rejected_small=0 rejected_no_dynamic_gain=0 rejected_global=0 min_gain_pct=10.00 min_contention_gain_pct=0.00 min_global_gain_pct=5.00 reroute_penalty_us=20.00 min_bytes=1024 accepted_gain_mean_pct=0.00 accepted_contention_gain_mean_pct=0.00 baseline_projected_critical_s=0.000013 candidate_projected_critical_s=0.000013 projected_global_gain_pct=0.00 global_gate_accepted=False
+Bandwidth-aware source assignment: decisions=8 multi_source=8 proposed=0 changed_from_default=0 rerouted_bytes=0 exclude_local_fallbacks=0 rejected_total=0 rejected_low_gain=0 rejected_small=0 rejected_no_dynamic_gain=0 rejected_global=0 min_gain_pct=10.00 min_contention_gain_pct=0.00 min_global_gain_pct=5.00 reroute_penalty_us=20.00 min_bytes=1024 accepted_gain_mean_pct=0.00 accepted_contention_gain_mean_pct=0.00 baseline_projected_critical_s=0.000013 candidate_projected_critical_s=0.000013 projected_global_gain_pct=0.00 global_gate_accepted=False
+.Bandwidth-aware source assignment: decisions=8 multi_source=8 proposed=0 changed_from_default=0 rerouted_bytes=0 exclude_local_fallbacks=0 rejected_total=0 rejected_low_gain=0 rejected_small=0 rejected_no_dynamic_gain=0 rejected_global=0 min_gain_pct=10.00 min_contention_gain_pct=0.00 min_global_gain_pct=5.00 reroute_penalty_us=20.00 min_bytes=1024 accepted_gain_mean_pct=0.00 accepted_contention_gain_mean_pct=0.00 baseline_projected_critical_s=0.000000 candidate_projected_critical_s=0.000000 projected_global_gain_pct=0.00 global_gate_accepted=False
+.Bandwidth-aware source assignment: decisions=8 multi_source=8 proposed=0 changed_from_default=0 rerouted_bytes=0 exclude_local_fallbacks=0 rejected_total=0 rejected_low_gain=0 rejected_small=0 rejected_no_dynamic_gain=0 rejected_global=0 min_gain_pct=15.00 min_contention_gain_pct=10.00 min_global_gain_pct=10.00 reroute_penalty_us=0.00 min_bytes=1048576 accepted_gain_mean_pct=0.00 accepted_contention_gain_mean_pct=0.00 baseline_projected_critical_s=0.000000 candidate_projected_critical_s=0.000000 projected_global_gain_pct=0.00 global_gate_accepted=False
+Bandwidth-aware source assignment: decisions=8 multi_source=8 proposed=0 changed_from_default=0 rerouted_bytes=0 exclude_local_fallbacks=0 rejected_total=0 rejected_low_gain=0 rejected_small=0 rejected_no_dynamic_gain=0 rejected_global=0 min_gain_pct=15.00 min_contention_gain_pct=10.00 min_global_gain_pct=10.00 reroute_penalty_us=0.00 min_bytes=1048576 accepted_gain_mean_pct=0.00 accepted_contention_gain_mean_pct=0.00 baseline_projected_critical_s=0.000000 candidate_projected_critical_s=0.000000 projected_global_gain_pct=0.00 global_gate_accepted=False
+.Bandwidth-aware source assignment: decisions=8 multi_source=8 proposed=0 changed_from_default=0 rerouted_bytes=0 exclude_local_fallbacks=0 rejected_total=0 rejected_low_gain=0 rejected_small=0 rejected_no_dynamic_gain=0 rejected_global=0 min_gain_pct=15.00 min_contention_gain_pct=10.00 min_global_gain_pct=10.00 reroute_penalty_us=0.00 min_bytes=1048576 accepted_gain_mean_pct=0.00 accepted_contention_gain_mean_pct=0.00 baseline_projected_critical_s=0.000000 candidate_projected_critical_s=0.000000 projected_global_gain_pct=0.00 global_gate_accepted=False
+Bandwidth-aware source assignment: decisions=8 multi_source=8 proposed=0 changed_from_default=0 rerouted_bytes=0 exclude_local_fallbacks=0 rejected_total=0 rejected_low_gain=0 rejected_small=0 rejected_no_dynamic_gain=0 rejected_global=0 min_gain_pct=15.00 min_contention_gain_pct=10.00 min_global_gain_pct=10.00 reroute_penalty_us=0.00 min_bytes=1048576 accepted_gain_mean_pct=0.00 accepted_contention_gain_mean_pct=0.00 baseline_projected_critical_s=0.000000 candidate_projected_critical_s=0.000000 projected_global_gain_pct=0.00 global_gate_accepted=False
+....
+.Bandwidth-aware source assignment: decisions=8 multi_source=8 proposed=1 changed_from_default=1 rerouted_bytes=16384 exclude_local_fallbacks=0 rejected_total=0 rejected_low_gain=0 rejected_small=0 rejected_no_dynamic_gain=0 rejected_global=0 min_gain_pct=1000000000.00 min_contention_gain_pct=1000000000.00 min_global_gain_pct=-inf reroute_penalty_us=20.00 min_bytes=1024 accepted_gain_mean_pct=0.00 accepted_contention_gain_mean_pct=0.00 baseline_projected_critical_s=0.000000 candidate_projected_critical_s=0.000028 projected_global_gain_pct=-2762144000.00 global_gate_accepted=True
+.Bandwidth-aware source assignment: decisions=8 multi_source=8 proposed=1 changed_from_default=1 rerouted_bytes=16384 exclude_local_fallbacks=0 rejected_total=0 rejected_low_gain=0 rejected_small=0 rejected_no_dynamic_gain=0 rejected_global=0 min_gain_pct=1000000000.00 min_contention_gain_pct=1000000000.00 min_global_gain_pct=-inf reroute_penalty_us=20.00 min_bytes=1024 accepted_gain_mean_pct=0.00 accepted_contention_gain_mean_pct=0.00 baseline_projected_critical_s=0.000000 candidate_projected_critical_s=0.000028 projected_global_gain_pct=-2762144000.00 global_gate_accepted=True
+.Bandwidth-aware source assignment: decisions=8 multi_source=8 proposed=1 changed_from_default=1 rerouted_bytes=16384 exclude_local_fallbacks=0 rejected_total=0 rejected_low_gain=0 rejected_small=0 rejected_no_dynamic_gain=0 rejected_global=0 min_gain_pct=1000000000.00 min_contention_gain_pct=1000000000.00 min_global_gain_pct=-inf reroute_penalty_us=20.00 min_bytes=1024 accepted_gain_mean_pct=0.00 accepted_contention_gain_mean_pct=0.00 baseline_projected_critical_s=0.000000 candidate_projected_critical_s=0.000028 projected_global_gain_pct=-2762144000.00 global_gate_accepted=True
+.Bandwidth-aware source assignment: decisions=8 multi_source=8 proposed=1 changed_from_default=1 rerouted_bytes=16384 exclude_local_fallbacks=0 rejected_total=0 rejected_low_gain=0 rejected_small=0 rejected_no_dynamic_gain=0 rejected_global=0 min_gain_pct=1000000000.00 min_contention_gain_pct=1000000000.00 min_global_gain_pct=-inf reroute_penalty_us=20.00 min_bytes=1024 accepted_gain_mean_pct=0.00 accepted_contention_gain_mean_pct=0.00 baseline_projected_critical_s=0.000000 candidate_projected_critical_s=0.000028 projected_global_gain_pct=-2762144000.00 global_gate_accepted=True
+.Bandwidth-aware source assignment: decisions=8 multi_source=8 proposed=1 changed_from_default=1 rerouted_bytes=16384 exclude_local_fallbacks=0 rejected_total=0 rejected_low_gain=0 rejected_small=0 rejected_no_dynamic_gain=0 rejected_global=0 min_gain_pct=1000000000.00 min_contention_gain_pct=1000000000.00 min_global_gain_pct=-inf reroute_penalty_us=20.00 min_bytes=1024 accepted_gain_mean_pct=0.00 accepted_contention_gain_mean_pct=0.00 baseline_projected_critical_s=0.000000 candidate_projected_critical_s=0.000028 projected_global_gain_pct=-2762144000.00 global_gate_accepted=True
+.Bandwidth-aware source assignment: decisions=8 multi_source=8 proposed=1 changed_from_default=1 rerouted_bytes=16384 exclude_local_fallbacks=0 rejected_total=0 rejected_low_gain=0 rejected_small=0 rejected_no_dynamic_gain=0 rejected_global=0 min_gain_pct=1000000000.00 min_contention_gain_pct=1000000000.00 min_global_gain_pct=-inf reroute_penalty_us=20.00 min_bytes=1024 accepted_gain_mean_pct=0.00 accepted_contention_gain_mean_pct=0.00 baseline_projected_critical_s=0.000000 candidate_projected_critical_s=0.000028 projected_global_gain_pct=-2762144000.00 global_gate_accepted=True
+.Bandwidth-aware source assignment: decisions=8 multi_source=8 proposed=0 changed_from_default=0 rerouted_bytes=0 exclude_local_fallbacks=0 rejected_total=0 rejected_low_gain=0 rejected_small=0 rejected_no_dynamic_gain=0 rejected_global=0 min_gain_pct=10.00 min_contention_gain_pct=0.00 min_global_gain_pct=-inf reroute_penalty_us=20.00 min_bytes=1024 accepted_gain_mean_pct=0.00 accepted_contention_gain_mean_pct=0.00 baseline_projected_critical_s=0.000000 candidate_projected_critical_s=0.000000 projected_global_gain_pct=0.00 global_gate_accepted=False
+Bandwidth-aware source assignment: decisions=8 multi_source=8 proposed=0 changed_from_default=0 rerouted_bytes=0 exclude_local_fallbacks=0 rejected_total=0 rejected_low_gain=0 rejected_small=0 rejected_no_dynamic_gain=0 rejected_global=0 min_gain_pct=10.00 min_contention_gain_pct=0.00 min_global_gain_pct=101.00 reroute_penalty_us=20.00 min_bytes=1024 accepted_gain_mean_pct=0.00 accepted_contention_gain_mean_pct=0.00 baseline_projected_critical_s=0.000000 candidate_projected_critical_s=0.000000 projected_global_gain_pct=0.00 global_gate_accepted=False
+.Bandwidth-aware source assignment: decisions=8 multi_source=8 proposed=0 changed_from_default=0 rerouted_bytes=0 exclude_local_fallbacks=0 rejected_total=0 rejected_low_gain=0 rejected_small=0 rejected_no_dynamic_gain=0 rejected_global=0 min_gain_pct=10.00 min_contention_gain_pct=0.00 min_global_gain_pct=-inf reroute_penalty_us=20.00 min_bytes=1024 accepted_gain_mean_pct=0.00 accepted_contention_gain_mean_pct=0.00 baseline_projected_critical_s=0.000000 candidate_projected_critical_s=0.000000 projected_global_gain_pct=0.00 global_gate_accepted=False
+Bandwidth-aware source assignment: decisions=8 multi_source=8 proposed=0 changed_from_default=0 rerouted_bytes=0 exclude_local_fallbacks=0 rejected_total=0 rejected_low_gain=0 rejected_small=0 rejected_no_dynamic_gain=0 rejected_global=0 min_gain_pct=10.00 min_contention_gain_pct=0.00 min_global_gain_pct=101.00 reroute_penalty_us=20.00 min_bytes=1024 accepted_gain_mean_pct=0.00 accepted_contention_gain_mean_pct=0.00 baseline_projected_critical_s=0.000000 candidate_projected_critical_s=0.000000 projected_global_gain_pct=0.00 global_gate_accepted=False
+.Bandwidth-aware source assignment: decisions=8 multi_source=8 proposed=0 changed_from_default=0 rerouted_bytes=0 exclude_local_fallbacks=0 rejected_total=0 rejected_low_gain=0 rejected_small=0 rejected_no_dynamic_gain=0 rejected_global=0 min_gain_pct=10.00 min_contention_gain_pct=0.00 min_global_gain_pct=-inf reroute_penalty_us=20.00 min_bytes=1024 accepted_gain_mean_pct=0.00 accepted_contention_gain_mean_pct=0.00 baseline_projected_critical_s=0.000000 candidate_projected_critical_s=0.000000 projected_global_gain_pct=0.00 global_gate_accepted=False
+Bandwidth-aware source assignment: decisions=8 multi_source=8 proposed=0 changed_from_default=0 rerouted_bytes=0 exclude_local_fallbacks=0 rejected_total=0 rejected_low_gain=0 rejected_small=0 rejected_no_dynamic_gain=0 rejected_global=0 min_gain_pct=10.00 min_contention_gain_pct=0.00 min_global_gain_pct=101.00 reroute_penalty_us=20.00 min_bytes=1024 accepted_gain_mean_pct=0.00 accepted_contention_gain_mean_pct=0.00 baseline_projected_critical_s=0.000000 candidate_projected_critical_s=0.000000 projected_global_gain_pct=0.00 global_gate_accepted=False
+.Bandwidth-aware source assignment: decisions=8 multi_source=8 proposed=0 changed_from_default=0 rerouted_bytes=0 exclude_local_fallbacks=0 rejected_total=0 rejected_low_gain=0 rejected_small=0 rejected_no_dynamic_gain=0 rejected_global=0 min_gain_pct=10.00 min_contention_gain_pct=0.00 min_global_gain_pct=-inf reroute_penalty_us=20.00 min_bytes=1024 accepted_gain_mean_pct=0.00 accepted_contention_gain_mean_pct=0.00 baseline_projected_critical_s=0.000000 candidate_projected_critical_s=0.000000 projected_global_gain_pct=0.00 global_gate_accepted=False
+Bandwidth-aware source assignment: decisions=8 multi_source=8 proposed=0 changed_from_default=0 rerouted_bytes=0 exclude_local_fallbacks=0 rejected_total=0 rejected_low_gain=0 rejected_small=0 rejected_no_dynamic_gain=0 rejected_global=0 min_gain_pct=10.00 min_contention_gain_pct=0.00 min_global_gain_pct=101.00 reroute_penalty_us=20.00 min_bytes=1024 accepted_gain_mean_pct=0.00 accepted_contention_gain_mean_pct=0.00 baseline_projected_critical_s=0.000000 candidate_projected_critical_s=0.000000 projected_global_gain_pct=0.00 global_gate_accepted=False
+.Bandwidth-aware source assignment: decisions=8 multi_source=8 proposed=0 changed_from_default=0 rerouted_bytes=0 exclude_local_fallbacks=0 rejected_total=0 rejected_low_gain=0 rejected_small=0 rejected_no_dynamic_gain=0 rejected_global=0 min_gain_pct=10.00 min_contention_gain_pct=0.00 min_global_gain_pct=-inf reroute_penalty_us=20.00 min_bytes=1024 accepted_gain_mean_pct=0.00 accepted_contention_gain_mean_pct=0.00 baseline_projected_critical_s=0.000000 candidate_projected_critical_s=0.000000 projected_global_gain_pct=0.00 global_gate_accepted=False
+Bandwidth-aware source assignment: decisions=8 multi_source=8 proposed=0 changed_from_default=0 rerouted_bytes=0 exclude_local_fallbacks=0 rejected_total=0 rejected_low_gain=0 rejected_small=0 rejected_no_dynamic_gain=0 rejected_global=0 min_gain_pct=10.00 min_contention_gain_pct=0.00 min_global_gain_pct=101.00 reroute_penalty_us=20.00 min_bytes=1024 accepted_gain_mean_pct=0.00 accepted_contention_gain_mean_pct=0.00 baseline_projected_critical_s=0.000000 candidate_projected_critical_s=0.000000 projected_global_gain_pct=0.00 global_gate_accepted=False
+.Bandwidth-aware source assignment: decisions=8 multi_source=8 proposed=0 changed_from_default=0 rerouted_bytes=0 exclude_local_fallbacks=0 rejected_total=0 rejected_low_gain=0 rejected_small=0 rejected_no_dynamic_gain=0 rejected_global=0 min_gain_pct=10.00 min_contention_gain_pct=0.00 min_global_gain_pct=-inf reroute_penalty_us=20.00 min_bytes=1024 accepted_gain_mean_pct=0.00 accepted_contention_gain_mean_pct=0.00 baseline_projected_critical_s=0.000000 candidate_projected_critical_s=0.000000 projected_global_gain_pct=0.00 global_gate_accepted=False
+Bandwidth-aware source assignment: decisions=8 multi_source=8 proposed=0 changed_from_default=0 rerouted_bytes=0 exclude_local_fallbacks=0 rejected_total=0 rejected_low_gain=0 rejected_small=0 rejected_no_dynamic_gain=0 rejected_global=0 min_gain_pct=10.00 min_contention_gain_pct=0.00 min_global_gain_pct=101.00 reroute_penalty_us=20.00 min_bytes=1024 accepted_gain_mean_pct=0.00 accepted_contention_gain_mean_pct=0.00 baseline_projected_critical_s=0.000000 candidate_projected_critical_s=0.000000 projected_global_gain_pct=0.00 global_gate_accepted=False
+........
+============================== warnings summary ===============================
+code\current\megatron\core\optimizer\__init__.py:25
+  C:\Users\ksqbx\.codex\worktrees\failstop\WeaveTP_������ʵ������_20260920\code\current\megatron\core\optimizer\__init__.py:25: UserWarning: Transformer Engine and Apex are not installed. Falling back to Torch optimizers.
+    warnings.warn(
+
+code\current\megatron\core\distributed\fsdp\src\megatron_fsdp\mixed_precision.py:115
+  C:\Users\ksqbx\.codex\worktrees\failstop\WeaveTP_������ʵ������_20260920\code\current\megatron\core\distributed\fsdp\src\megatron_fsdp\mixed_precision.py:115: UserWarning: Transformer Engine and Apex are not installed. Falling back to local implementations of multi_tensor_applier and multi_tensor_scale
+    warnings.warn(
+
+code\current\megatron\core\optimizer\optimizer.py:29
+  C:\Users\ksqbx\.codex\worktrees\failstop\WeaveTP_������ʵ������_20260920\code\current\megatron\core\optimizer\optimizer.py:29: UserWarning: Transformer Engine and Apex are not installed. Falling back to local implementations of multi_tensor_applier and multi_tensor_scale
+    warnings.warn(
+
+code\current\megatron\core\optimizer\clip_grads.py:32
+  C:\Users\ksqbx\.codex\worktrees\failstop\WeaveTP_������ʵ������_20260920\code\current\megatron\core\optimizer\clip_grads.py:32: UserWarning: Transformer Engine and Apex are not installed. Falling back to local implementations of multi_tensor_applier, multi_tensor_l2norm, and multi_tensor_scale
+    warnings.warn(
+
+code\current\megatron\core\hyper_comm_grid.py:26
+  C:\Users\ksqbx\.codex\worktrees\failstop\WeaveTP_������ʵ������_20260920\code\current\megatron\core\hyper_comm_grid.py:26: UserWarning: absl.logging is not installed. Using logging.getLogger(__name__) instead. Please install absl.logging with `pip install absl-py` to use absl.logging.
+    warnings.warn(
+
+code\current\megatron\core\inference\contexts\__init__.py:9
+  C:\Users\ksqbx\.codex\worktrees\failstop\WeaveTP_������ʵ������_20260920\code\current\megatron\core\inference\contexts\__init__.py:9: DeprecationWarning: The following imports from `dynamic_context.py` will be removed in this file in `megatron-core` 0.14. The imports here result in a cyclic import issue that causes rotary embeddings to import from Apex rather than Transformer Engine.
+    warnings.warn(
+
+code\current\megatron\core\models\backends.py:34
+  C:\Users\ksqbx\.codex\worktrees\failstop\WeaveTP_������ʵ������_20260920\code\current\megatron\core\models\backends.py:34: UserWarning: Apex is not installed. Falling back to Torch Norm
+    warnings.warn("Apex is not installed. Falling back to Torch Norm")
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=================================== PASSES ====================================
+============================ slowest 15 durations =============================
+2.29s call     tests/unit_tests/resharding/test_source_search.py::test_small_optimum_and_default_bound[17-ilp]
+0.68s call     tests/unit_tests/resharding/test_source_search.py::test_twenty_items_and_deep_iterative_dfs
+0.41s call     tests/unit_tests/resharding/test_source_search.py::test_actual_coordinator_times_only_forward_plan_and_samples_greedy_endpoints
+0.11s call     tests/unit_tests/resharding/test_source_search.py::test_benchmark_main_does_not_hide_exception_in_collective_cleanup[False]
+0.09s call     tests/unit_tests/resharding/test_source_search.py::test_remote_default_hash_and_stats_match_frozen_planner
+0.08s call     tests/unit_tests/resharding/test_source_search.py::test_small_optimum_and_default_bound[17-ls]
+0.04s call     tests/unit_tests/resharding/test_nccl_packing.py::test_temporary_send_address_reuse_does_not_reuse_payload
+0.02s call     tests/unit_tests/resharding/test_source_search.py::test_audit_serializes_actual_policy_matrices[False]
+0.02s call     tests/unit_tests/resharding/test_source_search.py::test_solver_routes_and_global_gate[ilp]
+0.02s call     tests/unit_tests/resharding/test_source_search.py::test_small_optimum_and_default_bound[31-ilp]
+0.02s call     tests/unit_tests/resharding/test_source_search.py::test_audit_serializes_actual_policy_matrices[True]
+0.01s call     tests/unit_tests/resharding/test_source_search.py::test_solver_routes_and_global_gate[dfs]
+0.01s call     tests/unit_tests/resharding/test_source_search.py::test_solver_routes_and_global_gate[heap]
+0.01s call     tests/unit_tests/resharding/test_source_search.py::test_solver_routes_and_global_gate[dijkstra]
+0.01s call     tests/unit_tests/resharding/test_source_search.py::test_solver_routes_and_global_gate[dp]
+=========================== short test summary info ===========================
+PASSED code\current\tests\unit_tests\resharding\test_nccl_packing.py::test_temporary_send_address_reuse_does_not_reuse_payload
+PASSED code\current\tests\unit_tests\resharding\test_nccl_packing.py::test_launcher_classifies_send_storage_before_configuring_service[stable]
+PASSED code\current\tests\unit_tests\resharding\test_nccl_packing.py::test_launcher_classifies_send_storage_before_configuring_service[strided]
+PASSED code\current\tests\unit_tests\resharding\test_nccl_packing.py::test_launcher_classifies_send_storage_before_configuring_service[dequantized]
+PASSED code\current\tests\unit_tests\resharding\test_nccl_packing.py::test_launcher_classifies_send_storage_before_configuring_service[mxfp8]
+PASSED code\current\tests\unit_tests\resharding\test_nccl_packing.py::test_launcher_classifies_send_storage_before_configuring_service[transformed]
+PASSED code\current\tests\unit_tests\resharding\test_nccl_packing.py::test_temporary_eligibility_does_not_change_peer_bucket_geometry
+PASSED code\current\tests\unit_tests\resharding\test_nccl_packing.py::test_least_stream_priority_falls_back_for_older_torch
+PASSED code\current\tests\unit_tests\resharding\test_nccl_packing.py::test_block_current_stream_prefers_nonblocking_work_dependency
+PASSED code\current\tests\unit_tests\resharding\test_nccl_packing.py::test_copy_handle_done_is_a_pure_query_until_wait
+PASSED code\current\tests\unit_tests\resharding\test_nccl_packing.py::test_bounded_unpack_splits_foreach_submission_by_bytes
+PASSED code\current\tests\unit_tests\resharding\test_nccl_packing.py::test_remote_packing_coalesces_by_peer_and_preserves_mixed_dtypes
+PASSED code\current\tests\unit_tests\resharding\test_nccl_packing.py::test_remote_packing_leaves_large_and_unaddressed_tensors_direct
+PASSED code\current\tests\unit_tests\resharding\test_nccl_packing.py::test_remote_packing_only_coalesces_rerouted_tasks
+PASSED code\current\tests\unit_tests\resharding\test_nccl_packing.py::test_persistent_send_bucket_is_reused_after_warmup
+PASSED code\current\tests\unit_tests\resharding\test_nccl_packing.py::test_persistent_send_bucket_never_caches_mutable_kv_tasks
+PASSED code\current\tests\unit_tests\resharding\test_source_search.py::test_small_optimum_and_default_bound[17-ls]
+PASSED code\current\tests\unit_tests\resharding\test_source_search.py::test_small_optimum_and_default_bound[17-heap]
+PASSED code\current\tests\unit_tests\resharding\test_source_search.py::test_small_optimum_and_default_bound[17-dp]
+PASSED code\current\tests\unit_tests\resharding\test_source_search.py::test_small_optimum_and_default_bound[17-dfs]
+PASSED code\current\tests\unit_tests\resharding\test_source_search.py::test_small_optimum_and_default_bound[17-dijkstra]
+PASSED code\current\tests\unit_tests\resharding\test_source_search.py::test_small_optimum_and_default_bound[17-ilp]
+PASSED code\current\tests\unit_tests\resharding\test_source_search.py::test_small_optimum_and_default_bound[31-ls]
+PASSED code\current\tests\unit_tests\resharding\test_source_search.py::test_small_optimum_and_default_bound[31-heap]
+PASSED code\current\tests\unit_tests\resharding\test_source_search.py::test_small_optimum_and_default_bound[31-dp]
+PASSED code\current\tests\unit_tests\resharding\test_source_search.py::test_small_optimum_and_default_bound[31-dfs]
+PASSED code\current\tests\unit_tests\resharding\test_source_search.py::test_small_optimum_and_default_bound[31-dijkstra]
+PASSED code\current\tests\unit_tests\resharding\test_source_search.py::test_small_optimum_and_default_bound[31-ilp]
+PASSED code\current\tests\unit_tests\resharding\test_source_search.py::test_twenty_items_and_deep_iterative_dfs
+PASSED code\current\tests\unit_tests\resharding\test_source_search.py::test_remote_default_hash_and_stats_match_frozen_planner
+PASSED code\current\tests\unit_tests\resharding\test_source_search.py::test_planner_never_reads_search_environment
+PASSED code\current\tests\unit_tests\resharding\test_source_search.py::test_audit_serializes_actual_policy_matrices[False]
+PASSED code\current\tests\unit_tests\resharding\test_source_search.py::test_audit_serializes_actual_policy_matrices[True]
+PASSED code\current\tests\unit_tests\resharding\test_source_search.py::test_failed_audit_serialization_does_not_leave_a_partial_file
+PASSED code\current\tests\unit_tests\resharding\test_source_search.py::test_benchmark_main_does_not_hide_exception_in_collective_cleanup[False]
+PASSED code\current\tests\unit_tests\resharding\test_source_search.py::test_benchmark_main_does_not_hide_exception_in_collective_cleanup[True]
+PASSED code\current\tests\unit_tests\resharding\test_source_search.py::test_actual_coordinator_times_only_forward_plan_and_samples_greedy_endpoints
+PASSED code\current\tests\unit_tests\resharding\test_source_search.py::test_every_override_or_default_and_no_greedy_contamination[ls]
+PASSED code\current\tests\unit_tests\resharding\test_source_search.py::test_every_override_or_default_and_no_greedy_contamination[heap]
+PASSED code\current\tests\unit_tests\resharding\test_source_search.py::test_every_override_or_default_and_no_greedy_contamination[dp]
+PASSED code\current\tests\unit_tests\resharding\test_source_search.py::test_every_override_or_default_and_no_greedy_contamination[dfs]
+PASSED code\current\tests\unit_tests\resharding\test_source_search.py::test_every_override_or_default_and_no_greedy_contamination[dijkstra]
+PASSED code\current\tests\unit_tests\resharding\test_source_search.py::test_every_override_or_default_and_no_greedy_contamination[ilp]
+PASSED code\current\tests\unit_tests\resharding\test_source_search.py::test_solver_routes_and_global_gate[ls]
+PASSED code\current\tests\unit_tests\resharding\test_source_search.py::test_solver_routes_and_global_gate[heap]
+PASSED code\current\tests\unit_tests\resharding\test_source_search.py::test_solver_routes_and_global_gate[dp]
+PASSED code\current\tests\unit_tests\resharding\test_source_search.py::test_solver_routes_and_global_gate[dfs]
+PASSED code\current\tests\unit_tests\resharding\test_source_search.py::test_solver_routes_and_global_gate[dijkstra]
+PASSED code\current\tests\unit_tests\resharding\test_source_search.py::test_solver_routes_and_global_gate[ilp]
+PASSED code\current\tests\unit_tests\resharding\test_source_search.py::test_tp_dedup_ep_and_fixed_loads
+PASSED code\current\tests\unit_tests\resharding\test_source_search.py::test_rss_delta_not_lifetime_peak_and_checkpoint_frequency
+PASSED code\current\tests\unit_tests\resharding\test_source_search.py::test_heap_matches_global_rescoring
+PASSED code\current\tests\unit_tests\resharding\test_source_search.py::test_time_budget_and_saved_complete_solution
+PASSED code\current\tests\unit_tests\resharding\test_source_search.py::test_stop_before_complete_instance_falls_back[budget]
+PASSED code\current\tests\unit_tests\resharding\test_source_search.py::test_stop_before_complete_instance_falls_back[memory]
+PASSED code\current\tests\unit_tests\resharding\test_source_search.py::test_ilp_gaps_and_failures
+56 passed, 7 warnings in 14.59s
