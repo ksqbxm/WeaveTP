@@ -1,0 +1,30 @@
+[
+  {
+    "file": "Step1_两阶段回归服务器命令.md",
+    "bash_blocks": 6,
+    "syntax": "passed"
+  },
+  {
+    "file": "Step1_bundle分发.md",
+    "bash_blocks": 2,
+    "syntax": "passed"
+  },
+  {
+    "file": "Step1_共享GPU服务器命令.md",
+    "bash_blocks": 5,
+    "syntax": "passed"
+  },
+  {
+    "file": "Step1_服务器命令.md",
+    "bash_blocks": 6,
+    "syntax": "passed"
+  },
+  {
+    "bundle_base": "d16b5e80cbc6f7f4cf7edcf1494b16f73a4bbe6c",
+    "implementation": "6bbd25326eb7311688ebb057d35e648471f0e5ae",
+    "bundle_bytes": 21184,
+    "verification": "The bundle contains this ref:\n6bbd25326eb7311688ebb057d35e648471f0e5ae refs/heads/codex/step1-6bbd253\nThe bundle requires this ref:\nd16b5e80cbc6f7f4cf7edcf1494b16f73a4bbe6c \nThe bundle uses this hash algorithm: sha1\nC:/Users/ksqbx/AppData/Local/Temp/tmpj6h5btuy/step1_6bbd253.bundle is okay\n",
+    "heads": "6bbd25326eb7311688ebb057d35e648471f0e5ae refs/heads/codex/step1-6bbd253\n",
+    "local_bundle_fetch": "passed"
+  }
+]

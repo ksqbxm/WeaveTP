@@ -107,3 +107,5 @@ NVIDIA 文档说明管道变量控制连接位置，并列出绕开 MPS 的设�
 当前范围：只优化 Step 1，不推进 Step 2/task2 或模型集成。`--repeats N` 默认 10，按 idle/inflight 交替运行共 2N 轮；N<10 标记 quick_mode=true，all_cases_passed 表示所选快验矩阵完整成功，accepted 保留至少每类 10 轮全部成功的主验收要求。两节点 repeats 必须一致。仓库检查只拒绝已跟踪文件的暂存/未暂存改动，忽略未跟踪文件。
 
 计时：spawn_to_ready_s 使用 SL3061 本地单调时钟，从四新 worker 最早 spawn 到最后 CUDA 就绪；rejoin_preparation_s 包含两节点 MPS/身份检查的后台准备墙钟；rejoin_join_s 保留完整回归请求到 world16 ready 的总时长。edp1_rejoin_pause_s 改为 EDP1 重建前最后一次有效服务计算到 world16 校验完成的最大进程间隙，包含 abort、协调和重建验证，不包括新进程初始化。旧 edp1_rejoin_pause_max_s 字段移除，不保留两种回归停顿口径。逐 worker service_progress、步数和最大进度间隙用于证明准备期间持续计算。
+
+两阶段优化固定实现：`6bbd25326eb7311688ebb057d35e648471f0e5ae`；54 项 CPU 测试通过，新版 GPU 快验待运行。见 [两阶段回归服务器命令](Step1_两阶段回归服务器命令.md)，包含 SL3061 bundle 分发与两节点 N=1 共享 GPU 命令。

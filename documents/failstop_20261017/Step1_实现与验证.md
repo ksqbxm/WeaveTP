@@ -67,3 +67,5 @@ kill 的身份核对包括 Popen 登记、Linux `/proc` 启动 tick、launch/角
 ## 服务器环境适配更新
 
 固定实现 `d16b5e80cbc6f7f4cf7edcf1494b16f73a4bbe6c`，50 项 CPU 测试通过，详见 [服务器环境适配](Step1_服务器环境适配.md)。新增 syscall pidfd、共享 foreign MPS 及 worker 内独立 context 证明、可配置磁盘预检；GPU 未运行。最新 [共享运行命令](Step1_共享GPU服务器命令.md) 使用 SL3061 拉取后 bundle 分发。
+
+两阶段优化固定实现：`6bbd25326eb7311688ebb057d35e648471f0e5ae`；54 项 CPU 测试通过，新版 GPU 快验待运行。见 [两阶段回归服务器命令](Step1_两阶段回归服务器命令.md)，包含 SL3061 bundle 分发与两节点 N=1 共享 GPU 命令。

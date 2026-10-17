@@ -1,5 +1,7 @@
 # Step 1 共享 GPU 正确性测试命令
 
+本页保留已通过的 d16b5e8 验收命令。当前两阶段回归优化请使用 [新版 N=1 快验命令](Step1_两阶段回归服务器命令.md)。
+
 固定实现提交：`d16b5e80cbc6f7f4cf7edcf1494b16f73a4bbe6c`（`codex/failstop`，个人仓库 `ksqbxm/WeaveTP`）。本文件是实现后的交付说明，后续文档提交不改变该实现 SHA。
 
 50 项 CPU 测试通过；**此实现已获用户确认：s1_shared_20261017_d16b5e8_r2 的 20/20 共享 GPU 正确性验收通过**。本次只跑玩具探针，不需要 checkpoint。两节点各八卡，允许其他任务占用 GPU；预检与运行均加 `--allow-foreign-gpu-processes`。共享模式允许 foreign MPS 客户端，无法定位实际管道的 daemon 记录后跳过查询；本测试 worker 必须在内部证明独立 GPU context，已定位管道查询报错仍失败，不修改服务。服务器需现有 PyTorch 2.11 / NCCL 2.28 构建，不在此安装或升级。

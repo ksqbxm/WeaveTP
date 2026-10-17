@@ -44,3 +44,5 @@ N<10 时 invocation、config、result、summary 标记 quick_mode=true。N=1 期
 54 项 CPU 测试通过，无跳过。真实 CPU TCPStore + 12 个并发服务线程覆盖独占/共享 × idle/inflight 四种组合，故意延迟新 worker 准备，验证期间计算持续推进、transition/2 与 build/2 未提前发生、就绪后停止与重建有序、暂停起点确实来自服务进度。新增计算/通知失败、准备超时、提前转换拒绝、N=1/3/10/12 矩阵与 summary、临时真实 Git 仓库的未跟踪/暂存/未暂存检查。
 
 isort、Ruff F、compileall 通过；默认、N=1、N=12 dry-run 通过；N=0、负数及越界端口拒绝。证据见 [CPU 日志](step1_two_phase_evidence/cpu_tests.log)。本地测试替代了 CUDA 计算与 GPU 启动，不代表新版本 GPU 性能/正确性已通过。
+
+两阶段优化固定实现：`6bbd25326eb7311688ebb057d35e648471f0e5ae`；54 项 CPU 测试通过，新版 GPU 快验待运行。见 [两阶段回归服务器命令](Step1_两阶段回归服务器命令.md)，包含 SL3061 bundle 分发与两节点 N=1 共享 GPU 命令。
