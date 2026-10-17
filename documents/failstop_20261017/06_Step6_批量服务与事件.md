@@ -2,6 +2,8 @@
 
 状态：待阶段 A 用户确认。专用 GPU 测试标识：`step06_batched_serving`。
 
+2026-10-18 用户指示分两部分推进：A 部分现在开始（统一服务驱动的计划与 CPU/fake 后端实现，不依赖 Step 3–5 上机），B 部分等阶段 A 服务器验收。统一服务驱动的计划稿见 [Step6_服务驱动计划.md](Step6_服务驱动计划.md)，**待用户审阅后才编码**；用户所述扩缩容计划 W1–W4 文档在仓库中未找到，计划稿 §0 给出了与 C1–C11/K1–K7 的映射并列出待确认问题。
+
 ## 1. 必读与前置
 
 **需要阅读 [CODEX.md](../../CODEX.md) 进行代码编写，需要阅读[总计划](00_总计划.md)。** 每次代码修改前核对本 Step、适用 AGENTS.md；Python imports 变化执行 `uv run isort`。阶段 A 的 microbatch=1 正确性不能替代本步 batched serving 验收。
