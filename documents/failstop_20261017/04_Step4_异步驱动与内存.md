@@ -1,6 +1,6 @@
 # Step 4：副本独立推进、迁移重叠与权重/KV 生命周期
 
-状态：等待 fix2 GPU 前置。专用 GPU 测试标识：`step04_async_driver_and_memory`。
+状态：2026-10-17 按用户指示开始实现，已实现并完成 CPU 验证；fix2 GPU 前置仍未登记，服务器 GPU 待运行。专用 GPU 测试标识：`step04_async_driver_and_memory`。
 
 ## 1. 必读与硬前置
 
@@ -68,4 +68,4 @@
 
 ## 7. 验收登记
 
-fix2 GPU SHA/证据/用户确认：待填。实现 SHA：待填。CPU：未运行。emulate/real GPU：均未运行。
+fix2 GPU SHA/证据/用户确认：待填；用户 2026-10-17 明确指示在此前置未登记时开始本步，runner 固定输出 `prerequisites_verified=false`。实现 SHA：`7b33df6591815bb5db8d98d97a6898bc9ab1c0af`；快验清单：`dce3d902edb258d3b028ee8bc333d1448853929f`（分支 `codex/failstop-step4`，基于 Step 2 交付 `69927c7`，不含 Step 3）。CPU：102 项 failstop 单测（含本步 16 项）、16 项 packing 回归及静态检查通过。emulate/real GPU、300 秒快验预算：均未运行。传输为显式切片夹具，Step 3 集成另行验收。详见 [实现与验证](Step4_实现与验证.md) 与 [服务器命令](Step4_服务器命令.md)。
