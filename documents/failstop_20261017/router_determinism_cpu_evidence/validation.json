@@ -1,0 +1,51 @@
+{
+  "check": "router_determinism",
+  "branch": "codex/failstop",
+  "code_commit": "7472af24113e534516db5e168965a91b0518289f",
+  "manifest_commit": "dbebcf7bd04170fe7ac7ef760f8657ea81845ce0",
+  "read_before_code": [
+    "CODEX.md",
+    "documents/failstop_20261017/00_总计划.md",
+    "documents/failstop_20261017/05_Step5_模型正确性.md",
+    "code/current/AGENTS.md",
+    "code/current/examples/rl/benchmark_live_moe_tp.py",
+    "code/current/tools/resharding/run_live_moe_tp_benchmark.sh",
+    "code/current/megatron/core/transformer/moe/router.py",
+    "code/current/megatron/core/transformer/moe/moe_utils.py",
+    "code/current/megatron/core/transformer/moe/token_dispatcher.py"
+  ],
+  "files": [
+    "code/current/tools/resharding/correctness/router_determinism.py",
+    "code/current/tools/resharding/correctness/router_determinism_driver.py",
+    "code/current/tools/resharding/correctness/router_determinism_check.sh",
+    "code/current/tools/resharding/correctness/test_router_determinism.py",
+    "code/current/tools/resharding/failstop/releases.json"
+  ],
+  "tests": {
+    "unittest": {
+      "count": 9,
+      "status": "passed",
+      "log": "cpu_tests.log",
+      "command": "python -B -X utf8 -m unittest discover -s code/current/tools/resharding/correctness -p test_router_determinism.py -v"
+    },
+    "failstop_regression": {"count": 99, "status": "passed", "note": "unchanged files; run on codex/failstop e40164f + this change"},
+    "gpu": {"status": "not_run", "tp2": "not_run", "tp4": "not_run", "elapsed_budget_900s": "not_measured"}
+  },
+  "static_checks": {"isort": "passed", "ruff_F": "passed", "bash_n": "passed"},
+  "memory_plan": {
+    "formula_total_parameters_tp1": 15706484224,
+    "tp2": {"weight_bytes_per_gpu": 8512592896, "kv_cache_bytes_max_seq_128": 17694720, "margin_bytes": 2147483648},
+    "tp4": {"weight_bytes_per_gpu": 4259830784, "kv_cache_bytes_max_seq_128": 8847360, "margin_bytes": 2147483648},
+    "verified_on_gpu": false
+  },
+  "logs_sha256": {"cpu_tests.log": "0cc57b8c7afceb9f87f60c66d582b0ccd7ee24aff751809cf7c6b29e56e46c13"},
+  "bundle": {
+    "path": "C:\\Users\\ksqbx\\.codex\\worktrees\\failstop\\router_determinism_dbebcf7.bundle",
+    "bytes": 890416,
+    "sha256": "679c5b882b4b03b99c207cf3cf8ab9621e161b4f57bfcbe7b8df9350c73e9d2e",
+    "base": "f7d555998b45756998465924d733fd70e553d6b4",
+    "ref": "refs/heads/codex/router-determinism-dbebcf7",
+    "head": "dbebcf7bd04170fe7ac7ef760f8657ea81845ce0",
+    "verified": true
+  }
+}
