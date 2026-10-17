@@ -148,8 +148,10 @@ class NCCLCopyService(CopyService):
         pack_rerouted_only: bool = False,
         unpack_chunk_bytes: int = 64 << 20,
         ensure_all_ranks_participate: bool = False,
+        group_relative_ranks: bool = False,
     ):
         self.group = group
+        self.group_relative_ranks = group_relative_ranks
         # Use group.rank()/size() to support cross-cluster ProcessGroups
         self.rank = group.rank() if group is not None else dist.get_rank()
         self.world_size = group.size() if group is not None else dist.get_world_size()
@@ -244,12 +246,17 @@ class NCCLCopyService(CopyService):
     def submit_recv(self, dest_tensor: torch.Tensor, src_rank: int, task_id: Optional[int] = None):
         self.recv_ops.append(RecvOp(task_id=task_id, tensor=dest_tensor, src_rank=src_rank))
 
+    def _p2p_op(self, operation, tensor, peer, group):
+        if self.group_relative_ranks:
+            return dist.P2POp(operation, tensor, group=group, group_peer=peer)
+        return dist.P2POp(operation, tensor, peer, group=group)
+
     def _build_send_recv_p2p_ops(self, remote_sends: List[SendOp], remote_recvs: List[RecvOp]):
         p2p_ops = []
         for op in remote_sends:
-            p2p_ops.append(dist.P2POp(dist.isend, op.tensor, op.dest_rank, group=self.group))
+            p2p_ops.append(self._p2p_op(dist.isend, op.tensor, op.dest_rank, group=self.group))
         for op in remote_recvs:
-            p2p_ops.append(dist.P2POp(dist.irecv, op.tensor, op.src_rank, group=self.group))
+            p2p_ops.append(self._p2p_op(dist.irecv, op.tensor, op.src_rank, group=self.group))
         return p2p_ops
 
     def _op_num_bytes(self, op) -> int:
@@ -528,7 +535,7 @@ class NCCLCopyService(CopyService):
                     self._task_sort_key(op.task_id, index),
                     0,
                     index,
-                    dist.P2POp(dist.isend, op.tensor, op.dest_rank, group=self.group),
+                    self._p2p_op(dist.isend, op.tensor, op.dest_rank, group=self.group),
                 )
             )
         send_count = len(remote_sends)
@@ -538,7 +545,7 @@ class NCCLCopyService(CopyService):
                     self._task_sort_key(op.task_id, send_count + index),
                     1,
                     index,
-                    dist.P2POp(dist.irecv, op.tensor, op.src_rank, group=self.group),
+                    self._p2p_op(dist.irecv, op.tensor, op.src_rank, group=self.group),
                 )
             )
         ordered_ops.sort(key=lambda item: (item[0], item[1], item[2]))
@@ -561,7 +568,7 @@ class NCCLCopyService(CopyService):
                     self._task_sort_key(op.task_id, index),
                     0,
                     index,
-                    dist.P2POp(dist.isend, op.tensor, op.dest_rank, group=self.group),
+                    self._p2p_op(dist.isend, op.tensor, op.dest_rank, group=self.group),
                 )
             )
         send_count = len(remote_sends)
@@ -573,7 +580,7 @@ class NCCLCopyService(CopyService):
                     self._task_sort_key(op.task_id, send_count + index),
                     1,
                     index,
-                    dist.P2POp(dist.irecv, op.tensor, op.src_rank, group=self.group),
+                    self._p2p_op(dist.irecv, op.tensor, op.src_rank, group=self.group),
                 )
             )
         ordered_ops.sort(key=lambda item: (item[0], item[1], item[2], item[3]), reverse=reverse)
@@ -609,9 +616,9 @@ class NCCLCopyService(CopyService):
 
         p2p_ops = []
         for op in _sort_peer_queues(remote_sends, "dest_rank"):
-            p2p_ops.append(dist.P2POp(dist.isend, op.tensor, op.dest_rank, group=self.group))
+            p2p_ops.append(self._p2p_op(dist.isend, op.tensor, op.dest_rank, group=self.group))
         for op in _sort_peer_queues(remote_recvs, "src_rank"):
-            p2p_ops.append(dist.P2POp(dist.irecv, op.tensor, op.src_rank, group=self.group))
+            p2p_ops.append(self._p2p_op(dist.irecv, op.tensor, op.src_rank, group=self.group))
         return p2p_ops
 
     def _build_nccl_round_p2p_ops(self, remote_sends: List[SendOp], remote_recvs: List[RecvOp]):
@@ -640,7 +647,7 @@ class NCCLCopyService(CopyService):
                 if send_queue:
                     op = send_queue.pop(0)
                     p2p_ops.append(
-                        dist.P2POp(dist.isend, op.tensor, op.dest_rank, group=self.group)
+                        self._p2p_op(dist.isend, op.tensor, op.dest_rank, group=self.group)
                     )
                     progressed = True
                     if not send_queue:
@@ -650,7 +657,7 @@ class NCCLCopyService(CopyService):
                 if recv_queue:
                     op = recv_queue.pop(0)
                     p2p_ops.append(
-                        dist.P2POp(
+                        self._p2p_op(
                             dist.irecv, op.tensor, op.src_rank, group=self.group
                         )
                     )
@@ -665,13 +672,13 @@ class NCCLCopyService(CopyService):
             # FIFO order rather than spinning forever.
             for peer in sorted(send_queues):
                 op = send_queues[peer].pop(0)
-                p2p_ops.append(dist.P2POp(dist.isend, op.tensor, op.dest_rank, group=self.group))
+                p2p_ops.append(self._p2p_op(dist.isend, op.tensor, op.dest_rank, group=self.group))
                 if not send_queues[peer]:
                     del send_queues[peer]
                 break
             for peer in sorted(recv_queues):
                 op = recv_queues[peer].pop(0)
-                p2p_ops.append(dist.P2POp(dist.irecv, op.tensor, op.src_rank, group=self.group))
+                p2p_ops.append(self._p2p_op(dist.irecv, op.tensor, op.src_rank, group=self.group))
                 if not recv_queues[peer]:
                     del recv_queues[peer]
                 break

@@ -194,7 +194,12 @@ def run(config):
                 for child, record in children.children:
                     require(child.poll() in (None, 0), f"{record['role']} exited {child.returncode}")
 
-            result = control(config, bus, journal, check)
+            if config.get("probe") == "step02_topology_rebind":
+                from topology_probe import control as topology_control
+
+                result = topology_control(config, bus, journal, check)
+            else:
+                result = control(config, bus, journal, check)
             require(supervisor.wait(timeout=30) == 0, "SL3060 supervisor exit failed")
         else:
             require(supervisor.wait(timeout=config["launch_timeout_s"] - 30) == 0, "SL3061 supervisor failed")

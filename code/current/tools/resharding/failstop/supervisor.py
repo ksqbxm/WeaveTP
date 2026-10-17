@@ -90,7 +90,9 @@ class Supervisor:
                    "TORCH_FR_DUMP_TEMP_FILE": str(self.root / f"flight_{slot}_"),
                    "TORCH_NCCL_TRACE_BUFFER_SIZE": "10000"}
             child, record = self.children.spawn(
-                [sys.executable, str(HERE / "worker.py"), "--config", str(self.root / "worker_config.json"),
+                [sys.executable, str(HERE / ("topology_worker.py" if self.config.get("probe") ==
+                                            "step02_topology_rebind" else "worker.py")),
+                 "--config", str(self.root / "worker_config.json"),
                  "--slot", str(slot), "--epoch", str(epoch)],
                 "worker", row["gpu_uuid"], env,
                 replacement_for=previous[0].pid if previous else None)
@@ -254,7 +256,12 @@ def main():
         journal.event("process_exit")
         return
     _, bus = connect(config)
-    supervisor = Supervisor(config, bus, journal)
+    if config.get("probe") == "step02_topology_rebind" and config["mode"] == "emulate":
+        from topology_probe import EmulateSupervisor
+
+        supervisor = EmulateSupervisor(config, bus, journal)
+    else:
+        supervisor = Supervisor(config, bus, journal)
     try:
         supervisor.run()
     except Exception:

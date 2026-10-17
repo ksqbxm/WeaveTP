@@ -13,6 +13,13 @@ from megatron.core.hyper_comm_grid import HyperCommGrid
 from megatron.core.process_groups_config import ProcessGroupCollection
 
 
+def build_replica_pg_collections(replicas, **kwargs):
+    """Opt-in explicit-rank replica groups; homogeneous inference is unchanged."""
+    from megatron.core.failstop import build_replica_pg_collections as build
+
+    return build(replicas, **kwargs)
+
+
 def build_inference_pg_collection(
     world_size: int,
     tp_size: Optional[int] = None,
