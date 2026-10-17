@@ -39,6 +39,7 @@ class Supervisor:
         self.root = Path(config["output"])
         self.children = Children(config, self.root, journal)
         self.workers, self.killed = {}, {}
+        self.foreign = {}
         self.state = "preflight"
 
     def transition(self, expected, target):
@@ -54,12 +55,22 @@ class Supervisor:
     def wait(self, keys, timeout=None):
         return self.bus.wait(keys, timeout=timeout, check=self.check_alive)
 
+    @property
+    def task_pids(self):
+        return {record["pid"] for _, record in self.children.children}
+
     def inspect(self, name, expected=None):
         raw = self.root / f"{name}_raw.jsonl"
         snapshot = gpu_snapshot(raw)
         mps = mps_snapshot(raw, snapshot, self.config.get("mps_pipe"))
-        check_gpu_processes(snapshot, mps, expected)
-        write_json(self.root / f"{name}.json", {"gpu": snapshot, "mps": mps})
+        foreign = check_gpu_processes(snapshot, mps, expected, self.config["shared_gpu_mode"], self.task_pids)
+        if name == "preflight":
+            self.foreign = foreign
+        new_foreign = {uuid: [p for p in processes if p["pid"] not in
+                             {old["pid"] for old in self.foreign.get(uuid, [])}]
+                       for uuid, processes in foreign.items()}
+        write_json(self.root / f"{name}.json", {"gpu": snapshot, "mps": mps,
+                   "shared_gpu_mode": self.config["shared_gpu_mode"], "foreign": foreign, "new_foreign": new_foreign})
         return snapshot, mps
 
     def start_workers(self, slots, epoch):
@@ -125,7 +136,7 @@ class Supervisor:
         self.transition("killing", "reclaiming")
         selected = {self.config["topology"][s]["gpu_uuid"]: baselines[self.config["topology"][s]["gpu_uuid"]]
                     for s in victims}
-        tracker = Reclaim(selected, allowed, self.config)
+        tracker = Reclaim(selected, allowed, self.config, self.task_pids)
         deadline = time.monotonic() + self.config["reclaim_timeout_s"]
         while time.monotonic() < deadline:
             self.check_alive()
@@ -134,7 +145,7 @@ class Supervisor:
             append_json(self.root / "gpu_reclaim_samples.jsonl", {**sample,
                         "t": sample["end_local"] + self.journal.offset,
                         "clock_error_s": self.journal.error, "streak": tracker.streak,
-                        "confirmed_local": tracker.confirmed})
+                        "confirmed_local": tracker.confirmed, "task_usage": tracker.task_usage})
             if done:
                 details = {}
                 for slot in victims:
@@ -144,7 +155,8 @@ class Supervisor:
                                      "confirmed_t": tracker.confirmed[uuid] + self.journal.offset,
                                      "gpu_reclaim_s": tracker.confirmed[uuid] - signals[slot]["t_local"]}
                 result = {"cards": details, "t_done": max(tracker.confirmed.values()) + self.journal.offset,
-                          "clock_error_s": self.journal.error}
+                          "clock_error_s": self.journal.error, "shared_gpu_mode": self.config["shared_gpu_mode"],
+                          "task_pids": sorted(self.task_pids), "task_usage": tracker.task_usage}
                 write_json(self.root / "gpu_reclaim.json", result)
                 self.bus.put("reclaimed", result)
                 self.transition("reclaiming", "reclaimed")
@@ -166,7 +178,7 @@ class Supervisor:
         for _ in range(self.config["stable_samples"] - 1):
             time.sleep(self.config["sample_s"])
             sample = gpu_snapshot(self.root / "baseline_raw.jsonl")
-            check_gpu_processes(sample, mps)
+            check_gpu_processes(sample, mps, shared_gpu_mode=self.config["shared_gpu_mode"])
             samples.append(sample)
         baselines = baseline_ranges(samples, self.config)
         write_json(self.root / "baseline.json", {"samples": samples, "ranges": baselines})
@@ -188,7 +200,7 @@ class Supervisor:
             expected = {p.pid: r["gpu_uuid"] for s, (p, r) in self.workers.items() if s not in victims}
             before_spawn, _ = self.inspect("rejoin_pre_spawn", expected)
             for gpu in before_spawn["gpus"]:
-                if gpu["uuid"] in {self.config["topology"][s]["gpu_uuid"] for s in victims}:
+                if not self.config["shared_gpu_mode"] and gpu["uuid"] in {self.config["topology"][s]["gpu_uuid"] for s in victims}:
                     require(gpu["used_mib"] <= baselines[gpu["uuid"]]["threshold_mib"],
                             "reclaimed GPU memory rose before spawn")
             self.start_workers(victims, 2)
@@ -205,12 +217,14 @@ class Supervisor:
                     f"worker failed at exit: {child.pid}")
             self.children.exited(child, record, "normal")
         # Cleanup evidence covers all eight GPUs, including the returned workers.
-        tracker = Reclaim(baselines, mps["servers"], self.config)
+        tracker = Reclaim(baselines, mps["servers"], self.config, self.task_pids)
         deadline = time.monotonic() + self.config["reclaim_timeout_s"]
         while time.monotonic() < deadline:
             sample = gpu_snapshot(self.root / "cleanup_gpu_raw.jsonl")
-            append_json(self.root / "cleanup_gpu_samples.jsonl", sample)
-            if tracker.update(sample["gpus"], True, sample["end_local"]):
+            done = tracker.update(sample["gpus"], True, sample["end_local"])
+            append_json(self.root / "cleanup_gpu_samples.jsonl", {**sample, "task_usage": tracker.task_usage,
+                        "streak": tracker.streak, "confirmed_local": tracker.confirmed})
+            if done:
                 self.inspect("final_mps")
                 self.bus.put(f"clean/{node}", self.journal.event("cleanup_verified"))
                 return

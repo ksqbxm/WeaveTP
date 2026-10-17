@@ -71,7 +71,7 @@ def control(config, bus, journal, check):
     for node, report in zip(NODES, preflight):
         require(report["host"].split(".")[0].upper() == node, f"{node} is running on wrong host: {report['host']}")
         for key in ("commit", "launch", "kind", "port", "tensor_elements", "memory_slack_mib",
-                    "stable_samples", "sample_s", "reclaim_timeout_s", "stage_timeout_s"):
+                    "stable_samples", "sample_s", "reclaim_timeout_s", "stage_timeout_s", "shared_gpu_mode"):
             require(report["config"][key] == config[key], f"node configuration differs: {key}")
     rows = topology(dict(zip(NODES, [r["gpus"] for r in preflight])))
     victims = failed_slots(rows)
@@ -152,6 +152,7 @@ def control(config, bus, journal, check):
     metrics["edp1_shrink_pause_max_s"] = max(p["seconds"] for p in pauses if p["epoch"] == 1)
     metrics["edp1_rejoin_pause_max_s"] = max(p["seconds"] for p in pauses if p["epoch"] == 2)
     result = {"status": "passed", "kind": config["kind"], "launch": config["launch"],
+              "shared_gpu_mode": config["shared_gpu_mode"],
               "commit": config["commit"], "metrics": metrics, "timing": timing,
               "clock_calibration": calibrations, "gpu_reclaim": reclaimed,
               "kill_signals": signals, "aborts": {1: abort1, 2: abort2},
@@ -169,7 +170,8 @@ def run(config):
     children = Children(config, root, journal)
     journal.event("process_start")
     bus = None
-    result = {"status": "failed", "kind": config["kind"], "launch": config["launch"]}
+    result = {"status": "failed", "kind": config["kind"], "launch": config["launch"],
+              "shared_gpu_mode": config["shared_gpu_mode"]}
     try:
         argv = [sys.executable, str(HERE / "supervisor.py"), "--config", str(root / "config.json")]
         _, bus = connect(config)

@@ -173,7 +173,8 @@ class ControlTests(unittest.TestCase):
             common.join_timing(1, 4, 16, 17, 15)
 
     def test_summary_never_hides_failed_or_missing_launches(self):
-        results = [{**c, "status": "passed", "metrics": {"abort_s": c["index"] + 1}} for c in run_probe.matrix("cpu")]
+        results = [{**c, "status": "passed", "shared_gpu_mode": False,
+                    "metrics": {"abort_s": c["index"] + 1}} for c in run_probe.matrix("cpu")]
         summary = common.summarize(results)
         self.assertTrue(summary["accepted"])
         self.assertEqual(summary["groups"]["idle"]["metrics"]["abort_s"]["mean"], 5.5)

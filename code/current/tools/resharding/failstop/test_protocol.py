@@ -100,11 +100,12 @@ class ProtocolTests(unittest.TestCase):
 
     def test_controller_full_lifecycle_over_real_tcpstore(self):
         for kind in ("idle", "inflight"):
-            with self.subTest(kind=kind), tempfile.TemporaryDirectory() as directory:
-                self.exercise(kind, directory)
+            for shared in (False, True):
+                with self.subTest(kind=kind, shared=shared), tempfile.TemporaryDirectory() as directory:
+                    self.exercise(kind, directory, shared)
 
     @patch.object(controller.signal, "SIGKILL", 9, create=True)
-    def exercise(self, kind, directory):
+    def exercise(self, kind, directory, shared):
         server = dist.TCPStore("127.0.0.1", 0, world_size=None, is_master=True,
                                wait_for_workers=False, timeout=timedelta(seconds=5), use_libuv=False)
         client = dist.TCPStore("127.0.0.1", server.port, world_size=None, is_master=False,
@@ -112,7 +113,7 @@ class ProtocolTests(unittest.TestCase):
         bus = common.Bus(dist.PrefixStore("cpu-control/", server), timeout=5)
         remote = common.Bus(dist.PrefixStore("cpu-control/", client), timeout=5)
         config = {**common.DEFAULTS, "output": directory, "launch": f"cpu_{kind}", "kind": kind,
-                  "commit": "cpu-fixture", "port": server.port, "startup_timeout_s": 5}
+                  "commit": "cpu-fixture", "port": server.port, "startup_timeout_s": 5, "shared_gpu_mode": shared}
         inventory = {node: [{"index": i, "uuid": f"GPU-{node}-{i}"} for i in range(8)] for node in common.NODES}
         rows = common.topology(inventory)
         victims = common.failed_slots(rows)
@@ -199,6 +200,7 @@ class ProtocolTests(unittest.TestCase):
         self.assertFalse(thread.is_alive())
         self.assertEqual(errors, [])
         self.assertEqual(result["status"], "passed")
+        self.assertEqual(result["shared_gpu_mode"], shared)
         self.assertEqual([len(result["epochs"][e]) for e in range(3)], [16, 12, 16])
         events = [json.loads(line)["stage"] for line in (Path(directory) / "events.jsonl").read_text().splitlines()]
         for earlier, later in (("kill", "transition/1"), ("reclaim_received", "spawn"), ("transition/2", "build/2")):

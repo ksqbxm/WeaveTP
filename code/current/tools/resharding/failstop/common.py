@@ -9,8 +9,10 @@ from datetime import timedelta
 from pathlib import Path
 
 NODES = ("SL3060", "SL3061")
+SHARED_GPU_NOTE = "与其他任务共享 GPU，仅用于正确性和可行性判断，各阶段耗时不作为正式数据"
 FAIL_COORDS = {(0, 0), (0, 1), (1, 0), (1, 1)}  # (ep, etp)
 DEFAULTS = {
+    "shared_gpu_mode": False,
     "sample_s": 0.1,
     "stable_samples": 3,
     "memory_slack_mib": 8,
@@ -140,8 +142,11 @@ class Journal:
 
 
 class Reclaim:
-    def __init__(self, baselines, allowed_pids, config):
+    def __init__(self, baselines, allowed_pids, config, task_pids=()):
         self.baselines, self.allowed_pids, self.config = baselines, set(allowed_pids), config
+        self.task_pids = set(task_pids)
+        require(not config["shared_gpu_mode"] or self.task_pids, "shared reclaim requires registered task PIDs")
+        self.task_usage = {}
         self.streak = {uuid: 0 for uuid in baselines}
         self.confirmed = {}
 
@@ -149,8 +154,17 @@ class Reclaim:
         indexed = {g["uuid"]: g for g in gpus}
         for uuid, baseline in self.baselines.items():
             gpu = indexed[uuid]
-            clean = (exited and gpu["used_mib"] <= baseline["max_mib"] + self.config["memory_slack_mib"]
-                     and all(p["pid"] in self.allowed_pids for p in gpu["processes"]))
+            if self.config["shared_gpu_mode"]:
+                owned = [p for p in gpu["processes"] if p["pid"] in self.task_pids]
+                memory = [p["used_mib"] for p in owned]
+                self.task_usage[uuid] = {"pids": [p["pid"] for p in owned],
+                                         "used_mib": None if None in memory else sum(memory)}
+                # No task entries means zero task-accounted memory. A PID still
+                # listed blocks reclamation even if its memory reads 0 or N/A.
+                clean = exited and not owned
+            else:
+                clean = (exited and gpu["used_mib"] <= baseline["max_mib"] + self.config["memory_slack_mib"]
+                         and all(p["pid"] in self.allowed_pids for p in gpu["processes"]))
             self.streak[uuid] = self.streak[uuid] + 1 if clean else 0
             if not clean:
                 self.confirmed.pop(uuid, None)
@@ -165,9 +179,10 @@ def baseline_ranges(samples, config):
     for gpu in samples[0]["gpus"]:
         values = [next(g["used_mib"] for g in s["gpus"] if g["uuid"] == gpu["uuid"])
                   for s in samples]
-        require(max(values) - min(values) <= config["baseline_noise_mib"], "unstable GPU baseline")
+        if not config["shared_gpu_mode"]:
+            require(max(values) - min(values) <= config["baseline_noise_mib"], "unstable GPU baseline")
         result[gpu["uuid"]] = {"min_mib": min(values), "max_mib": max(values),
-                               "threshold_mib": max(values) + config["memory_slack_mib"]}
+                               "threshold_mib": None if config["shared_gpu_mode"] else max(values) + config["memory_slack_mib"]}
     return result
 
 
@@ -183,7 +198,8 @@ def join_timing(kill, reclaim_done, request, spawn, ready):
             "join_interval": [request, ready]}
 
 
-def summarize(results):
+def summarize(results, shared_gpu_mode=False):
+    require(all(r["shared_gpu_mode"] == shared_gpu_mode for r in results), "mixed GPU modes in summary")
     groups = {}
     for kind in ("idle", "inflight"):
         rows = [r for r in results if r["kind"] == kind]
@@ -197,4 +213,6 @@ def summarize(results):
         groups[kind] = {"count": len(rows), "passed": len(good), "metrics": metrics}
     passed = all(groups[k]["count"] == groups[k]["passed"] == 10 for k in groups)
     return {"accepted": passed, "groups": groups, "launches": results,
+            "shared_gpu_mode": shared_gpu_mode,
+            "timing_note": SHARED_GPU_NOTE if shared_gpu_mode else "exclusive GPU acceptance",
             "real_integration": "requires_user_confirmation"}

@@ -39,9 +39,12 @@ def gpu_snapshot(log):
             require(text.endswith(unit), f"unreadable GPU field {path}: {text}")
             return int(text[:-len(unit)].strip())
 
-        processes = [{"pid": int(p.findtext("pid")), "name": p.findtext("process_name"),
-                      "type": p.findtext("type")}
-                     for p in gpu.findall("processes/process_info")]
+        processes = []
+        for process in gpu.findall("processes/process_info"):
+            memory = process.findtext("used_memory", "N/A").strip()
+            processes.append({"pid": int(process.findtext("pid")), "name": process.findtext("process_name"),
+                              "type": process.findtext("type"), "used_memory_raw": memory,
+                              "used_mib": int(memory[:-3].strip()) if memory.endswith("MiB") else None})
         require(gpu.find("processes") is not None and gpu.findtext("processes", "").strip() != "N/A",
                 "GPU process inventory unavailable")
         gpus.append({"index": index, "uuid": gpu.findtext("uuid"),
@@ -120,22 +123,29 @@ def mps_snapshot(log, snapshot, explicit_pipe=None):
     return result
 
 
-def check_gpu_processes(snapshot, mps, expected=None):
+def check_gpu_processes(snapshot, mps, expected=None, shared_gpu_mode=False, task_pids=()):
     """expected maps PID to UUID; an MPS server is allowed only with no clients."""
     expected = expected or {}
+    require(len(set(expected.values())) == len(expected), "worker GPU UUID assignment is not one-to-one")
     require(not mps["clients"], f"existing MPS clients present: {mps['clients']}")
-    found = {}
+    found, foreign = {}, {g["uuid"]: [] for g in snapshot["gpus"]}
     for gpu in snapshot["gpus"]:
-        if not expected:
+        if not expected and not shared_gpu_mode:
             require(gpu["util_percent"] == 0, f"busy GPU {gpu['uuid']}")
         for process in gpu["processes"]:
             pid = process["pid"]
             if pid in mps["servers"] and Path(process["name"]).name == "nvidia-cuda-mps-server":
+                foreign[gpu["uuid"]].append(process)
                 continue
-            require(pid in expected, f"unrelated GPU process {process} on {gpu['uuid']}")
+            if pid not in expected:
+                require(pid not in task_pids, f"unexpected registered GPU process {process} on {gpu['uuid']}")
+                require(shared_gpu_mode, f"unrelated GPU process {process} on {gpu['uuid']}")
+                foreign[gpu["uuid"]].append(process)
+                continue
             require(expected[pid] == gpu["uuid"], "worker CUDA context on wrong GPU")
             found[pid] = gpu["uuid"]
     require(found == expected, f"missing independent GPU contexts: {set(expected)-set(found)}")
+    return foreign
 
 
 def start_ticks(pid):

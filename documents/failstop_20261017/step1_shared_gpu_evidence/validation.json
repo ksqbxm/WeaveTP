@@ -1,0 +1,175 @@
+{
+  "baseline_commit": "81e6811306b3d69210612e43cac370301da36d89",
+  "python": "3.13.12 | packaged by conda-forge | (main, Feb  5 2026, 05:41:12) [MSC v.1944 64 bit (AMD64)]",
+  "platform": "win32",
+  "gpu_executed": false,
+  "commands": [
+    {
+      "name": "isort",
+      "argv": [
+        "C:\\Users\\ksqbx\\miniforge3\\python.exe",
+        "-m",
+        "uv",
+        "run",
+        "--no-project",
+        "--with",
+        "isort==5.13.2",
+        "isort",
+        "code/current/tools/resharding/failstop"
+      ],
+      "exit_code": 0
+    },
+    {
+      "name": "compile",
+      "argv": [
+        "C:\\Users\\ksqbx\\miniforge3\\python.exe",
+        "-X",
+        "utf8",
+        "-m",
+        "compileall",
+        "-q",
+        "code/current/tools/resharding/failstop"
+      ],
+      "exit_code": 0
+    },
+    {
+      "name": "static",
+      "argv": [
+        "C:\\Users\\ksqbx\\miniforge3\\python.exe",
+        "-m",
+        "uv",
+        "run",
+        "--no-project",
+        "--with",
+        "ruff",
+        "ruff",
+        "check",
+        "--select",
+        "F",
+        "code/current/tools/resharding/failstop"
+      ],
+      "exit_code": 0
+    },
+    {
+      "name": "cpu_tests",
+      "argv": [
+        "C:\\Users\\ksqbx\\miniforge3\\python.exe",
+        "-B",
+        "-X",
+        "utf8",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "code/current/tools/resharding/failstop",
+        "-p",
+        "test_*.py",
+        "-v"
+      ],
+      "exit_code": 0
+    },
+    {
+      "name": "default_dry_run",
+      "argv": [
+        "C:\\Users\\ksqbx\\miniforge3\\python.exe",
+        "-B",
+        "-X",
+        "utf8",
+        "code/current/tools/resharding/failstop/run_probe.py",
+        "--node",
+        "SL3060",
+        "--suite-id",
+        "cpu_default",
+        "--output",
+        "/data/step01_real_probe/cpu_default",
+        "--dry-run"
+      ],
+      "exit_code": 0
+    },
+    {
+      "name": "shared_SL3060_dry_run",
+      "argv": [
+        "C:\\Users\\ksqbx\\miniforge3\\python.exe",
+        "-B",
+        "-X",
+        "utf8",
+        "code/current/tools/resharding/failstop/run_probe.py",
+        "--node",
+        "SL3060",
+        "--suite-id",
+        "cpu_shared",
+        "--output",
+        "/data/step01_real_probe/cpu_shared",
+        "--allow-foreign-gpu-processes",
+        "--dry-run"
+      ],
+      "exit_code": 0
+    },
+    {
+      "name": "shared_SL3061_dry_run",
+      "argv": [
+        "C:\\Users\\ksqbx\\miniforge3\\python.exe",
+        "-B",
+        "-X",
+        "utf8",
+        "code/current/tools/resharding/failstop/run_probe.py",
+        "--node",
+        "SL3061",
+        "--suite-id",
+        "cpu_shared",
+        "--output",
+        "/data/step01_real_probe/cpu_shared",
+        "--allow-foreign-gpu-processes",
+        "--dry-run"
+      ],
+      "exit_code": 0
+    },
+    {
+      "name": "shared_shrink_dry_run",
+      "argv": [
+        "C:\\Users\\ksqbx\\miniforge3\\python.exe",
+        "-B",
+        "-X",
+        "utf8",
+        "code/current/tools/resharding/failstop/run_probe.py",
+        "--node",
+        "SL3060",
+        "--suite-id",
+        "cpu_shrink",
+        "--output",
+        "/data/step01_real_probe/cpu_shrink",
+        "--allow-foreign-gpu-processes",
+        "--optional-shrink",
+        "--dry-run"
+      ],
+      "exit_code": 0
+    },
+    {
+      "name": "diff_check",
+      "argv": [
+        "git",
+        "diff",
+        "--check"
+      ],
+      "exit_code": 0
+    }
+  ],
+  "source_sha256": {
+    "code/current/tools/resharding/failstop/common.py": "1a5b19869fd54565682aae8535c2e79f25438aca210656ca7bf2cfd2da4f2c12",
+    "code/current/tools/resharding/failstop/controller.py": "b3709c4efd4738d9b2bcdfd9d049accd18594cc53f312ea434efbfeb4159abb6",
+    "code/current/tools/resharding/failstop/run_probe.py": "5410340ed67db0c60d34db59013cd5a579dad190ad6ed10e1685b3de022dcd7e",
+    "code/current/tools/resharding/failstop/safety.py": "1aafb808dc033ae383373827cf98b2e4956797700901cea4b65ff2c9dbd7647e",
+    "code/current/tools/resharding/failstop/supervisor.py": "3cdb45ab1d7aa7b4b60cd8505c7f1a786ecc44a2fc945f66ae2ac47667d6dfb2",
+    "code/current/tools/resharding/failstop/test_cleanup.py": "378a521e1feae010a39e2af01e90cdff335d9738b5a2a007f3e86afd47f78a24",
+    "code/current/tools/resharding/failstop/test_probe.py": "50773b461e9c33e69862f18aba87cdcfe49d835fbe710a3e3c1277fd09bfa765",
+    "code/current/tools/resharding/failstop/test_protocol.py": "804b61153ec05f09e636ddb7f7f5edb45dcc4fd1a0c36399a07c77eb96aa0860",
+    "code/current/tools/resharding/failstop/test_shared_gpu.py": "6a2b3ab5c15daee33ec39d8d5d0cbd4a156badc0c45c28132968ba6d151a5e94",
+    "code/current/tools/resharding/failstop/worker.py": "189ed3ed37598eb0497aa4343adaa44637e90db102002d41f707bc885ed67dbb"
+  },
+  "required_files_before_status_updates": {
+    "CODEX.md": "c5f5547d74937bea8323a8626b06509ee2235b60013dd01c4235e2631faf0179",
+    "code/current/AGENTS.md": "3c070ba5881775cd6c9681946a39b68b42f9b01c130e088632fd5d2e8b086fc1",
+    "documents/failstop_20261017/00_总计划.md": "752b9ac628c422e6d89b972d4034906a13d192b22bfaa3e5be7c51a0560b4bf7",
+    "documents/failstop_20261017/01_Step1_real可行性.md": "4a442ce4d23b3090ba91c412e825f889d2170d521ec11dca7dda90f77b0175b5"
+  }
+}

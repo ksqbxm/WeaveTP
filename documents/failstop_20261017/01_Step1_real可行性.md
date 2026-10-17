@@ -56,6 +56,14 @@ NVIDIA 文档说明管道变量控制连接位置，并列出绕开 MPS 的设�
 
 官方 PyTorch 2.11 源码包含 shrink 接口和实验性 `_abort_process_group`，后者建议 `TORCH_NCCL_ASYNC_ERROR_HANDLING=0`；实施时核查并记录实际环境。[PyTorch 2.11 源码](https://github.com/pytorch/pytorch/blob/v2.11.0/torch/distributed/distributed_c10d.py)。NCCL API 说明见 [2.28 communicator 文档](https://docs.nvidia.com/deeplearning/nccl/archives/nccl_2287/user-guide/docs/api/comms.html)。重建具有环境可行性风险，因此必须先走本步关口。
 
+### 3.5 可选共享 GPU 正确性模式（用户 2026-10-17 补充授权）
+
+`--allow-foreign-gpu-processes` 默认关闭。开启后预检记录每 GPU 的 foreign PID、名称和进程显存；利用率和整卡显存波动只作为证据，不作为失败判据。运行中 foreign 和新出现的外部进程均允许并记录，本测试 worker PID 与 GPU UUID 仍须一一对应。MPS 客户端检查、登记身份和 SIGKILL 目标核对保持不变。
+
+回收及最终清理按全部已登记 worker PID 检查：目标进程已经退出、该卡上无本测试 PID 条目（本测试进程显存合计为 0），连续 `stable_samples` 次才确认。仍在表中的本测试 PID，即使显存为 0 或 N/A，也阻止确认。启动前、kill/reclaim、spawn 前及最终清理继续保留整卡显存和进程清单；共享模式整卡基线阈值为 null，其他任务显存变化不影响回收。
+
+`result.json`、`events_actual.json`、summary 均标记 `shared_gpu_mode=true`；summary 注明“与其他任务共享 GPU，仅用于正确性和可行性判断，各阶段耗时不作为正式数据”。该模式 `accepted` 仍要求 10 idle + 10 inflight 全部完成，张量地址/内容、计算、新 world collective、存活 worker 身份及清理确认通过；没有性能数值门槛。超时、崩溃、正确性错误或清理失败仍失败。两节点必须选择相同模式。默认独占模式和第 5 节主验收口径不变。
+
 ## 4. 本地验证
 
 窄范围检查坐标映射、rank 压缩/恢复、唯一 store 前缀、监管器状态机、超时退出、MPS 查询失败不当作空列表、显存阈值与稳定样本、回收等待重叠计时。fake store/process/NVML 的测试只证明控制逻辑；文档明确不能证明 CUDA/NCCL 可行性。校验只会向登记的本任务 PID 发信号。

@@ -11,7 +11,17 @@ import time
 import traceback
 from pathlib import Path
 
-from common import DEFAULTS, NODES, Journal, connect, prefix, require, summarize, write_json
+from common import (
+    DEFAULTS,
+    NODES,
+    SHARED_GPU_NOTE,
+    Journal,
+    connect,
+    prefix,
+    require,
+    summarize,
+    write_json,
+)
 from safety import Children, check_gpu_processes, gpu_snapshot, mps_snapshot, signal_registered
 
 HERE = Path(__file__).resolve().parent
@@ -107,7 +117,8 @@ def run_case(config):
             except Exception:
                 result.update(status="failed", store_cleanup_error=traceback.format_exc())
         write_json(root / "launcher_lifecycle.json", [r for _, r in children.children + service.children])
-    result.update(kind=config["kind"], launch=config["launch"])
+    result.update(kind=config["kind"], launch=config["launch"], shared_gpu_mode=config["shared_gpu_mode"],
+                  timing_note=SHARED_GPU_NOTE if config["shared_gpu_mode"] else "exclusive GPU acceptance")
     write_json(root / "result.json", result)
     if config["node"] == NODES[0]:
         write_json(root / "events_actual.json", result)
@@ -124,8 +135,11 @@ def main():
     parser.add_argument("--mps-pipe", help="actual existing service pipe, for read-only queries only")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--preflight-only", action="store_true")
+    parser.add_argument("--allow-foreign-gpu-processes", action="store_true",
+                        help="share GPUs for correctness only; process-based reclamation, timings are not formal data")
     parser.add_argument("--optional-shrink", action="store_true", help="one separate capability launch; never counts toward 20/20")
     args = parser.parse_args()
+    shared = args.allow_foreign_gpu_processes
     cases = matrix(args.suite_id, args.optional_shrink)
     for case in cases:
         prefix(case["launch"], 0)
@@ -133,7 +147,7 @@ def main():
     require(str(args.output).replace("\\", "/").startswith("/data/") and ".." not in args.output.parts,
             "output must be an absolute /data path")
     if args.dry_run:
-        print(json.dumps({"node": args.node, "defaults": DEFAULTS, "cases": cases,
+        print(json.dumps({"node": args.node, "defaults": DEFAULTS, "cases": cases, "shared_gpu_mode": shared,
                           "ports": [args.port_base + c["index"] for c in cases],
                           "output": str(args.output / args.node)}, indent=2))
         return 0
@@ -147,6 +161,7 @@ def main():
     dirty = subprocess.check_output(["git", "status", "--porcelain"], cwd=HERE, text=True)
     require(not dirty, "server repository must be clean at the delivered commit")
     write_json(root / "invocation.json", {"argv": sys.argv, "commit": commit, "defaults": DEFAULTS,
+                                         "shared_gpu_mode": shared,
                                          "pid": os.getpid(), "start_monotonic": time.monotonic(), "node": args.node,
                                          "original_environment": {k: v for k, v in os.environ.items()
                                                                   if k.startswith(("NCCL_", "TORCH_", "CUDA_", "PYTORCH_", "UCX_", "GLOO_", "FI_"))}})
@@ -161,36 +176,40 @@ def main():
         try:
             snapshot = gpu_snapshot(root / "preflight_raw.jsonl")
             mps = mps_snapshot(root / "preflight_raw.jsonl", snapshot, args.mps_pipe)
-            check_gpu_processes(snapshot, mps)
-            write_json(root / "preflight.json", {"status": "passed", "snapshot": snapshot, "mps": mps})
+            foreign = check_gpu_processes(snapshot, mps, shared_gpu_mode=shared)
+            write_json(root / "preflight.json", {"status": "passed", "snapshot": snapshot, "mps": mps,
+                                                 "shared_gpu_mode": shared, "foreign": foreign})
             return 0
         except Exception:
-            write_json(root / "preflight.json", {"status": "failed", "traceback": traceback.format_exc()})
+            write_json(root / "preflight.json", {"status": "failed", "traceback": traceback.format_exc(),
+                                                 "shared_gpu_mode": shared})
             raise
     results = []
     for case in cases:
         if results and results[-1]["status"] != "passed":
-            results.append({**case, "status": "not_run", "reason": "prior launch failed; preserve evidence"})
+            results.append({**case, "status": "not_run", "reason": "prior launch failed; preserve evidence",
+                            "shared_gpu_mode": shared})
             continue
         config = {**DEFAULTS, **case, "output": str(root / case["launch"]), "node": args.node,
                   "master": args.master, "port": args.port_base + case["index"],
-                  "mps_pipe": args.mps_pipe, "commit": commit}
+                  "mps_pipe": args.mps_pipe, "commit": commit, "shared_gpu_mode": shared}
         print(f"Starting {case['launch']} on {args.node}", flush=True)
         result = run_case(config)
         results.append(result)
         write_json(root / "progress.json", results)
         print(f"{case['launch']}: {result['status']}", flush=True)
-    summary = summarize(results)
+    summary = summarize(results, shared)
     if args.node != "SL3060" or args.optional_shrink:
         summary["accepted"] = False
         summary["acceptance_note"] = "main 20-launch acceptance is only reported by SL3060"
     write_json(root / "summary.json", summary)
-    with (root / "summary.csv").open("w", newline="") as stream:
+    with (root / "summary.csv").open("w", newline="", encoding="utf-8") as stream:
         writer = csv.writer(stream)
-        writer.writerow(["kind", "metric", "count", "mean", "sample_std", "max"])
+        writer.writerow(["kind", "metric", "count", "mean", "sample_std", "max", "shared_gpu_mode", "timing_note"])
         for kind, group in summary["groups"].items():
             for key, values in group["metrics"].items():
-                writer.writerow([kind, key, values["count"], values["mean"], values["sample_std"], values["max"]])
+                writer.writerow([kind, key, values["count"], values["mean"], values["sample_std"], values["max"],
+                                 shared, summary["timing_note"]])
     print(f"Evidence: {root}; main acceptance={summary['accepted']}", flush=True)
     return 0 if all(r["status"] == "passed" for r in results) else 1
 
