@@ -1,6 +1,7 @@
 """Explicit Step 2/3/4 suites. Nothing runs unless invoked; default mode is emulate."""
 
 import argparse
+import hashlib
 import json
 import math
 import os
@@ -73,6 +74,9 @@ def main(argv=None, *, step=2):
         parser.add_argument('--host-library-mode', choices=('full', 'on-demand'), default='on-demand')
         parser.add_argument('--profile-only', action='store_true',
                             help='collect the world16 profile only: no fault, no migration, accepted=false')
+        parser.add_argument('--profile-file', type=Path,
+                            help='frozen profile.json of an earlier launch; plans of default- and deterministic-mode '
+                                 'launches are comparable only over one profile (Step 5 §2.1)')
     if step == 4:
         parser.add_argument('--weight-elements', type=int, default=8388608,
                             help='float32 elements per full expert weight; large enough that the TP2->TP4 transfer spans several decode steps')
@@ -82,6 +86,11 @@ def main(argv=None, *, step=2):
         require(args.weight_elements >= 64 and args.weight_elements % 4 == 0 and args.memory_budget_mib > 0,
                 'invalid weight size or memory budget')
     profile_only = step == 3 and args.profile_only
+    profile_sha256 = None
+    if step == 3 and args.profile_file:
+        require(not profile_only, '--profile-file and --profile-only are exclusive')
+        frozen = json.loads(args.profile_file.read_text(encoding='utf-8'))
+        profile_sha256 = hashlib.sha256(json.dumps(frozen, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
     correctness_only = args.correctness_only or args.quick
     mode_flags = {'quick_mode': args.quick, 'correctness_only': correctness_only,
                   'shared_gpu_mode': correctness_only, 'timing_valid': not correctness_only}
@@ -95,7 +104,8 @@ def main(argv=None, *, step=2):
     if args.dry_run:
         print(json.dumps({'cases': selected, **mode_flags, 'output': str(args.output), 'node': args.node,
                           'step': step, 'profile_only': profile_only,
-                          **({'host_library_mode': args.host_library_mode} if step == 3 else {})}, indent=2))
+                          **({'host_library_mode': args.host_library_mode, 'profile_sha256': profile_sha256}
+                             if step == 3 else {})}, indent=2))
         return 0
     require(sys.platform == 'linux' and Path('/data').is_mount(), 'requires Linux and mounted /data')
     require(args.output.resolve().is_relative_to(Path('/data').resolve()), 'output escapes /data')
@@ -132,7 +142,9 @@ def main(argv=None, *, step=2):
                   'reclaim_timeout_s': min(120 if correctness_only else 60, remaining - 20),
                   'launch_timeout_s': remaining}
         if step == 3:
-            config.update(host_library_mode=args.host_library_mode, source_width=4096 if args.quick else 262144)
+            config.update(host_library_mode=args.host_library_mode, source_width=4096 if args.quick else 262144,
+                          profile_file=None if args.profile_file is None else str(args.profile_file),
+                          profile_sha256=profile_sha256)
         if step == 4:
             config.update(weight_elements=args.weight_elements, memory_budget_bytes=args.memory_budget_mib << 20)
         print(f"Starting {case['launch']} mode={case['mode']} rounds={case['rounds']}", flush=True)

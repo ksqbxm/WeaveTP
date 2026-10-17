@@ -23,10 +23,13 @@ class QuickTests(unittest.TestCase):
             logs.mkdir(parents=True)
             run = root / 's2q_cpu'
             (run / 'SL3060').mkdir(parents=True)
-            (run / 'SL3060' / 'summary.json').write_text(json.dumps({
-                'all_cases_passed': True, 'quick_mode': True, 'correctness_only': True,
-                'shared_gpu_mode': True, 'timing_valid': False, 'accepted': False,
-                'emulate': 'passed', 'real': 'passed', 'edp1_rejoin_pause_s': None if failure == 'metric' else 0.5}))
+            flags = {'quick_mode': True, 'correctness_only': True, 'shared_gpu_mode': True, 'timing_valid': False, 'accepted': False}
+            summary = ({**flags, 'all_checks_passed': True, 'layouts_requested': ['tp2'],
+                        'deterministic_step_time_ratio': {} if failure == 'metric' else {'tp2': {'median_ratio': 1.25}}}
+                       if step == 5 else
+                       {**flags, 'all_cases_passed': True, 'emulate': 'passed', 'real': 'passed',
+                        'edp1_rejoin_pause_s': None if failure == 'metric' else 0.5})
+            (run / 'SL3060' / 'summary.json').write_text(json.dumps(summary))
             state, calls = {'head': 'a' * 40}, []
             def git(argv, **kwargs):
                 args = argv[3:]
@@ -70,6 +73,8 @@ class QuickTests(unittest.TestCase):
                 self.assertIn(['checkout', '--detach', quick_driver.BASE], calls)
                 argv = popen.call_args.args[0]
                 self.assertEqual(float(argv[argv.index('--min-free-disk-gb') + 1]), 1.0 if min_free is None else min_free)
+                self.assertEqual(('--mode' in argv, argv[2].endswith({5: 'run_model.py', 4: 'run_async.py', 3: 'run_sources.py',
+                                                                      2: 'run_topology.py'}[step])), (step != 5, True))
                 self.assertEqual((logs / 'runner.log').read_bytes(), child_output)
             else:
                 self.assertFalse(any(c[0] == 'checkout' for c in calls))
@@ -99,6 +104,16 @@ class QuickTests(unittest.TestCase):
         for failure in ('suite', 'restore', 'package', 'dirty', 'timeout', 'metric'):
             self.assertEqual(self.run_driver(step=4, failure=failure)['result'], 'FAIL')
         self.assertEqual(self.run_driver(step=4, peer='FAIL')['result'], 'FAIL')
+
+    def test_step5_requires_ratio_per_layout_and_prints_its_own_line(self):
+        result = self.run_driver(step=5)
+        self.assertEqual((result['result'], result['step'], result['layouts']), ('PASS', 5, ['tp2']))
+        self.assertEqual(result['deterministic_step_time_ratio'], {'tp2': 1.25})
+        self.assertNotIn('edp1_rejoin_pause_s', result)
+        for failure in ('suite', 'restore', 'package', 'dirty', 'timeout', 'metric'):
+            self.assertEqual(self.run_driver(step=5, failure=failure)['result'], 'FAIL')
+        self.assertIn('deterministic-contract', self.run_driver(step=5, failure='metric')['error'])
+        self.assertEqual(self.run_driver(step=5, peer='FAIL')['result'], 'FAIL')
 
     def test_preflight_failure_reports_runner_error_and_disk_threshold(self):
         output = (b'{"disk_space": {"free_bytes": 4880000000}}\nTraceback (most recent call last):\n'

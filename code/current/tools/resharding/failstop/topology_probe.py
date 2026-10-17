@@ -59,7 +59,7 @@ def control(config, bus, journal, check):
     for node, report in zip(NODES, preflight):
         require(report['host'].split('.')[0].upper() == node, 'wrong physical host')
         for key in ('commit', 'launch', 'mode', 'rounds', 'port', 'shared_gpu_mode', 'quick_mode', 'correctness_only',
-                    'probe', 'profile_only') + (('host_library_mode', 'source_width') if step3 else ()):
+                    'probe', 'profile_only') + (('host_library_mode', 'source_width', 'profile_sha256') if step3 else ()):
             require(report['config'][key] == config[key], f'node config mismatch: {key}')
     rows = topology(dict(zip(NODES, [r['gpus'] for r in preflight])))
     victims = failed_slots(rows)

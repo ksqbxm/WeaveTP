@@ -107,17 +107,14 @@ def preflight(gpus, layouts, max_sequence_length, checkpoint):
     return {'checkpoint': checkpoint, 'inventory': inventory, 'layouts': plans, 'shortages': shortages}
 
 
-def torchrun_command(python, layout, gpus, checkpoint, output, prompt_tokens, decode_steps, repeats, modes, seq_length):
+def model_arguments(layout, checkpoint, prompt_tokens, seq_length):
+    """DeepSeek-V2-Lite native-router build/load arguments shared by every layout-level GPU check."""
     spec = LAYOUTS[layout]
-    return [python, '-m', 'torch.distributed.run', '--standalone', f'--nproc_per_node={spec["gpus"]}',
-            'tools/resharding/correctness/router_determinism.py',
-            '--tensor-model-parallel-size', str(spec['tp']), '--expert-tensor-parallel-size', str(spec['tp']),
+    return ['--tensor-model-parallel-size', str(spec['tp']), '--expert-tensor-parallel-size', str(spec['tp']),
             '--expert-model-parallel-size', str(spec['ep']), '--pipeline-model-parallel-size', '1',
             '--micro-batch-size', '1', '--global-batch-size', str(spec['gpus'] // spec['tp']),
             '--live-model-preset', 'deepseek-v2-lite', '--live-router-mode', 'native',
             '--live-prompt-tokens', str(prompt_tokens),
-            '--rd-output', str(output), '--rd-decode-steps', str(decode_steps), '--rd-repeats', str(repeats),
-            '--rd-modes', ','.join(modes),
             '--num-layers', '27', '--hidden-size', '2048', '--ffn-hidden-size', '10944',
             '--num-attention-heads', '16', '--num-query-groups', '16', '--kv-channels', '16',
             '--multi-latent-attention', '--kv-lora-rank', '512', '--v-head-dim', '128', '--qk-head-dim', '128',
@@ -135,6 +132,15 @@ def torchrun_command(python, layout, gpus, checkpoint, output, prompt_tokens, de
             '--load', checkpoint, '--ckpt-format', 'torch_dist',
             '--disable-bias-linear', '--no-gradient-accumulation-fusion', '--no-rope-fusion',
             '--hidden-dropout', '0.0', '--attention-dropout', '0.0', '--transformer-impl', 'local', '--seed', '1234']
+
+
+def torchrun_command(python, layout, gpus, checkpoint, output, prompt_tokens, decode_steps, repeats, modes, seq_length):
+    spec = LAYOUTS[layout]
+    return [python, '-m', 'torch.distributed.run', '--standalone', f'--nproc_per_node={spec["gpus"]}',
+            'tools/resharding/correctness/router_determinism.py',
+            *model_arguments(layout, checkpoint, prompt_tokens, seq_length),
+            '--rd-output', str(output), '--rd-decode-steps', str(decode_steps), '--rd-repeats', str(repeats),
+            '--rd-modes', ','.join(modes)]
 
 
 def torchrun_env(gpus, mps_pipe):

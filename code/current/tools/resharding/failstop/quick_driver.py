@@ -92,7 +92,7 @@ def main():
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--node', choices=('SL3060', 'SL3061'), required=True)
-    parser.add_argument('--step', choices=(2, 3, 4), type=int, default=2)
+    parser.add_argument('--step', choices=(2, 3, 4, 5), type=int, default=2)
     parser.add_argument('--min-free-disk-gb', type=float, default=1.0,
                         help='quick correctness threshold for /data; formal acceptance keeps the runner default of 5')
     parser.add_argument('--sha', required=True)
@@ -129,9 +129,11 @@ def main():
         run = args.log_dir.parent.parent / suite
         status['suite'], status['run'] = suite, str(run)
         (args.log_dir / 'run_path.txt').write_text(str(run) + '\n')
-        entry = args.repo / 'code/current/tools/resharding/failstop' / {2: 'run_topology.py', 3: 'run_sources.py', 4: 'run_async.py'}[args.step]
-        argv = [sys.executable, '-B', str(entry), '--node', args.node, '--suite-id', suite,
-                '--output', str(run), '--mode', 'both', '--rounds', '1', '--real-launches', '1',
+        entry = args.repo / 'code/current/tools/resharding/failstop' / {
+            2: 'run_topology.py', 3: 'run_sources.py', 4: 'run_async.py', 5: 'run_model.py'}[args.step]
+        # Step 5 runs its node's layouts under the deterministic contract; the fault matrix is Steps 2-4.
+        argv = [sys.executable, '-B', str(entry), '--node', args.node, '--suite-id', suite, '--output', str(run),
+                *([] if args.step == 5 else ['--mode', 'both', '--rounds', '1', '--real-launches', '1']),
                 '--quick', '--correctness-only', '--budget-seconds', str(max(1, deadline - time.monotonic() - 45)),
                 '--min-free-disk-gb', str(args.min_free_disk_gb)]
         runner_log = args.log_dir / 'runner.log'
@@ -151,14 +153,25 @@ def main():
             status['runner_error'] = runner_error(tail)
             raise RuntimeError(f"runner exited {code}: {status['runner_error']} ({hint}; full output: {runner_log})")
         summary = json.loads((run / args.node / 'summary.json').read_text())
-        if not (summary['all_cases_passed'] and summary['quick_mode'] and summary['correctness_only'] and
-                summary['shared_gpu_mode'] and not summary['timing_valid'] and not summary['accepted'] and
-                summary['emulate'] == summary['real'] == 'passed'):
-            raise RuntimeError('incomplete emulate/real correctness matrix')
-        pause = summary.get('edp1_rejoin_pause_s')
-        if not isinstance(pause, (int, float)) or not math.isfinite(pause) or pause < 0:
-            raise RuntimeError('missing or invalid edp1_rejoin_pause_s')
-        status['edp1_rejoin_pause_s'] = pause
+        flags = (summary['quick_mode'] and summary['correctness_only'] and summary['shared_gpu_mode'] and
+                 not summary['timing_valid'] and not summary['accepted'])
+        if args.step == 5:
+            ratios = summary.get('deterministic_step_time_ratio') or {}
+            if not (summary['all_checks_passed'] and flags and set(ratios) == set(summary['layouts_requested'])):
+                raise RuntimeError('incomplete Step 5 deterministic-contract checks')
+            for layout, ratio in ratios.items():
+                value = ratio.get('median_ratio')
+                if not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0:
+                    raise RuntimeError(f'missing or invalid deterministic step-time ratio for {layout}')
+            status['layouts'] = summary['layouts_requested']
+            status['deterministic_step_time_ratio'] = {layout: ratio['median_ratio'] for layout, ratio in ratios.items()}
+        else:
+            if not (summary['all_cases_passed'] and flags and summary['emulate'] == summary['real'] == 'passed'):
+                raise RuntimeError('incomplete emulate/real correctness matrix')
+            pause = summary.get('edp1_rejoin_pause_s')
+            if not isinstance(pause, (int, float)) or not math.isfinite(pause) or pause < 0:
+                raise RuntimeError('missing or invalid edp1_rejoin_pause_s')
+            status['edp1_rejoin_pause_s'] = pause
         status['result'] = 'PASS'
     except BaseException:
         status.update(result='FAIL', error=traceback.format_exc())
@@ -214,7 +227,12 @@ def main():
         code = 0 if status['result'] == 'PASS' else 1
         (args.log_dir / 'exit_code').write_text(str(code) + '\n')
         print(json.dumps(status, indent=2), flush=True)
-        print(f"QUICK CHECK step={args.step} result={status['result']} (emulate shrink/expand, real shrink/expand) shared_gpu_mode=true edp1_rejoin_pause_s={status.get('edp1_rejoin_pause_s')} logs={run}", flush=True)
+        if args.step == 5:
+            print(f"QUICK CHECK step=5 result={status['result']} (memory preflight, deterministic reference/candidate "
+                  f"{status.get('layouts')}, step_time_ratio={status.get('deterministic_step_time_ratio')}) "
+                  f"shared_gpu_mode=true fail_stop_integration=pending logs={run}", flush=True)
+        else:
+            print(f"QUICK CHECK step={args.step} result={status['result']} (emulate shrink/expand, real shrink/expand) shared_gpu_mode=true edp1_rejoin_pause_s={status.get('edp1_rejoin_pause_s')} logs={run}", flush=True)
         lock.close()
     return code
 

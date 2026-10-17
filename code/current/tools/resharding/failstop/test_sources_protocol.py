@@ -6,6 +6,7 @@ protocol and bytes, never GPU feasibility, bandwidth or timing performance.
 
 import contextlib
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -15,12 +16,14 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 import source_runtime
 import torch
-from common import TOPOLOGY_PROBES
+from common import DETERMINISTIC_ENVIRONMENT, TOPOLOGY_PROBES
+from determinism import compare_launch_plans
 from source_fixture import create_checkpoint, demand
 from test_sources import CAPACITY, profile
 from test_topology_protocol import Simulation
 
 from megatron.core.resharding.host_weights import HostAttachment, HostOwner
+from megatron.core.resharding.mixed_sources import digest
 
 
 class Stream:
@@ -32,11 +35,13 @@ class Stream:
 
 
 class SourceProtocolTests(unittest.TestCase):
-    def run_case(self, mode, rounds, library_mode):
+    def run_case(self, mode, rounds, library_mode, frozen=False):
+        """Returns slot 0's plan files so launches can be compared after the directory is gone."""
         with tempfile.TemporaryDirectory() as directory, contextlib.ExitStack() as stack:
             root = Path(directory)
             sim = Simulation(mode, root, rounds, {'probe': TOPOLOGY_PROBES[3], 'source_width': 64,
-                                                  'host_library_mode': library_mode})
+                                                  'host_library_mode': library_mode,
+                                                  'profile_file': None, 'profile_sha256': None})
             sim.cuda_stream = Stream()
             owners = []
             for node in ('SL3060', 'SL3061'):
@@ -49,6 +54,10 @@ class SourceProtocolTests(unittest.TestCase):
                 sim.put(f'host_ready/{node}', owner.report)
                 owners.append(owner)
             measured = profile([source_runtime.identity(row) for row in sim.rows])
+            if frozen:
+                # A frozen profile replaces measurement entirely; the collector must not run.
+                (root / 'profile.json').write_text(json.dumps(measured))
+                sim.extra_config.update(profile_file=str(root / 'profile.json'), profile_sha256=digest(measured))
             attachments = []
 
             def attach(report, **kwargs):
@@ -56,7 +65,9 @@ class SourceProtocolTests(unittest.TestCase):
                 attachments.append(result)
                 return result
 
-            stack.enter_context(patch.object(source_runtime, 'collect', return_value=measured))
+            stack.enter_context(patch.object(source_runtime, 'collect',
+                                             side_effect=RuntimeError('collect called with a frozen profile') if frozen else None,
+                                             return_value=measured))
             stack.enter_context(patch.object(source_runtime, 'probe_registration', return_value={'cpu_double': True}))
             stack.enter_context(patch.object(source_runtime, 'HostAttachment', side_effect=attach))
             stack.enter_context(patch.object(source_runtime, 'make_copy_service', sim.copy_service))
@@ -87,12 +98,48 @@ class SourceProtocolTests(unittest.TestCase):
             self.assertEqual(sum(r['payload_bytes'] for r in payloads), rounds * 2 * 3 * 2 * 2 * 64 * 8)
             metrics = sim.get('topology_metrics')
             self.assertGreaterEqual(metrics['edp1_rejoin_pause_s'], 0)
+            plans = {p.name: json.loads(p.read_text()) for p in (root / 'SL3060').glob('source_plan_*.json')}
+            self.assertEqual(set(plans), {f'source_plan_{r}_{p}' + '.json' for r in range(rounds) for p in (1, 2)})
+            for plan in plans.values():
+                self.assertEqual(plan['profile_source'], 'frozen_file' if frozen else 'measured')
+                self.assertEqual(plan['profile_sha256'], digest(measured))
+                self.assertTrue(plan['sources'] and plan['targets'] and plan['membership'])
+                self.assertEqual(set(plan['environment']), set(DETERMINISTIC_ENVIRONMENT))
+            return plans
 
     def test_emulate_two_rounds_demand(self):
         self.run_case('emulate', 2, 'on-demand')
 
     def test_real_replacements_full_library(self):
         self.run_case('real', 1, 'full')
+
+    def test_frozen_profile_launches_plan_identically_across_modes(self):
+        """Step 5 §2.1: the same snapshot over one frozen profile plans the same under either mode environment."""
+        with patch.dict(os.environ, DETERMINISTIC_ENVIRONMENT):
+            deterministic = self.run_case('emulate', 1, 'on-demand', frozen=True)
+        with patch.dict(os.environ, {}, clear=False):
+            for key in DETERMINISTIC_ENVIRONMENT:
+                os.environ.pop(key, None)
+            default = self.run_case('emulate', 1, 'on-demand', frozen=True)
+        self.assertEqual(deterministic['source_plan_0_1.json']['environment'], DETERMINISTIC_ENVIRONMENT)
+        self.assertEqual(default['source_plan_0_1.json']['environment'], {key: None for key in DETERMINISTIC_ENVIRONMENT})
+        with tempfile.TemporaryDirectory() as directory:
+            roots = {}
+            for name, plans in (('default', default), ('deterministic', deterministic)):
+                roots[name] = Path(directory, name)
+                roots[name].mkdir()
+                for file, plan in plans.items():
+                    (roots[name] / file).write_text(json.dumps(plan))
+            result = compare_launch_plans(roots['default'], roots['deterministic'])
+            self.assertTrue(result['equal'], result)
+            self.assertTrue(all(all(p['inputs_equal'].values()) for p in result['plans'].values()))
+            broken = json.loads((roots['deterministic'] / 'source_plan_0_2.json').read_text())
+            broken['tasks'][0]['payload_bytes'] += 8
+            (roots['deterministic'] / 'source_plan_0_2.json').write_text(json.dumps(broken))
+            result = compare_launch_plans(roots['default'], roots['deterministic'])
+            self.assertFalse(result['equal'])
+            self.assertEqual(result['plans']['source_plan_0_2.json']['first_difference']['fields'], ['payload_bytes'])
+            self.assertTrue(result['plans']['source_plan_0_1.json']['equal'])
 
 
 if __name__ == '__main__':

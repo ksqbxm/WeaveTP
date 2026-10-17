@@ -16,6 +16,7 @@ case "$STEP" in
   2) NAME=step02_topology_rebind ;;
   3) NAME=step03_sources_and_transport ;;
   4) NAME=step04_async_driver_and_memory ;;
+  5) NAME=step05_model_correctness ;;
   *) echo "Unknown step: $STEP" >&2; exit 2 ;;
 esac
 [[ "$NODE" == SL3060 || "$NODE" == SL3061 ]]

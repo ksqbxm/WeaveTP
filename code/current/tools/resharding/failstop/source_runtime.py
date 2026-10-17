@@ -1,12 +1,13 @@
 """Step 3 checks attached to the existing Step 2 fault/rebuild protocol."""
 
 import json
+import os
 from dataclasses import asdict, replace
 from pathlib import Path
 
 import torch
 import torch.distributed as dist
-from common import NODES, append_json, host_backing, require, write_json
+from common import DETERMINISTIC_ENVIRONMENT, NODES, append_json, host_backing, require, write_json
 from source_fixture import NAMES, host_resident, identity, read_oracle
 from source_profile import collect
 
@@ -103,7 +104,17 @@ class SourceRuntime:
     def validate(self, session, group, phase, round_id):
         if phase == 0:
             if self.profile is None:
-                measured = collect(self.config, self.config['topology'], self.slot, group, self.host, self.journal)
+                frozen = self.config.get('profile_file')
+                if frozen:
+                    # Step 5 §2.1: default- and deterministic-mode launches plan over one frozen
+                    # profile, so their plans are comparable; a re-measured profile is not.
+                    measured = json.loads(Path(frozen).read_text(encoding='utf-8'))
+                    require(digest(measured) == self.config['profile_sha256'], 'frozen profile hash mismatch')
+                    require(set(measured['p2p']) == {identity(r) for r in self.config['topology']},
+                            'frozen profile was measured on different devices')
+                    self.journal.event('profile_frozen', path=str(frozen), profile_sha256=self.config['profile_sha256'])
+                else:
+                    measured = collect(self.config, self.config['topology'], self.slot, group, self.host, self.journal)
                 # Node clocks differ in the metadata; every plan hashes one published payload.
                 if self.slot == 0:
                     self.bus.put('source_profile', measured)
@@ -136,9 +147,14 @@ class SourceRuntime:
             membership=membership, epoch=session.epoch, rank_map=alternate)
         require(normalized(tasks) == normalized(replay), 'normalized mode plans differ')
         if self.slot == 0:
+            # The full snapshot and this process's mode environment make two launches' plans comparable offline.
             write_json(self.root / f'source_plan_{round_id}_{phase}.json', {
                 'tasks': [asdict(t) for t in tasks], 'cache_key': cache_key,
-                'profile_sha256': digest(self.profile), 'normalized_replay_equal': True,
+                'profile_sha256': digest(self.profile),
+                'profile_source': 'frozen_file' if self.config.get('profile_file') else 'measured',
+                'normalized_replay_equal': True, 'membership': membership, 'epoch': session.epoch, 'rank_map': rank_map,
+                'sources': [asdict(s) for s in sources], 'targets': [asdict(t) for t in targets],
+                'environment': {key: os.environ.get(key) for key in DETERMINISTIC_ENVIRONMENT},
                 'loads': [{'resource': k, 'seconds': v} for k, v in loads.items()]})
         size = 2 if phase == 1 else 4
         if self.row['replica'] == 'EDP0':
