@@ -1,0 +1,22 @@
+$ python -B -X utf8 code/current/tools/resharding/failstop/run_async.py --node SL3060 --suite-id step4_dry --output /data/step4_dry --mode both --rounds 1 --real-launches 1 --quick --correctness-only --dry-run
+{
+  "cases": [
+    {
+      "mode": "emulate",
+      "rounds": 1,
+      "launch": "step4_dry_emulate"
+    },
+    {
+      "mode": "real",
+      "rounds": 1,
+      "launch": "step4_dry_real_00"
+    }
+  ],
+  "quick_mode": true,
+  "correctness_only": true,
+  "shared_gpu_mode": true,
+  "timing_valid": false,
+  "output": "\\data\\step4_dry",
+  "node": "SL3060"
+}
+dry-run exit=0

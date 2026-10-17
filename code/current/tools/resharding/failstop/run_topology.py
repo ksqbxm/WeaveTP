@@ -1,4 +1,4 @@
-"""Explicit Step 2/3 suites. Nothing runs unless invoked; default mode is emulate."""
+"""Explicit Step 2/3/4 suites. Nothing runs unless invoked; default mode is emulate."""
 
 import argparse
 import json
@@ -10,7 +10,7 @@ import sys
 import time
 from pathlib import Path
 
-from common import DEFAULTS, NODES, SHARED_GPU_NOTE, TOPOLOGY_PROBES, require, write_json
+from common import DEFAULTS, NODES, SHARED_GPU_NOTE, STEP_PROBES, require, write_json
 from run_probe import repository_commit, run_case
 from safety import check_data_space, pidfd_implementations
 
@@ -73,7 +73,14 @@ def main(argv=None, *, step=2):
         parser.add_argument('--host-library-mode', choices=('full', 'on-demand'), default='on-demand')
         parser.add_argument('--profile-only', action='store_true',
                             help='collect the world16 profile only: no fault, no migration, accepted=false')
+    if step == 4:
+        parser.add_argument('--weight-elements', type=int, default=8388608,
+                            help='float32 elements per full expert weight; large enough that the TP2->TP4 transfer spans several decode steps')
+        parser.add_argument('--memory-budget-mib', type=int, default=2048)
     args = parser.parse_args(argv)
+    if step == 4:
+        require(args.weight_elements >= 64 and args.weight_elements % 4 == 0 and args.memory_budget_mib > 0,
+                'invalid weight size or memory budget')
     profile_only = step == 3 and args.profile_only
     correctness_only = args.correctness_only or args.quick
     mode_flags = {'quick_mode': args.quick, 'correctness_only': correctness_only,
@@ -115,7 +122,7 @@ def main(argv=None, *, step=2):
             write_json(root / 'progress.json', results)
             continue
         config = {**{k: v for k, v in DEFAULTS.items() if k != 'repeats'}, **case,
-                  'probe': TOPOLOGY_PROBES[step], 'kind': case['mode'], 'profile_only': profile_only,
+                  'probe': STEP_PROBES[step], 'kind': case['mode'], 'profile_only': profile_only,
                   'node': args.node, 'output': str(root / case['launch']), 'master': args.master,
                   'port': args.port_base + index, 'commit': commit, 'mps_pipe': None,
                   **mode_flags,
@@ -126,6 +133,8 @@ def main(argv=None, *, step=2):
                   'launch_timeout_s': remaining}
         if step == 3:
             config.update(host_library_mode=args.host_library_mode, source_width=4096 if args.quick else 262144)
+        if step == 4:
+            config.update(weight_elements=args.weight_elements, memory_budget_bytes=args.memory_budget_mib << 20)
         print(f"Starting {case['launch']} mode={case['mode']} rounds={case['rounds']}", flush=True)
         result = run_case(config)
         results.append({**case, **result})
@@ -137,6 +146,10 @@ def main(argv=None, *, step=2):
                     if r['mode'] == 'real' and r['status'] == 'passed'), default=None)}
     if profile_only:
         summary['accepted'] = False
+    if step == 4:
+        # The exclusive full matrix is a mechanism result; fix2 and Step 3 integration are accepted separately.
+        summary.update(mechanism_matrix_passed=summary['accepted'], accepted=False, prerequisites_verified=False,
+                       step3_integration='separate acceptance required')
     passed = summary['all_cases_passed']
     write_json(root / 'summary.json', summary)
     print(f"STEP {step} result={'PASS' if passed else 'FAIL'} edp1_rejoin_pause_s={summary['edp1_rejoin_pause_s']} "

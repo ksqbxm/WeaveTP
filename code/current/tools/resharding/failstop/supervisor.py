@@ -12,6 +12,8 @@ from datetime import timedelta
 from pathlib import Path
 
 from common import (
+    ASYNC_PROBE,
+    STEP_PROBES,
     TOPOLOGY_PROBES,
     Journal,
     Reclaim,
@@ -94,7 +96,8 @@ class Supervisor:
                    "TORCH_FR_DUMP_TEMP_FILE": str(self.root / f"flight_{slot}_"),
                    "TORCH_NCCL_TRACE_BUFFER_SIZE": "10000"}
             child, record = self.children.spawn(
-                [sys.executable, str(HERE / ("topology_worker.py" if self.config.get("probe") in
+                [sys.executable, str(HERE / ("async_worker.py" if self.config.get("probe") == ASYNC_PROBE else
+                                            "topology_worker.py" if self.config.get("probe") in
                                             TOPOLOGY_PROBES.values() else "worker.py")),
                  "--config", str(self.root / "worker_config.json"),
                  "--slot", str(slot), "--epoch", str(epoch)],
@@ -275,7 +278,7 @@ def main():
         journal.event("process_exit")
         return
     _, bus = connect(config)
-    if config.get("probe") in TOPOLOGY_PROBES.values() and config["mode"] == "emulate":
+    if config.get("probe") in STEP_PROBES.values() and config["mode"] == "emulate":
         from topology_probe import EmulateSupervisor
 
         supervisor = EmulateSupervisor(config, bus, journal)

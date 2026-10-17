@@ -9,6 +9,7 @@ import traceback
 from pathlib import Path
 
 from common import (
+    ASYNC_PROBE,
     NODES,
     TOPOLOGY_PROBES,
     Journal,
@@ -195,7 +196,11 @@ def run(config):
                 for child, record in children.children:
                     require(child.poll() in (None, 0), f"{record['role']} exited {child.returncode}")
 
-            if config.get("probe") in TOPOLOGY_PROBES.values():
+            if config.get("probe") == ASYNC_PROBE:
+                from async_probe import control as async_control
+
+                result = async_control(config, bus, journal, check)
+            elif config.get("probe") in TOPOLOGY_PROBES.values():
                 from topology_probe import control as topology_control
 
                 result = topology_control(config, bus, journal, check)

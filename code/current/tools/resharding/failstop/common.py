@@ -10,6 +10,8 @@ from pathlib import Path
 
 NODES = ("SL3060", "SL3061")
 TOPOLOGY_PROBES = {2: "step02_topology_rebind", 3: "step03_sources_and_transport"}
+ASYNC_PROBE = "step04_async_driver_and_memory"
+STEP_PROBES = {**TOPOLOGY_PROBES, 4: ASYNC_PROBE}
 SHARED_GPU_NOTE = "与其他任务共享 GPU，仅用于正确性和可行性判断，各阶段耗时不作为正式数据"
 FAIL_COORDS = {(0, 0), (0, 1), (1, 0), (1, 1)}  # (ep, etp)
 DEFAULTS = {

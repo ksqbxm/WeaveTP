@@ -1,0 +1,182 @@
+{
+  "step": 4,
+  "label": "step04_async_driver_and_memory",
+  "branch": "codex/failstop-step4",
+  "branch_base": "69927c7effe6e2ff87133c80c4daaedad30aac89",
+  "code_commit": "b621125876e8ea8ab07c1f3ba210ddd370a0ae60",
+  "quick_manifest_commit": "e09d7bce466fb3f7bbd4afc309860898873c3c2a",
+  "read_before_code": [
+    "CODEX.md",
+    "documents/failstop_20261017/00_总计划.md",
+    "documents/failstop_20261017/04_Step4_异步驱动与内存.md",
+    "documents/failstop_20261017/Step2_服务器命令.md",
+    "code/current/AGENTS.md"
+  ],
+  "prerequisites": {
+    "fix2_gpu_recheck": "not registered; user explicitly instructed to start Step 4 on 2026-10-17; runner reports prerequisites_verified=false",
+    "step3_transport": "not integrated; branch does not contain Step 3 commits; fixture uses explicit slices with a done()/wait() contract for a later adapter"
+  },
+  "source_sha256": {
+    "code/current/tools/resharding/failstop/async_state.py": "080b5851dc47a3d7f435836a68d04c3e82b6e431d3dc76dd0b8153dc3da011a1",
+    "code/current/tools/resharding/failstop/async_topology.py": "fed75990f91eeff30b41b26bfd382dc35455dd3b83bf09dcabd67890b04584f9",
+    "code/current/tools/resharding/failstop/async_fixture.py": "3590884f939bf5facde6dea6aa94c29298d70099d85598864b96afd0d40f975f",
+    "code/current/tools/resharding/failstop/async_worker.py": "62bbb57dab7ace5a631b1d04dc3404ee23b13e614f9458874f2a5fd1fd273238",
+    "code/current/tools/resharding/failstop/async_probe.py": "ef6b15f6c052b28b0c75e0aa2d66cdfc5744032929c184b69342be69291b89ac",
+    "code/current/tools/resharding/failstop/run_async.py": "eaacf61a3a93a114587b394a6a917eb7bf30f20700f20f6a1f58aad3f8025828",
+    "code/current/tools/resharding/failstop/test_async_state.py": "526001ae8aaed10c475be223e778932609864bfb8040f5f7203c975b3f20cad0",
+    "code/current/tools/resharding/failstop/test_async_protocol.py": "f7f32185081c4b5578893ff6ef5dbed01a6c8c8776f300f7ff615f8488e2e787",
+    "code/current/tools/resharding/failstop/controller.py": "c49128422d3b3d018b7412cabdf33c65c24eb7b5d3ae80a5b94a181d40e0c0ea",
+    "code/current/tools/resharding/failstop/quick_check.sh": "4cc22ee6e2fc02f03cc1e4fd6931191db92ca64e22fb1b6d55a8544005cb6dbc",
+    "code/current/tools/resharding/failstop/quick_driver.py": "d848207ed5e3f69e15c28627f90cf33a90e87dd524a8672975b47a579dc749c2",
+    "code/current/tools/resharding/failstop/supervisor.py": "2ad1c3986f70ede1a3fd07a07a13ce6495de84817cefd9400416984a78eaf207",
+    "code/current/tools/resharding/failstop/test_quick.py": "d237e205c4a6e1105dca128c7d9c0e8d4dba9392246d75d5ad01df0a099956b6"
+  },
+  "source_hash_kind": "Git blob bytes at code_commit",
+  "tests": {
+    "unittest": {
+      "count": 102,
+      "new_in_step4": 16,
+      "status": "passed",
+      "log": "cpu_tests.log",
+      "command": "python -B -X utf8 -m unittest discover -s code/current/tools/resharding/failstop -p 'test_*.py' -v",
+      "env": {
+        "PYTHONPATH": "code/current;%TEMP%/weavetp-step2-deps",
+        "OMP_NUM_THREADS": "1"
+      }
+    },
+    "packing": {
+      "count": 16,
+      "status": "passed",
+      "log": "packing.log",
+      "command": "python -B -X utf8 -m pytest --noconftest code/current/tests/unit_tests/resharding/test_nccl_packing.py -q"
+    },
+    "gpu": {
+      "status": "not_run",
+      "emulate": "not_run",
+      "real": "not_run",
+      "quick_300s_budget": "not_measured"
+    }
+  },
+  "static_checks": {
+    "isort": {
+      "command": "python -m isort <changed files>",
+      "status": "passed",
+      "note": "import order of async_worker.py, async_probe.py, test_async_protocol.py fixed before the implementation commit; recheck exit 0"
+    },
+    "ruff": {
+      "command": "uv run --no-project --with ruff ruff check --select F <changed files>",
+      "status": "passed",
+      "output": "All checks passed!"
+    },
+    "compile": {
+      "command": "compile() over tools/resharding/failstop/*.py, megatron/core/failstop.py, failstop_rebind.py, standby_weights.py",
+      "files": 33,
+      "status": "passed"
+    },
+    "bash": {
+      "command": "bash -n code/current/tools/resharding/failstop/quick_check.sh",
+      "status": "passed"
+    },
+    "dry_run": {
+      "command": "python -B -X utf8 code/current/tools/resharding/failstop/run_async.py --node SL3060 --suite-id step4_dry --output /data/step4_dry --mode both --rounds 1 --real-launches 1 --quick --correctness-only --dry-run",
+      "status": "passed",
+      "log": "dry_run.log"
+    },
+    "git_diff_check": {
+      "status": "passed"
+    },
+    "committed_line_endings": {
+      "status": "LF",
+      "checked": [
+        "quick_check.sh",
+        "async_worker.py",
+        "async_probe.py",
+        "run_async.py",
+        "controller.py",
+        "releases.json"
+      ]
+    }
+  },
+  "logs_sha256": {
+    "cpu_tests.log": "fc03f90e24486a6829314d0e295c19ebaea419eb940f6b4d8764a671c12b234b",
+    "packing.log": "57a916fa70cd75be895a151e77362a9412efc1a265e9a8ab73ab9bdc6c654631",
+    "cpu_tests_fix1.log": "3db6724f4cecd33481411452a8923259f8d23df7f371b66866b32a7bed10a4bd",
+    "cpu_tests_review.log": "ef0ac4cba48f56d91062b06eaa65698c56a91e21a2371ec5da6ca6e867cef39b"
+  },
+  "bundle": {
+    "path": "C:\\Users\\ksqbx\\.codex\\worktrees\\failstop-step4\\step4_e09d7bc.bundle",
+    "bytes": 873581,
+    "sha256": "b75f0215620c193aa2e6416dfc72c427fa55a0eb3c8c8d8ee7941fadd4040232",
+    "base": "f7d555998b45756998465924d733fd70e553d6b4",
+    "ref": "refs/heads/codex/step4-e09d7bc",
+    "head": "e09d7bce466fb3f7bbd4afc309860898873c3c2a",
+    "verified": true
+  },
+  "remote_before_commit": "origin/codex/failstop = 69927c7effe6e2ff87133c80c4daaedad30aac89; origin has no codex/failstop-step4",
+  "first_delivery": {
+    "code_commit": "7b33df6591815bb5db8d98d97a6898bc9ab1c0af",
+    "quick_manifest_commit": "dce3d902edb258d3b028ee8bc333d1448853929f",
+    "bundle": {
+      "path": "C:\\Users\\ksqbx\\.codex\\worktrees\\failstop-step4\\step4_dce3d90.bundle",
+      "bytes": 843307,
+      "sha256": "07047c2ba350c631f4df3c75029eb926a5641a4bc4bb10026e42e36d8b9cecf9",
+      "base": "f7d555998b45756998465924d733fd70e553d6b4",
+      "ref": "refs/heads/codex/step4-dce3d90",
+      "head": "dce3d902edb258d3b028ee8bc333d1448853929f",
+      "verified": true
+    },
+    "server_quick_check": "FAIL before any case: SL3060 /data free 4.88 GB < 5 GB default threshold (user report, 2026-10-17)"
+  },
+  "fix1": {
+    "changes": [
+      "quick_check.sh --min-free-disk-gb (default 1) forwarded to quick_driver and runner",
+      "quick_driver mirrors runner output to runner.log and reports the child exception line on failure",
+      "formal acceptance runner default stays 5 GB"
+    ],
+    "unittest": {
+      "count": 103,
+      "status": "passed",
+      "log": "cpu_tests_fix1.log"
+    },
+    "static_checks": {
+      "isort": "passed",
+      "ruff_F": "passed",
+      "compile": "passed",
+      "bash_n": "passed",
+      "git_diff_check": "passed"
+    },
+    "code_commit": "05d942e682e3d96b85c7c7db164ba09a8dd13841",
+    "quick_manifest_commit": "1f5400d0fac899f5003db2663a555d214cf481cf",
+    "bundle": {
+      "path": "C:\\Users\\ksqbx\\.codex\\worktrees\\failstop-step4\\step4_1f5400d.bundle",
+      "bytes": 872222,
+      "sha256": "8ee7e272f1b5c5e7a1c04723b8796a5a30c9ad271cde142cda4ea3b7caf1cc48",
+      "base": "f7d555998b45756998465924d733fd70e553d6b4",
+      "ref": "refs/heads/codex/step4-1f5400d",
+      "head": "1f5400d0fac899f5003db2663a555d214cf481cf",
+      "verified": true
+    }
+  },
+  "review": {
+    "findings": [
+      "P1 real replacement worker aborted a nonexistent process group",
+      "P1 EDP1 rebuild pause end recorded at end of serving period",
+      "P2 fake wait()-is-False transport contract",
+      "P2 shrink source needlessly rebound",
+      "P3 meaningless recovery_queue call, duplicate delta validation, JSON round-trip comparisons",
+      "P3 duplicated cases/summarize, inline imports, redundant variables",
+      "P3 default weight size too small for a reliable overlap assertion"
+    ],
+    "unittest": {
+      "count": 104,
+      "status": "passed",
+      "log": "cpu_tests_review.log"
+    },
+    "old_worker_regression": "test_real_replacements fails with \"abort without a process group\" on the previous async_worker.py",
+    "static_checks": {
+      "isort": "passed",
+      "ruff_F": "passed",
+      "git_diff_check": "passed"
+    }
+  }
+}
