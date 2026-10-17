@@ -1,0 +1,25 @@
+{
+  "status": "CPU_passed_GPU_pending",
+  "implementation": "7e61596114b003bf3ecefdd8045a6b10aeeda65b",
+  "review_start": "bcc61aeb86ddc1bcce403785493ac38ad59486db",
+  "failstop_tests": 99,
+  "packing_and_source_search_tests": 56,
+  "gloo_processes": 4,
+  "static_checks": ["isort --settings-path code/current", "ast unused-import scan: 0", "py_compile", "bash -n quick_check.sh"],
+  "dry_runs": [
+    "run_sources.py --mode both --profile-only --dry-run -> profile_only=true, rounds forced to 1",
+    "run_sources.py --mode both --quick --host-library-mode full --dry-run -> correctness_only=shared_gpu_mode=true, timing_valid=false",
+    "run_topology.py --dry-run -> step=2, profile_only=false"
+  ],
+  "commands": [
+    "python -B -X utf8 -m unittest discover -s code/current/tools/resharding/failstop -p 'test_*.py' -v",
+    "PYTHONPATH=code/current python -B -m pytest --noconftest code/current/tests/unit_tests/resharding/test_nccl_packing.py code/current/tests/unit_tests/resharding/test_source_search.py -q",
+    "PYTHONPATH=code/current python -B code/current/tools/resharding/failstop/cpu_topology_gloo.py"
+  ],
+  "gpu_validation": "not_run",
+  "quick_300s_server_budget": "not_run",
+  "python": "3.13.12",
+  "torch": "2.14.0+cpu",
+  "server_runtime_required": "PyTorch 2.11 / NCCL 2.28",
+  "test_scope": "CPU doubles substitute the profile, CUDA registration and NCCL; they prove protocol, coverage, completion boundary and bytes, not GPU feasibility"
+}

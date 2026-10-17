@@ -79,3 +79,5 @@ HostTask 在目标 rank 的专用 CUDA stream 提交异步 H2D，与 NCCL 接收
 ## 7. 验收登记
 
 实现 SHA：`bcc61aeb86ddc1bcce403785493ac38ad59486db`。99 项 failstop CPU、56 项 packing/选源回归、4 进程 Gloo 通过。profile/emulate/real GPU 与 300 秒服务器预算：未运行。本轮用户明确开始 Step 3 并要求 real 两阶段核查，因此实现 real 测试路径；Step 2 real GPU 通过结论仍待回传，不越过验收关口。详见 [实现与验证](Step3_实现与验证.md)。
+
+2026-10-17 审阅修正：当前实现 `7e61596114b003bf3ecefdd8045a6b10aeeda65b`，99/56/4 项 CPU 检查通过，GPU 仍未运行；问题与修正见[审阅与修正](Step3_审阅与修正.md)。本步 §3.2 的 "memlock/注册能力" 按修正后的语义执行：memlock 只记录，注册能力由共享文件页的真实注册探针在读权重前证明。

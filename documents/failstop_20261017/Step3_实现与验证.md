@@ -2,6 +2,8 @@
 
 实现：`bcc61aeb86ddc1bcce403785493ac38ad59486db`，分支 `codex/failstop`。本轮已在写代码前阅读 CODEX.md、总计划、Step 2/3 文档和 code/current/AGENTS.md；修改 imports 后执行 `python -m uv run isort`。
 
+审阅修正后的当前实现为 `7e61596114b003bf3ecefdd8045a6b10aeeda65b`，问题清单、修正与复验见[审阅与修正](Step3_审阅与修正.md)；本文件下方表格已按修正后的路径更新，历史数字保留。
+
 状态：公共/emulate/real 的 Step 3 独立切片测试路径已实现，CPU 已验证；服务器 CUDA/NCCL、profile、实际 300 秒快验预算均未运行。用户本轮明确要求实现 Step 3 并核查 real 回归，因此实现 real 测试路径；不据此登记 Step 2 real GPU 或 Step 3 real GPU 已通过。Step 4 未启动，fix2 GPU 回传关口不变。
 
 ## 两阶段回归核查
@@ -18,13 +20,13 @@
 |---|---|
 | `megatron/core/resharding/planner.py` | 本地 src==dst 不进入 L/S/D，保留实际传输任务 |
 | `mixed_sources.py` | 全局矩形切片、dtype/形状/参数/global expert 身份；混合 TP4/TP2/host 精确覆盖；host 计 D/M、不计 GPU S；复用 ResidualBandwidthWaveScheduler 的有界分波分配，无在线 replan/新 packing |
-| `host_weights.py`、`host_owner.py` | 每节点独立 CPU owner、单份共享 mmap；完整/按需清单；RAM、实测 /dev/shm、memlock 和 CUDA 注册能力预检；直接 readinto backing，无完整 state_dict 临时副本 |
+| `host_weights.py`、`host_owner.py` | 每节点独立 CPU owner、单份共享 mmap；完整/按需清单；RAM 与实测 /dev/shm 预算，memlock 记录为证据；共享文件页的 CUDA 注册探针先于读权重；直接 readinto backing，无完整 state_dict 临时副本 |
 | `mixed_transport.py` | 专用 H2D stream 与现有 NCCL streams 并发；非连续目标用 GPU staging、host 按连续行异步复制；所有流完成后才放行目标；按接收端提交到完成的 batch 墙钟记录实际 payload/control/reuse bytes |
-| `source_profile.py`、`run_source_profile.py` | 单卡 H2D、每节点 4/8 卡并发 H2D、240 条有向机内/跨机 P2P；三种 payload、原始样本、拟合方法、硬件身份/状态证据、runtime/源码 SHA、真实 profile 文件 SHA256；独立采集入口不注入故障 |
+| `source_profile.py`、`run_sources.py --profile-only` | 单卡 H2D、每节点 4/8 卡并发 H2D、240 条有向机内/跨机 P2P；三种 payload、原始样本、拟合方法、硬件身份/状态证据、runtime/源码 SHA、真实 profile 文件 SHA256；独立采集模式不注入故障 |
 | `source_fixture.py`、`source_runtime.py` | 独立索引 checkpoint oracle；GPU-only/host-only/同目标互补混合来源，非连续切片和两个 global expert；新 real PID 只读结构建空目标，初始权重 H2D=0，不作源 |
 | `run_sources.py`、`quick_check.sh --step 3` | 复用 Step 2 监管/拓扑/清理，默认模式 emulate；快验两模式各一次缩容/扩容，默认共享正确性模式，固定 SHA、自动协调 suite、nohup、打包、恢复原正式提交 |
 
-主机库输入是显式索引的原始分片 checkpoint，入口生成独立的小型整数权重 fixture；本步没有实现 native DeepSeek 整模型加载/推理，该关口仍在 Step 5。按需模式在读取权重文件前固定覆盖清单，只读可能使用的 host-only 和 mixed 分片。完整模式加载全部 fixture 分片；两种模式均报告预计/实际 backing、元数据、注册量、page-cache 预算和 owner VmHWM。服务器正式入口默认 on-demand，可显式选择 full。
+主机库输入是显式索引的原始分片 checkpoint，入口生成独立的小型整数权重 fixture；本步没有实现 native DeepSeek 整模型加载/推理，该关口仍在 Step 5。按需模式在读取权重文件前固定覆盖清单，只读可能使用的 host-only 和 mixed 分片。完整模式加载全部 fixture 分片；两种模式均报告预计/实际 backing、每 worker 注册量、可用 RAM、/dev/shm、memlock 和 owner VmHWM。服务器正式入口默认 on-demand，可显式选择 full。
 
 共享 backing 使用可注册的 writable MAP_SHARED 映射，应用层只作为源，退出时 owner 按 checkpoint SHA256 逐片检查未修改；不使用私有/COW 映射。原因是 OS 只读 mmap 的 CUDA 注册需要可选设备能力，不能假设 GeForce 支持。这里的“权重只读”是源对象使用合同和完整性校验，不声称 OS 页保护。[CUDA Runtime 官方说明](https://docs.nvidia.com/cuda/archive/13.2.0/cuda-runtime-api/group__CUDART__MEMORY.html)。worker 正常退出只 unregister/detach；owner 在所有 worker 结束后校验并 unlink。异常回收只处理本 launch 登记的路径和 inode。
 

@@ -1,0 +1,293 @@
+C:\Users\ksqbx\.codex\worktrees\failstop\WeaveTP_浠ｇ爜涓庡疄楠岃祫鏂檁20260920\code\current\megatron\core\optimizer\__init__.py:25: UserWarning: Transformer Engine and Apex are not installed. Falling back to Torch optimizers.
+  warnings.warn(
+C:\Users\ksqbx\.codex\worktrees\failstop\WeaveTP_浠ｇ爜涓庡疄楠岃祫鏂檁20260920\code\current\megatron\core\distributed\fsdp\src\megatron_fsdp\mixed_precision.py:115: UserWarning: Transformer Engine and Apex are not installed. Falling back to local implementations of multi_tensor_applier and multi_tensor_scale
+  warnings.warn(
+C:\Users\ksqbx\.codex\worktrees\failstop\WeaveTP_浠ｇ爜涓庡疄楠岃祫鏂檁20260920\code\current\megatron\core\optimizer\optimizer.py:29: UserWarning: Transformer Engine and Apex are not installed. Falling back to local implementations of multi_tensor_applier and multi_tensor_scale
+  warnings.warn(
+C:\Users\ksqbx\.codex\worktrees\failstop\WeaveTP_浠ｇ爜涓庡疄楠岃祫鏂檁20260920\code\current\megatron\core\optimizer\clip_grads.py:32: UserWarning: Transformer Engine and Apex are not installed. Falling back to local implementations of multi_tensor_applier, multi_tensor_l2norm, and multi_tensor_scale
+  warnings.warn(
+C:\Users\ksqbx\.codex\worktrees\failstop\WeaveTP_浠ｇ爜涓庡疄楠岃祫鏂檁20260920\code\current\megatron\core\hyper_comm_grid.py:26: UserWarning: absl.logging is not installed. Using logging.getLogger(__name__) instead. Please install absl.logging with `pip install absl-py` to use absl.logging.
+  warnings.warn(
+C:\Users\ksqbx\.codex\worktrees\failstop\WeaveTP_浠ｇ爜涓庡疄楠岃祫鏂檁20260920\code\current\megatron\core\models\backends.py:34: UserWarning: Apex is not installed. Falling back to Torch Norm
+  warnings.warn("Apex is not installed. Falling back to Torch Norm")
+test_exited_pidfd_does_not_require_live_environment_or_send_signal (test_cleanup.CleanupTests.test_exited_pidfd_does_not_require_live_environment_or_send_signal) ... ok
+test_final_result_includes_cleanup_failure_and_still_cleans_descendants (test_cleanup.CleanupTests.test_final_result_includes_cleanup_failure_and_still_cleans_descendants) ... ok
+test_pidfd_wait_confirms_exit_or_reports_timeout (test_cleanup.CleanupTests.test_pidfd_wait_confirms_exit_or_reports_timeout) ... ok
+test_registry_cleanup_waits_and_preserves_owned_store (test_cleanup.CleanupTests.test_registry_cleanup_waits_and_preserves_owned_store) ... ok
+test_spawn_registration_failure_reaps_owned_child (test_cleanup.CleanupTests.test_spawn_registration_failure_reaps_owned_child) ... ok
+test_join_overlap_is_not_double_counted (test_probe.ControlTests.test_join_overlap_is_not_double_counted) ... ok
+test_outer_timeout_is_failure_and_cleans_registered_children (test_probe.ControlTests.test_outer_timeout_is_failure_and_cleans_registered_children) ... ok
+test_ready_key_before_process_exit_check (test_probe.ControlTests.test_ready_key_before_process_exit_check) ... ok
+test_rejoin_state_machine_rejects_spawn_before_reclamation (test_probe.ControlTests.test_rejoin_state_machine_rejects_spawn_before_reclamation) ... ok
+test_remote_lifecycle_time_is_unconverted_until_calibrated (test_probe.ControlTests.test_remote_lifecycle_time_is_unconverted_until_calibrated) ... ok
+test_store_timeout_and_peer_failure (test_probe.ControlTests.test_store_timeout_and_peer_failure) ... ok
+test_summary_never_hides_failed_or_missing_launches (test_probe.ControlTests.test_summary_never_hides_failed_or_missing_launches) ... ok
+test_supervisor_kills_exactly_four_registered_targets_then_confirms_reclaim (test_probe.ControlTests.test_supervisor_kills_exactly_four_registered_targets_then_confirms_reclaim) ... ok
+test_all_four_devices_must_be_stable_together (test_probe.ReclaimTests.test_all_four_devices_must_be_stable_together) ... ok
+test_requires_stable_baseline_and_fixed_slack (test_probe.ReclaimTests.test_requires_stable_baseline_and_fixed_slack) ... ok
+test_streak_resets_on_memory_process_or_exit_failure (test_probe.ReclaimTests.test_streak_resets_on_memory_process_or_exit_failure) ... ok
+test_context_check_requires_independent_worker_pid_and_correct_uuid (test_probe.SafetyTests.test_context_check_requires_independent_worker_pid_and_correct_uuid) ... ok
+test_foreground_mps_queries_real_pipe_and_preserves_original_alias (test_probe.SafetyTests.test_foreground_mps_queries_real_pipe_and_preserves_original_alias) ... ok
+test_mps_error_text_is_not_an_empty_client_list (test_probe.SafetyTests.test_mps_error_text_is_not_an_empty_client_list) ... ok
+test_mps_query_failure_and_stderr_are_fatal (test_probe.SafetyTests.test_mps_query_failure_and_stderr_are_fatal) ... ok
+test_pidfd_identity_and_gpu_checks_precede_signal (test_probe.SafetyTests.test_pidfd_identity_and_gpu_checks_precede_signal) ... ok
+test_unlocatable_mps_daemon_stops_case (test_probe.SafetyTests.test_unlocatable_mps_daemon_stops_case) ... ok
+test_coordinate_mapping_and_compression (test_probe.TopologyTests.test_coordinate_mapping_and_compression) ... ok
+test_epoch_validation_rejects_replaced_survivor_or_tensor (test_probe.TopologyTests.test_epoch_validation_rejects_replaced_survivor_or_tensor) ... ok
+test_fault_ranks_derive_from_coordinates_not_constants (test_probe.TopologyTests.test_fault_ranks_derive_from_coordinates_not_constants) ... ok
+test_twenty_independent_launches_and_sixty_prefixes (test_probe.TopologyTests.test_twenty_independent_launches_and_sixty_prefixes) ... ok
+test_uuid_uniqueness_and_gpu_count (test_probe.TopologyTests.test_uuid_uniqueness_and_gpu_count) ... ok
+test_controller_full_lifecycle_over_real_tcpstore (test_protocol.ProtocolTests.test_controller_full_lifecycle_over_real_tcpstore) ... [W1017 18:47:50.000000000 socket.cpp:764] [c10d] The client socket has failed to connect to [ksqbxm]:11023 (system error: 10049 - 在其上下文中，该请求的地址无效。).
+[W1017 18:47:50.000000000 socket.cpp:764] [c10d] The client socket has failed to connect to [ksqbxm]:11023 (system error: 10049 - 在其上下文中，该请求的地址无效。).
+{
+  "fault_coordinates": [
+    {
+      "slot": 8,
+      "node": "SL3061",
+      "gpu_uuid": "GPU-SL3061-0",
+      "gpu_index": 0,
+      "replica": "EDP0",
+      "ep": 0,
+      "etp": 0
+    },
+    {
+      "slot": 9,
+      "node": "SL3061",
+      "gpu_uuid": "GPU-SL3061-1",
+      "gpu_index": 1,
+      "replica": "EDP0",
+      "ep": 0,
+      "etp": 1
+    },
+    {
+      "slot": 12,
+      "node": "SL3061",
+      "gpu_uuid": "GPU-SL3061-4",
+      "gpu_index": 4,
+      "replica": "EDP0",
+      "ep": 1,
+      "etp": 0
+    },
+    {
+      "slot": 13,
+      "node": "SL3061",
+      "gpu_uuid": "GPU-SL3061-5",
+      "gpu_index": 5,
+      "replica": "EDP0",
+      "ep": 1,
+      "etp": 1
+    }
+  ]
+}
+[W1017 18:47:51.000000000 socket.cpp:764] [c10d] The client socket has failed to connect to [ksqbxm]:11029 (system error: 10049 - 在其上下文中，该请求的地址无效。).
+[W1017 18:47:51.000000000 socket.cpp:764] [c10d] The client socket has failed to connect to [ksqbxm]:11029 (system error: 10049 - 在其上下文中，该请求的地址无效。).
+{
+  "fault_coordinates": [
+    {
+      "slot": 8,
+      "node": "SL3061",
+      "gpu_uuid": "GPU-SL3061-0",
+      "gpu_index": 0,
+      "replica": "EDP0",
+      "ep": 0,
+      "etp": 0
+    },
+    {
+      "slot": 9,
+      "node": "SL3061",
+      "gpu_uuid": "GPU-SL3061-1",
+      "gpu_index": 1,
+      "replica": "EDP0",
+      "ep": 0,
+      "etp": 1
+    },
+    {
+      "slot": 12,
+      "node": "SL3061",
+      "gpu_uuid": "GPU-SL3061-4",
+      "gpu_index": 4,
+      "replica": "EDP0",
+      "ep": 1,
+      "etp": 0
+    },
+    {
+      "slot": 13,
+      "node": "SL3061",
+      "gpu_uuid": "GPU-SL3061-5",
+      "gpu_index": 5,
+      "replica": "EDP0",
+      "ep": 1,
+      "etp": 1
+    }
+  ]
+}
+[W1017 18:47:52.000000000 socket.cpp:764] [c10d] The client socket has failed to connect to [ksqbxm]:11034 (system error: 10049 - 在其上下文中，该请求的地址无效。).
+[W1017 18:47:52.000000000 socket.cpp:764] [c10d] The client socket has failed to connect to [ksqbxm]:11034 (system error: 10049 - 在其上下文中，该请求的地址无效。).
+{
+  "fault_coordinates": [
+    {
+      "slot": 8,
+      "node": "SL3061",
+      "gpu_uuid": "GPU-SL3061-0",
+      "gpu_index": 0,
+      "replica": "EDP0",
+      "ep": 0,
+      "etp": 0
+    },
+    {
+      "slot": 9,
+      "node": "SL3061",
+      "gpu_uuid": "GPU-SL3061-1",
+      "gpu_index": 1,
+      "replica": "EDP0",
+      "ep": 0,
+      "etp": 1
+    },
+    {
+      "slot": 12,
+      "node": "SL3061",
+      "gpu_uuid": "GPU-SL3061-4",
+      "gpu_index": 4,
+      "replica": "EDP0",
+      "ep": 1,
+      "etp": 0
+    },
+    {
+      "slot": 13,
+      "node": "SL3061",
+      "gpu_uuid": "GPU-SL3061-5",
+      "gpu_index": 5,
+      "replica": "EDP0",
+      "ep": 1,
+      "etp": 1
+    }
+  ]
+}
+[W1017 18:47:53.000000000 socket.cpp:764] [c10d] The client socket has failed to connect to [ksqbxm]:11040 (system error: 10049 - 在其上下文中，该请求的地址无效。).
+[W1017 18:47:53.000000000 socket.cpp:764] [c10d] The client socket has failed to connect to [ksqbxm]:11040 (system error: 10049 - 在其上下文中，该请求的地址无效。).
+{
+  "fault_coordinates": [
+    {
+      "slot": 8,
+      "node": "SL3061",
+      "gpu_uuid": "GPU-SL3061-0",
+      "gpu_index": 0,
+      "replica": "EDP0",
+      "ep": 0,
+      "etp": 0
+    },
+    {
+      "slot": 9,
+      "node": "SL3061",
+      "gpu_uuid": "GPU-SL3061-1",
+      "gpu_index": 1,
+      "replica": "EDP0",
+      "ep": 0,
+      "etp": 1
+    },
+    {
+      "slot": 12,
+      "node": "SL3061",
+      "gpu_uuid": "GPU-SL3061-4",
+      "gpu_index": 4,
+      "replica": "EDP0",
+      "ep": 1,
+      "etp": 0
+    },
+    {
+      "slot": 13,
+      "node": "SL3061",
+      "gpu_uuid": "GPU-SL3061-5",
+      "gpu_index": 5,
+      "replica": "EDP0",
+      "ep": 1,
+      "etp": 1
+    }
+  ]
+}
+ok
+test_notification_arrives_while_pg_store_connection_is_blocked (test_protocol.ProtocolTests.test_notification_arrives_while_pg_store_connection_is_blocked) ... [W1017 18:47:54.000000000 socket.cpp:764] [c10d] The client socket has failed to connect to [ksqbxm]:11045 (system error: 10049 - 在其上下文中，该请求的地址无效。).
+[W1017 18:47:54.000000000 socket.cpp:764] [c10d] The client socket has failed to connect to [ksqbxm]:11045 (system error: 10049 - 在其上下文中，该请求的地址无效。).
+[W1017 18:47:54.000000000 socket.cpp:764] [c10d] The client socket has failed to connect to [ksqbxm]:11045 (system error: 10049 - 在其上下文中，该请求的地址无效。).
+ok
+test_real_store_prefix_isolation_and_missing_key_timeout (test_protocol.ProtocolTests.test_real_store_prefix_isolation_and_missing_key_timeout) ... [W1017 18:47:54.000000000 socket.cpp:764] [c10d] The client socket has failed to connect to [ksqbxm]:11052 (system error: 10049 - 在其上下文中，该请求的地址无效。).
+[W1017 18:47:54.000000000 socket.cpp:764] [c10d] The client socket has failed to connect to [ksqbxm]:11052 (system error: 10049 - 在其上下文中，该请求的地址无效。).
+ok
+test_terminal_exchange_propagates_peer_cleanup_failure (test_protocol.ProtocolTests.test_terminal_exchange_propagates_peer_cleanup_failure) ... [W1017 18:47:54.000000000 socket.cpp:764] [c10d] The client socket has failed to connect to [ksqbxm]:11057 (system error: 10049 - 在其上下文中，该请求的地址无效。).
+[W1017 18:47:54.000000000 socket.cpp:764] [c10d] The client socket has failed to connect to [ksqbxm]:11057 (system error: 10049 - 在其上下文中，该请求的地址无效。).
+[W1017 18:47:54.000000000 socket.cpp:764] [c10d] The client socket has failed to connect to [ksqbxm]:11062 (system error: 10049 - 在其上下文中，该请求的地址无效。).
+[W1017 18:47:54.000000000 socket.cpp:764] [c10d] The client socket has failed to connect to [ksqbxm]:11062 (system error: 10049 - 在其上下文中，该请求的地址无效。).
+ok
+test_default_and_quick_case_matrices (test_quick.QuickTests.test_default_and_quick_case_matrices) ... ok
+test_failure_paths_never_print_pass (test_quick.QuickTests.test_failure_paths_never_print_pass) ... ok
+test_pass_requires_restoration_packaging_and_both_modes (test_quick.QuickTests.test_pass_requires_restoration_packaging_and_both_modes) ... ok
+test_step3_reports_rejoin_pause (test_quick.QuickTests.test_step3_reports_rejoin_pause) ... ok
+test_repeats_alternate_and_quick_success_is_not_main_acceptance (test_rejoin.RejoinTests.test_repeats_alternate_and_quick_success_is_not_main_acceptance) ... ok
+test_repository_accepts_untracked_but_rejects_modified_and_staged (test_rejoin.RejoinTests.test_repository_accepts_untracked_but_rejects_modified_and_staged) ... ok
+test_service_does_not_hide_compute_or_notification_failure (test_rejoin.RejoinTests.test_service_does_not_hide_compute_or_notification_failure) ... ok
+test_service_wait_is_bounded_and_rejects_early_transition (test_rejoin.RejoinTests.test_service_wait_is_bounded_and_rejects_early_transition) ... ok
+test_low_space_prevents_launch_and_records_failure (test_server_environment.DiskSpaceTests.test_low_space_prevents_launch_and_records_failure) ... ok
+test_threshold_and_usage_are_logged_even_on_failure (test_server_environment.DiskSpaceTests.test_threshold_and_usage_are_logged_even_on_failure) ... ok
+test_known_foreign_clients_are_queried_and_recorded (test_server_environment.MpsEnvironmentTests.test_known_foreign_clients_are_queried_and_recorded) ... ok
+test_unknown_daemon_pipe_is_recorded_only_in_shared_mode (test_server_environment.MpsEnvironmentTests.test_unknown_daemon_pipe_is_recorded_only_in_shared_mode) ... ok
+test_worker_proves_own_compute_context_and_pipe_isolation (test_server_environment.MpsEnvironmentTests.test_worker_proves_own_compute_context_and_pipe_isolation) ... ok
+test_missing_python_interfaces_use_exact_syscalls (test_server_environment.PidfdTests.test_missing_python_interfaces_use_exact_syscalls) ... ok
+test_native_interfaces_preferred_and_errors_not_retried (test_server_environment.PidfdTests.test_native_interfaces_preferred_and_errors_not_retried) ... ok
+test_surveyed_environment_uses_syscall_open_and_native_send (test_server_environment.PidfdTests.test_surveyed_environment_uses_syscall_open_and_native_send) ... ok
+test_syscall_errno_is_preserved (test_server_environment.PidfdTests.test_syscall_errno_is_preserved) ... ok
+test_unsupported_platform_never_calls_syscall (test_server_environment.PidfdTests.test_unsupported_platform_never_calls_syscall) ... ok
+test_baseline_fluctuations_are_reference_only (test_shared_gpu.SharedGpuTests.test_baseline_fluctuations_are_reference_only) ... ok
+test_busy_foreign_preflight_allowed_only_when_enabled (test_shared_gpu.SharedGpuTests.test_busy_foreign_preflight_allowed_only_when_enabled) ... ok
+test_foreign_mps_clients_allowed_only_in_shared_mode (test_shared_gpu.SharedGpuTests.test_foreign_mps_clients_allowed_only_in_shared_mode) ... ok
+test_gpu_xml_keeps_per_process_memory_and_unavailable_value (test_shared_gpu.SharedGpuTests.test_gpu_xml_keeps_per_process_memory_and_unavailable_value) ... ok
+test_nodes_must_agree_on_shared_mode_before_workers_start (test_shared_gpu.SharedGpuTests.test_nodes_must_agree_on_shared_mode_before_workers_start) ... ok
+test_reclaim_requires_exit_and_absence_even_with_zero_or_unknown_memory (test_shared_gpu.SharedGpuTests.test_reclaim_requires_exit_and_absence_even_with_zero_or_unknown_memory) ... ok
+test_runtime_foreign_arrivals_do_not_relax_worker_identity (test_shared_gpu.SharedGpuTests.test_runtime_foreign_arrivals_do_not_relax_worker_identity) ... ok
+test_summary_labels_shared_timings_and_requires_twenty_successes (test_shared_gpu.SharedGpuTests.test_summary_labels_shared_timings_and_requires_twenty_successes) ... ok
+test_supervisor_full_shared_lifecycle_with_fluctuating_foreign_memory (test_shared_gpu.SharedGpuTests.test_supervisor_full_shared_lifecycle_with_fluctuating_foreign_memory) ... ok
+test_budget_refuses_before_weight_open_and_modes_report_peaks (test_sources.SourcesTests.test_budget_refuses_before_weight_open_and_modes_report_peaks) ... ok
+test_demand_does_not_open_unselected_checkpoint_shards (test_sources.SourcesTests.test_demand_does_not_open_unselected_checkpoint_shards) ... ok
+test_host_D_M_no_S_and_partial_GPU_complement (test_sources.SourcesTests.test_host_D_M_no_S_and_partial_GPU_complement) ... ok
+test_load_aware_choices_and_cache_invalidates_coverage_epoch_profile_rank (test_sources.SourcesTests.test_load_aware_choices_and_cache_invalidates_coverage_epoch_profile_rank) ... ok
+test_local_has_no_L_S_D_but_keeps_transfer (test_sources.SourcesTests.test_local_has_no_L_S_D_but_keeps_transfer) ... ok
+test_measured_node_capacity_can_reject_fast_single_card_host (test_sources.SourcesTests.test_measured_node_capacity_can_reject_fast_single_card_host) ... ok
+test_missing_coverage_expert_foreign_host_failed_and_rank_rejected (test_sources.SourcesTests.test_missing_coverage_expert_foreign_host_failed_and_rank_rejected) ... ok
+test_one_backing_survives_attachment_close_and_rejoin (test_sources.SourcesTests.test_one_backing_survives_attachment_close_and_rejoin) ... ok
+test_partial_TP4_and_TP2_keep_old_coordinates (test_sources.SourcesTests.test_partial_TP4_and_TP2_keep_old_coordinates) ... ok
+test_profile_fit_positive_and_no_silent_missing_sample (test_sources.SourcesTests.test_profile_fit_positive_and_no_silent_missing_sample) ... ok
+test_emulate_two_rounds_demand (test_sources_protocol.SourceProtocolTests.test_emulate_two_rounds_demand) ... ok
+test_real_replacements_full_library (test_sources_protocol.SourceProtocolTests.test_real_replacements_full_library) ... ok
+test_forward_boundary_waits_for_active_call_and_blocks_next_call (test_topology.BindingTests.test_forward_boundary_waits_for_active_call_and_blocks_next_call) ... ok
+test_group_rebind_preserves_pointers_metadata_and_forward (test_topology.BindingTests.test_group_rebind_preserves_pointers_metadata_and_forward) ... ok
+test_shape_change_is_source_only_not_fake_resharding (test_topology.BindingTests.test_shape_change_is_source_only_not_fake_resharding) ... ok
+test_actual_sorting_updates_local_map_without_relabeling_sources (test_topology.GroupTests.test_actual_sorting_updates_local_map_without_relabeling_sources) ... ok
+test_copy_peer_rank_mode_is_opt_in (test_topology.GroupTests.test_copy_peer_rank_mode_is_opt_in) ... ok
+test_every_rank_creates_same_groups_including_nonmembers (test_topology.GroupTests.test_every_rank_creates_same_groups_including_nonmembers) ... ok
+test_failed_gpu_cannot_join_marker_ring (test_topology.GroupTests.test_failed_gpu_cannot_join_marker_ring) ... ok
+test_homogeneous_entry_unchanged (test_topology.GroupTests.test_homogeneous_entry_unchanged) ... ok
+test_invalid_replica_specs (test_topology.GroupTests.test_invalid_replica_specs) ... ok
+test_default_mode_and_invalid_scenario (test_topology.MembershipTests.test_default_mode_and_invalid_scenario) ... ok
+test_drain_failure_stops_before_cache_reuse (test_topology.MembershipTests.test_drain_failure_stops_before_cache_reuse) ... ok
+test_epoch_caches_and_pending_work_are_disposed_before_new_world (test_topology.MembershipTests.test_epoch_caches_and_pending_work_are_disposed_before_new_world) ... ok
+test_failure_callback_cannot_leave_apparently_normal_world (test_topology.MembershipTests.test_failure_callback_cannot_leave_apparently_normal_world) ... ok
+test_modes_share_device_membership_and_source_roles (test_topology.MembershipTests.test_modes_share_device_membership_and_source_roles) ... ok
+test_old_events_wrong_rounds_and_rank_lists_are_rejected (test_topology.MembershipTests.test_old_events_wrong_rounds_and_rank_lists_are_rejected) ... ok
+test_reuse_optimizer_counts_actual_byte_spans_and_ties (test_topology.MembershipTests.test_reuse_optimizer_counts_actual_byte_spans_and_ties) ... ok
+test_emulate_two_rounds_actual_controller_and_worker_algorithms (test_topology_protocol.ProtocolTests.test_emulate_two_rounds_actual_controller_and_worker_algorithms) ... ok
+test_real_replacements_actual_controller_and_worker_algorithms (test_topology_protocol.ProtocolTests.test_real_replacements_actual_controller_and_worker_algorithms) ... ok
+test_correctness_switch_and_quick_enable_shared_test_only_mode (test_topology_review.ModeTests.test_correctness_switch_and_quick_enable_shared_test_only_mode) ... ok
+test_mode_summary_requires_every_selected_launch (test_topology_review.ModeTests.test_mode_summary_requires_every_selected_launch) ... ok
+test_removed_step2_flag_is_not_a_compatibility_alias (test_topology_review.ModeTests.test_removed_step2_flag_is_not_a_compatibility_alias) ... ok
+test_emulate_supervisor_rejoin_keeps_all_registered_cuda_contexts (test_topology_review.ReviewTests.test_emulate_supervisor_rejoin_keeps_all_registered_cuda_contexts) ... ok
+test_ep_and_dp_pair_actual_tp_coordinates_after_api_sorting (test_topology_review.ReviewTests.test_ep_and_dp_pair_actual_tp_coordinates_after_api_sorting) ... ok
+test_invalid_local_orders_fail_before_membership_mutation (test_topology_review.ReviewTests.test_invalid_local_orders_fail_before_membership_mutation) ... ok
+test_next_round_rekeys_caches_and_keeps_current_forward_available (test_topology_review.ReviewTests.test_next_round_rekeys_caches_and_keeps_current_forward_available) ... ok
+test_old_binding_stays_blocked_after_new_epoch_activation (test_topology_review.ReviewTests.test_old_binding_stays_blocked_after_new_epoch_activation) ... ok
+test_real_preflight_still_requires_dead_victims_and_reclaimed_memory (test_topology_review.ReviewTests.test_real_preflight_still_requires_dead_victims_and_reclaimed_memory) ... ok
+test_rejected_nested_forward_does_not_release_outer_boundary (test_topology_review.ReviewTests.test_rejected_nested_forward_does_not_release_outer_boundary) ... ok
+test_unsupported_native_handles_rejected_before_any_group_mutation (test_topology_review.ReviewTests.test_unsupported_native_handles_rejected_before_any_group_mutation) ... ok
+
+----------------------------------------------------------------------
+Ran 99 tests in 11.910s
+
+OK
