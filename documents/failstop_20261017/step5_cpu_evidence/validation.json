@@ -1,0 +1,84 @@
+{
+  "step": 5,
+  "label": "step05_model_correctness",
+  "batch": "first: deterministic-mode contract, cross-mode plan consistency, step-time ratio, per-GPU memory preflight, quick entry",
+  "branch": "codex/failstop",
+  "branch_base": "b6f1e6a (router determinism registration)",
+  "code_commit": "9405ed65c00d573938032e8c94a0d795258427fb",
+  "quick_manifest_commit": "see Step5_服务器命令.md (releases.json step5 pin commit)",
+  "read_before_code": [
+    "CODEX.md",
+    "documents/failstop_20261017/00_总计划.md",
+    "documents/failstop_20261017/05_Step5_模型正确性.md",
+    "documents/failstop_20261017/路由确定性检查_服务器命令.md",
+    "documents/failstop_20261017/Step3_实现与验证.md",
+    "documents/failstop_20261017/Step4_实现与验证.md",
+    "documents/failstop_20261017/Step4_服务器命令.md",
+    "code/current/AGENTS.md"
+  ],
+  "user_instructions_2026-10-17": [
+    "develop Step 5 on codex/failstop; implement the Step 5 §2.1 deterministic-mode contract",
+    "bitwise checks require both sides under --deterministic-mode; add the default-vs-deterministic migration plan consistency check; the quick check records the deterministic/default per-step time ratio",
+    "Step 3/4 GPU quick checks not yet passed (SL3060 memory occupied): Step 5 developed and tested on CPU; server order stays Step 3 -> Step 4 -> Step 5",
+    "Step 5 quick preflight lists per-GPU memory for the real model with TP2/TP4 layouts coexisting",
+    "fix Step 3/4 interface problems found during Step 5 directly and list them"
+  ],
+  "source_sha256": {
+    "code/current/tools/resharding/correctness/router_determinism_driver.py": "4915d2893452af405204592a99a88114b8a0e8c15d243553982e4905296c063c",
+    "code/current/tools/resharding/failstop/common.py": "e7c60af893e7c2f1fdcca8f26c84bde28882775480107c8372f11256a0139b97",
+    "code/current/tools/resharding/failstop/determinism.py": "432a3c30ef9035261d967db33a105b9f1fcbc50a75e99f2d6ccc2d33be13f652",
+    "code/current/tools/resharding/failstop/model_memory.py": "608f910f79065390ff2eccc15abdc95bc749e64b3fffbab698b302cbe486228c",
+    "code/current/tools/resharding/failstop/model_reference.py": "b316f8803c938065fdd9a228a9baaf62dca07d5acb1d3fedc4702d5bf8cc1c9c",
+    "code/current/tools/resharding/failstop/quick_check.sh": "cc2c7b7340ba8b4bbc804d5c7388b759fd8f735e05adf847e94de5300c34ae33",
+    "code/current/tools/resharding/failstop/quick_driver.py": "4a0016f1a40915d484f0c6c5f2b45470a3705c152d966ba5d9ca48f5b18b6a4c",
+    "code/current/tools/resharding/failstop/run_model.py": "ec07498c228cef71d2413fdb1f8c8a9e473bdcc64d8c70ffbebbe5e1113e1cf0",
+    "code/current/tools/resharding/failstop/run_topology.py": "ea299027343b631f119ed9504e5a51cb8b6723666fef81991a12f9a4cdd7a7dc",
+    "code/current/tools/resharding/failstop/source_runtime.py": "1c2a40465674fb15319af5edd79dd19728ff0862156d10180b0d6043ff76a95b",
+    "code/current/tools/resharding/failstop/test_model.py": "0bb6f063bf82f810caef47ceeb2381373dd63939cc1b1c85d2f2c52e9d0fcf0a",
+    "code/current/tools/resharding/failstop/test_quick.py": "cfecf9c1f22c4d125d6dda61e33b12397f53f8dde8e7a636ac600fd1841186ee",
+    "code/current/tools/resharding/failstop/test_sources_protocol.py": "ffdcdf3dd3245d5dc9b59d34dfd325c01ea8fbf938ca727d3c0e534b9c82fd0e",
+    "code/current/tools/resharding/failstop/topology_probe.py": "8ecf2596c0f8dab85ce80d4039a093aff70d03b31632c999d7669290b15f9965"
+  },
+  "source_hash_kind": "Git blob bytes at code_commit",
+  "environment": {"platform": "Windows 11", "python": "3.13.12", "torch": "2.14.0+cpu", "isort": "9.0.2", "uv": "not installed; python -m isort used"},
+  "tests": {
+    "failstop_unittest": {"count": 135, "baseline": 117, "new_in_step5": 18, "status": "passed", "log": "cpu_tests.log",
+      "command": "python -B -X utf8 -m unittest discover -s code/current/tools/resharding/failstop -p 'test_*.py' -v"},
+    "packing_and_source_search": {"count": 56, "status": "passed", "log": "packing.log"},
+    "router_determinism_unittest": {"count": 10, "status": "passed", "note": "after extracting model_arguments from torchrun_command"},
+    "static_checks": {"isort": "passed", "py_compile": "passed", "bash_n": "passed", "git_diff_check": "passed"},
+    "dry_run": {"log": "dry_run.log", "cases": ["run_model.py SL3061 quick -> tp2", "run_model.py SL3060 formal -> tp4", "run_sources.py --profile-file fixture -> profile_sha256 in config"]},
+    "gpu": {"status": "not_run", "note": "server order Step 3 -> Step 4 -> Step 5; SL3060 memory occupied at the time"}
+  },
+  "contract_coverage": [
+    "mode manifest: argument, torch deterministic algorithms, NCCL_ALGO=Ring, CUBLAS_WORKSPACE_CONFIG=:4096:8 all required; each missing piece named",
+    "compare_records refuses a default-mode side and differing layout/history/parameter checksum; reports dtype, shape, first mismatch index/value/bits, history and parameter hashes",
+    "1 ULP bf16 (0x3f80 -> 0x3f81) and shape mismatches detected",
+    "normalize_tasks equals Step 3 normalized(); temporary ranks ignored; first differing task and fields named; task count and profile hash differences reported",
+    "step_time_ratio pairs by layout/step/context; medians for prefill and decode; overhead scope",
+    "memory roles by fault coordinates; windows equal formula and PeakBudget fields; 16-GPU table; shortages name GPU and role; reference-run shortages",
+    "driver command/environment per role; real Megatron parse_args accepts --deterministic-mode plus mr-* arguments; evaluate/summarize failure paths; dry-run layouts",
+    "quick_driver step 5 acceptance and failure paths",
+    "Step 3 protocol double with frozen profile: collector not called; default- and deterministic-environment launches plan identically; tampered bytes located"
+  ],
+  "memory_plan_bytes_seq128": {
+    "tp2_weight_per_gpu": 8512592896, "tp4_weight_per_gpu": 4259830784,
+    "tp2_kv_per_gpu": 17694720, "tp4_kv_per_gpu": 8847360, "margin": 2147483648,
+    "edp0_survivor_shrink_window": 23459042304, "edp0_survivor_expand_window": 19206280192,
+    "edp0_rejoin_expand_window": 10675992576, "edp1_steady": 10675992576,
+    "reference_run_tp2_per_gpu": 10677771264, "reference_run_tp4_per_gpu": 6416161792,
+    "receive_and_send_buffers": "upper bound: one wave entirely remote, bounded by target/own shard bytes",
+    "verified_on_gpu": false
+  },
+  "step3_step4_interface_fixes": [
+    "run_sources.py --profile-file: frozen profile (hash + device identity checked, profile_frozen event, controller compares profile_sha256 across nodes); needed so default- and deterministic-mode launches plan over one profile",
+    "source_plan_*.json now stores membership/epoch/rank_map/sources/targets/profile_source/environment for offline comparison",
+    "quick_driver.py selects runner arguments and acceptance fields per step (edp1_rejoin_pause_s only for Steps 2-4)"
+  ],
+  "not_implemented": [
+    "real-model fail->shrink->rejoin->expand integration (A6 matrix per event)",
+    "A7 weight-only smoke, run_failstop_smoke.sh, emulate --rounds reset, real per-round launches, KV reference",
+    "candidate is a fresh checkpoint load, not the migrated model",
+    "server-side plan consistency run (two Step 3 launches with one --profile-file, one per mode)"
+  ]
+}

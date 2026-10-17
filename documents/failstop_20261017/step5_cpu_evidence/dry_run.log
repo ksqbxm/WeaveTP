@@ -1,0 +1,58 @@
+# run_model.py --dry-run SL3061 quick
+{
+  "step": 5,
+  "probe": "step05_model_correctness",
+  "node": "SL3061",
+  "layouts": [
+    "tp2"
+  ],
+  "roles": [
+    "reference",
+    "candidate",
+    "timing"
+  ],
+  "output": "\\data\\ubuntu\\lxh\\weavetp\\acceptance\\step05_model_correctness\\s5q_dry",
+  "quick_mode": true,
+  "correctness_only": true,
+  "shared_gpu_mode": true,
+  "timing_valid": false
+}
+# run_model.py --dry-run SL3060 formal
+{
+  "step": 5,
+  "probe": "step05_model_correctness",
+  "node": "SL3060",
+  "layouts": [
+    "tp4"
+  ],
+  "roles": [
+    "reference",
+    "candidate",
+    "timing"
+  ],
+  "output": "\\data\\ubuntu\\lxh\\weavetp\\acceptance\\step05_model_correctness\\s5_dry",
+  "quick_mode": false,
+  "correctness_only": false,
+  "shared_gpu_mode": false,
+  "timing_valid": false
+}
+# run_sources.py --dry-run with --profile-file (frozen profile fixture)
+{
+  "cases": [
+    {
+      "mode": "emulate",
+      "rounds": 5,
+      "launch": "s3_dry_emulate"
+    }
+  ],
+  "quick_mode": true,
+  "correctness_only": true,
+  "shared_gpu_mode": true,
+  "timing_valid": false,
+  "output": "\\data\\x",
+  "node": "SL3060",
+  "step": 3,
+  "profile_only": false,
+  "host_library_mode": "on-demand",
+  "profile_sha256": "242281b3dc291c9b39b6b509e2d85381ca4c9b0b41e036cf2950d2310f37dca4"
+}
