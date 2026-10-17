@@ -1,8 +1,8 @@
 {
   "check": "router_determinism",
   "branch": "codex/failstop",
-  "code_commit": "7472af24113e534516db5e168965a91b0518289f",
-  "manifest_commit": "dbebcf7bd04170fe7ac7ef760f8657ea81845ce0",
+  "code_commit": "36beb5ed481c8b5da6a00f49643e9c9e69598f51",
+  "manifest_commit": "2fbe24590d7f1d3715c1b4e5869ce9d45aaac004",
   "read_before_code": [
     "CODEX.md",
     "documents/failstop_20261017/00_总计划.md",
@@ -23,29 +23,81 @@
   ],
   "tests": {
     "unittest": {
-      "count": 9,
+      "count": 10,
       "status": "passed",
-      "log": "cpu_tests.log",
+      "log": "cpu_tests_fix1.log",
       "command": "python -B -X utf8 -m unittest discover -s code/current/tools/resharding/correctness -p test_router_determinism.py -v"
     },
-    "failstop_regression": {"count": 99, "status": "passed", "note": "unchanged files; run on codex/failstop e40164f + this change"},
-    "gpu": {"status": "not_run", "tp2": "not_run", "tp4": "not_run", "elapsed_budget_900s": "not_measured"}
+    "failstop_regression": {
+      "count": 99,
+      "status": "passed",
+      "note": "unchanged files; run on codex/failstop e40164f + this change"
+    },
+    "gpu": {
+      "status": "not_run",
+      "tp2": "not_run",
+      "tp4": "not_run",
+      "elapsed_budget_900s": "not_measured"
+    }
   },
-  "static_checks": {"isort": "passed", "ruff_F": "passed", "bash_n": "passed"},
+  "static_checks": {
+    "isort": "passed",
+    "ruff_F": "passed",
+    "bash_n": "passed"
+  },
   "memory_plan": {
     "formula_total_parameters_tp1": 15706484224,
-    "tp2": {"weight_bytes_per_gpu": 8512592896, "kv_cache_bytes_max_seq_128": 17694720, "margin_bytes": 2147483648},
-    "tp4": {"weight_bytes_per_gpu": 4259830784, "kv_cache_bytes_max_seq_128": 8847360, "margin_bytes": 2147483648},
+    "tp2": {
+      "weight_bytes_per_gpu": 8512592896,
+      "kv_cache_bytes_max_seq_128": 17694720,
+      "margin_bytes": 2147483648
+    },
+    "tp4": {
+      "weight_bytes_per_gpu": 4259830784,
+      "kv_cache_bytes_max_seq_128": 8847360,
+      "margin_bytes": 2147483648
+    },
     "verified_on_gpu": false
   },
-  "logs_sha256": {"cpu_tests.log": "0cc57b8c7afceb9f87f60c66d582b0ccd7ee24aff751809cf7c6b29e56e46c13"},
+  "logs_sha256": {
+    "cpu_tests.log": "0cc57b8c7afceb9f87f60c66d582b0ccd7ee24aff751809cf7c6b29e56e46c13",
+    "cpu_tests_fix1.log": "7c032f8209a8bc5fefc5edc233bd608d822423777a5fa6fb8a8e61f11b0cd243"
+  },
   "bundle": {
-    "path": "C:\\Users\\ksqbx\\.codex\\worktrees\\failstop\\router_determinism_dbebcf7.bundle",
-    "bytes": 890416,
-    "sha256": "679c5b882b4b03b99c207cf3cf8ab9621e161b4f57bfcbe7b8df9350c73e9d2e",
+    "path": "C:/Users/ksqbx/.codex/worktrees/failstop/router_determinism_2fbe245.bundle",
+    "bytes": 969689,
+    "sha256": "fd821a98929e289e78efd41f7d5d4653e1e62f430268a21f82828fe580471ddc",
     "base": "f7d555998b45756998465924d733fd70e553d6b4",
-    "ref": "refs/heads/codex/router-determinism-dbebcf7",
-    "head": "dbebcf7bd04170fe7ac7ef760f8657ea81845ce0",
+    "ref": "refs/heads/codex/router-determinism-2fbe245",
+    "head": "2fbe24590d7f1d3715c1b4e5869ce9d45aaac004",
     "verified": true
+  },
+  "first_delivery": {
+    "code_commit": "7472af24113e534516db5e168965a91b0518289f",
+    "manifest_commit": "dbebcf7bd04170fe7ac7ef760f8657ea81845ce0",
+    "bundle": {
+      "path": "C:\\Users\\ksqbx\\.codex\\worktrees\\failstop\\router_determinism_dbebcf7.bundle",
+      "bytes": 890416,
+      "sha256": "679c5b882b4b03b99c207cf3cf8ab9621e161b4f57bfcbe7b8df9350c73e9d2e",
+      "base": "f7d555998b45756998465924d733fd70e553d6b4",
+      "ref": "refs/heads/codex/router-determinism-dbebcf7",
+      "head": "dbebcf7bd04170fe7ac7ef760f8657ea81845ce0",
+      "verified": true
+    },
+    "server_result": "FAIL after 12 s: add_args did not return the parser (user report, SL3061)"
+  },
+  "fix1": {
+    "change": "add_args returns the parser; real megatron parse_args CPU test; driver/first_mismatch simplification",
+    "unittest": {
+      "count": 10,
+      "status": "passed",
+      "log": "cpu_tests_fix1.log"
+    },
+    "local_dependency_added_for_test": "pydantic installed into %TEMP%/weavetp-step2-deps (megatron.rl import)",
+    "static_checks": {
+      "isort": "passed",
+      "ruff_F": "passed",
+      "git_diff_check": "passed"
+    }
   }
 }
