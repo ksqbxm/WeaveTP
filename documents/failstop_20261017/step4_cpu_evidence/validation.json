@@ -3,8 +3,8 @@
   "label": "step04_async_driver_and_memory",
   "branch": "codex/failstop",
   "branch_base": "69927c7effe6e2ff87133c80c4daaedad30aac89",
-  "code_commit": "0503710a3abe86e458b2b9ced240d72f38ab793a",
-  "quick_manifest_commit": "7c9aaf20fbda914eaa2969ad67fecb70ecb2f471",
+  "code_commit": "28ab6dd320f64d9b595e691252fc8ab56ccbbc70",
+  "quick_manifest_commit": "02e7bce29bf36ef9707853ef863ae20d85accc79",
   "read_before_code": [
     "CODEX.md",
     "documents/failstop_20261017/00_总计划.md",
@@ -102,15 +102,16 @@
     "packing.log": "57a916fa70cd75be895a151e77362a9412efc1a265e9a8ab73ab9bdc6c654631",
     "cpu_tests_fix1.log": "3db6724f4cecd33481411452a8923259f8d23df7f371b66866b32a7bed10a4bd",
     "cpu_tests_review.log": "ef0ac4cba48f56d91062b06eaa65698c56a91e21a2371ec5da6ca6e867cef39b",
-    "cpu_tests_merged.log": "13abab6f40772821111e7a89f55c9b01e895329d7f5d1cffda1adfaec499dcf3"
+    "cpu_tests_merged.log": "13abab6f40772821111e7a89f55c9b01e895329d7f5d1cffda1adfaec499dcf3",
+    "cpu_tests_metrics_fix.log": "ad5795bb3c38baf61e3b33b91b52504d1157ba2ff72ac982188b6bb9a58bb9b9"
   },
   "bundle": {
-    "path": "C:\\Users\\ksqbx\\.codex\\worktrees\\failstop\\step4_merged_7c9aaf2.bundle",
-    "bytes": 959057,
-    "sha256": "0aff71edc156d5d8e2d1c0ca995e61008b0ed2f44932a268f1f22226f39dab18",
+    "path": "C:/Users/ksqbx/.codex/worktrees/failstop/step4_metrics_02e7bce.bundle",
+    "bytes": 1032019,
+    "sha256": "625d7148b7c153026dfb94b03b6fd75d7d5b85f28ec2ae0fa417e2ada9aa0381",
     "base": "f7d555998b45756998465924d733fd70e553d6b4",
-    "ref": "refs/heads/codex/step4-merged-7c9aaf2",
-    "head": "7c9aaf20fbda914eaa2969ad67fecb70ecb2f471",
+    "ref": "refs/heads/codex/step4-metrics-02e7bce",
+    "head": "02e7bce29bf36ef9707853ef863ae20d85accc79",
     "verified": true
   },
   "remote_before_commit": "origin/codex/failstop = 69927c7effe6e2ff87133c80c4daaedad30aac89; origin has no codex/failstop-step4",
@@ -196,6 +197,26 @@
       "bash_n": "passed",
       "git_diff_check": "passed",
       "run_async_dry_run": "passed"
+    },
+    "server_quick_check": {
+      "manifest_commit": "7c9aaf20fbda914eaa2969ad67fecb70ecb2f471",
+      "suite": "s4q_20261017T160602_33f20a9d",
+      "cases": "emulate and real_00 passed on both nodes",
+      "edp1_rejoin_pause_s_SL3060": 6.09,
+      "result": "FAIL: SL3061 suite summary KeyError 'metrics'"
+    }
+  },
+  "metrics_fix": {
+    "change": "edp1_rejoin_pause_s computed and validated on SL3060 only; topology_metrics bus hand-off removed for all steps",
+    "unittest": {
+      "count": 137,
+      "status": "passed",
+      "log": "cpu_tests_metrics_fix.log"
+    },
+    "static_checks": {
+      "isort": "passed",
+      "ruff_F": "passed",
+      "git_diff_check": "passed"
     }
   }
 }

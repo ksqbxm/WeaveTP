@@ -26,7 +26,7 @@ source /data/ubuntu/lxh/weavetp/env.sh && git -C "$REPO" checkout --detach 50b4a
 QUICK CHECK step=3 result=PASS (emulate shrink/expand, real shrink/expand) shared_gpu_mode=true edp1_rejoin_pause_s=<本次实测非负数值> logs=<本次目录>
 ```
 
-两机 exit_code 均须为 0，receipt.result 均须为 PASS；quick_mode=true、correctness_only=true、shared_gpu_mode=true、timing_valid=false、accepted=false。任一模式、对端、打包、恢复或清理失败都不能 PASS。指标缺失/NaN 也失败；不以停顿时长阈值判定正确性。`edp1_rejoin_pause_s` 是 real 的 EDP1 从重建前最后一次正确服务到新 16 rank 组验证后第一次正确服务的最大间隔，排除后台启动/CUDA 初始化。完整同步迁移探针间隙另见 events_actual.json 的 `edp1_rejoin_validation_gap_s`。
+两机 exit_code 均须为 0，receipt.result 均须为 PASS；quick_mode=true、correctness_only=true、shared_gpu_mode=true、timing_valid=false、accepted=false。任一模式、对端、打包、恢复或清理失败都不能 PASS。指标缺失/NaN 也失败（自 `28ab6dd320f64d9b595e691252fc8ab56ccbbc70` 起所有 step 统一：指标只由 SL3060 计算与校验，SL3061 的结论行打印 None；本页固定的 Step 3 清单 `50b4a78` 仍是两节点都携带该指标的旧路径）；不以停顿时长阈值判定正确性。`edp1_rejoin_pause_s` 是 real 的 EDP1 从重建前最后一次正确服务到新 16 rank 组验证后第一次正确服务的最大间隔，排除后台启动/CUDA 初始化。完整同步迁移探针间隙另见 events_actual.json 的 `edp1_rejoin_validation_gap_s`。
 
 查看最新结果（SL3061 使用 NODE=SL3061）：
 
