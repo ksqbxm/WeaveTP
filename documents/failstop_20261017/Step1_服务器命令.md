@@ -1,10 +1,12 @@
 # Step 1 服务器测试命令
 
-固定实现提交：`ca72cd23d2e6a92cb58e38b6b3ea8b91936ca254`（`codex/failstop`，个人仓库 `ksqbxm/WeaveTP`）。本文件是实现后的交付说明，后续文档提交不改变该实现 SHA。
+固定实现提交：`d69d5950819626b0cbd09bfa4e32ed4ebbe9396c`（`codex/failstop`，个人仓库 `ksqbxm/WeaveTP`）。本文件是实现后的交付说明，后续文档提交不改变该实现 SHA。
 
-审阅修正后 31 项 CPU 测试通过；**服务器 GPU 尚未执行**。本次只跑玩具探针，不需要 checkpoint。要求两节点各八卡空闲，原 MPS 服务保留；查询权限不足、存在客户端或不能证明独立 GPU context 时，程序失败并留证据，不修改服务。服务器需现有 PyTorch 2.11 / NCCL 2.28 构建，不在此安装或升级。
+40 项 CPU 测试通过；**服务器 GPU 尚未执行**。本次只跑玩具探针，不需要 checkpoint。要求两节点各八卡空闲，原 MPS 服务保留；查询权限不足、存在客户端或不能证明独立 GPU context 时，程序失败并留证据，不修改服务。服务器需现有 PyTorch 2.11 / NCCL 2.28 构建，不在此安装或升级。
 
 本次包含通知连接隔离、前台 MPS 识别、登记失败回收和两节点最终清理确认修正，见 [审阅报告](Step1_审阅与修正.md)。旧版命令固定的 `a609198` 不再用于本次验收。store 由最外层 launcher 持有，完成两节点清理终态交换后关闭；最终结果以 `result.json` 为准。
+
+本页为默认独占模式，命令不加共享开关。当前允许共享 GPU 的正确性测试请使用 [共享 GPU 服务器命令](Step1_共享GPU服务器命令.md)。
 
 主测试固定 **10 idle + 10 inflight，共 20 次独立 launch**。默认控制地址 `10.60.14.1`，TCPStore 端口 `29750–29769`；只在两台机器执行各自一份命令，不需要 SSH 互相拉起。先执行 SL3060，再在 10 分钟内执行 SL3061。两处 `SUITE` 必须一致；以下是首次运行名，复跑必须在两处改成新的同名值，保留旧结果。
 
@@ -18,9 +20,9 @@ source /data/ubuntu/lxh/weavetp/env.sh
 cd "$REPO"
 test -z "$(git status --porcelain)"
 git fetch https://github.com/ksqbxm/WeaveTP.git codex/failstop
-git checkout --detach ca72cd23d2e6a92cb58e38b6b3ea8b91936ca254
+git checkout --detach d69d5950819626b0cbd09bfa4e32ed4ebbe9396c
 export NODE=SL3060
-export SUITE=s1_20261017_ca72cd2_r1
+export SUITE=s1_20261017_d69d595_r1
 export RUN="/data/ubuntu/lxh/weavetp/acceptance/step01_real_probe/$SUITE"
 export PROBE="$REPO/code/current/tools/resharding/failstop/run_probe.py"
 export PYTHON
@@ -42,9 +44,9 @@ source /data/ubuntu/lxh/weavetp/env.sh
 cd "$REPO"
 test -z "$(git status --porcelain)"
 git fetch https://github.com/ksqbxm/WeaveTP.git codex/failstop
-git checkout --detach ca72cd23d2e6a92cb58e38b6b3ea8b91936ca254
+git checkout --detach d69d5950819626b0cbd09bfa4e32ed4ebbe9396c
 export NODE=SL3061
-export SUITE=s1_20261017_ca72cd2_r1
+export SUITE=s1_20261017_d69d595_r1
 export RUN="/data/ubuntu/lxh/weavetp/acceptance/step01_real_probe/$SUITE"
 export PROBE="$REPO/code/current/tools/resharding/failstop/run_probe.py"
 export PYTHON
@@ -69,7 +71,7 @@ tail -n 60 "$RUN/$NODE.nohup.log"
 
 ```bash
 cat "$RUN/$NODE.exit_code"
-"$PYTHON" -c 'import json,os,pathlib; p=pathlib.Path(os.environ["RUN"])/os.environ["NODE"]/"summary.json"; s=json.loads(p.read_text()); print(json.dumps({"accepted":s["accepted"],"groups":s["groups"],"launches":[{"launch":r["launch"],"status":r["status"]} for r in s["launches"]]},indent=2))'
+"$PYTHON" -c 'import json,os,pathlib; p=pathlib.Path(os.environ["RUN"])/os.environ["NODE"]/"summary.json"; s=json.loads(p.read_text()); print(json.dumps({"accepted":s["accepted"],"shared_gpu_mode":s["shared_gpu_mode"],"timing_note":s["timing_note"],"groups":s["groups"],"launches":[{"launch":r["launch"],"status":r["status"]} for r in s["launches"]]},indent=2))'
 ```
 
 预期两节点退出码均为 0；SL3060 的 `accepted=true`，idle/inflight 各 `count=passed=10`。SL3061 的 `accepted=false` 是设计行为：它只报告本机退出和证据，全局验收由 SL3060 计算。任何 timeout、crash、张量错误、MPS 查询失败、回收失败、清理未确认或 `not_run` 均不能放行。失败后先检查失败轮 `result.json`、`controller.jsonl`、`supervisor_error.json`、对应 worker 日志及最后成功阶段，不覆盖原目录重跑。
@@ -89,8 +91,8 @@ git checkout --detach f7d555998b45756998465924d733fd70e553d6b4
 
 首次运行的回传路径分别为：
 
-- SL3060：`/data/ubuntu/lxh/weavetp/acceptance/step01_real_probe/s1_20261017_ca72cd2_r1_SL3060.tar.gz`
-- SL3061：`/data/ubuntu/lxh/weavetp/acceptance/step01_real_probe/s1_20261017_ca72cd2_r1_SL3061.tar.gz`
+- SL3060：`/data/ubuntu/lxh/weavetp/acceptance/step01_real_probe/s1_20261017_d69d595_r1_SL3060.tar.gz`
+- SL3061：`/data/ubuntu/lxh/weavetp/acceptance/step01_real_probe/s1_20261017_d69d595_r1_SL3061.tar.gz`
 
 ## 单独可选的 shrink 能力探针
 
@@ -99,8 +101,8 @@ git checkout --detach f7d555998b45756998465924d733fd70e553d6b4
 ```bash
 cd "$REPO"
 test -z "$(git status --porcelain)"
-git checkout --detach ca72cd23d2e6a92cb58e38b6b3ea8b91936ca254
-export SUITE=s1_shrink_20261017_ca72cd2_r1
+git checkout --detach d69d5950819626b0cbd09bfa4e32ed4ebbe9396c
+export SUITE=s1_shrink_20261017_d69d595_r1
 export RUN="/data/ubuntu/lxh/weavetp/acceptance/step01_real_probe/$SUITE"
 mkdir -p "$RUN"
 nohup bash -c '"$PYTHON" -B "$PROBE" --node "$NODE" --suite-id "$SUITE" --output "$RUN" --optional-shrink; rc=$?; printf "%s\n" "$rc" > "$RUN/$NODE.exit_code"; exit "$rc"' > "$RUN/$NODE.nohup.log" 2>&1 < /dev/null &

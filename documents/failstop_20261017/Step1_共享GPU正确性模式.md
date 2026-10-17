@@ -2,6 +2,8 @@
 
 2026-10-17 按用户明确要求新增 `--allow-foreign-gpu-processes`，默认关闭。**已实现，40 项 CPU 测试通过；服务器 GPU 未运行。** 修改前已阅读 CODEX、总计划、Step 1、AGENTS 及贡献规范。默认独占模式继续要求 GPU 空闲和整卡显存回落，正式验收口径保持不变。
 
+固定实现提交：`d69d5950819626b0cbd09bfa4e32ed4ebbe9396c`。两节点可复制命令见 [共享 GPU 服务器命令](Step1_共享GPU服务器命令.md)。
+
 ## 行为与证据
 
 - 预检和每轮 config 保存 `shared_gpu_mode`。两节点模式不一致，在启动 worker 前失败。

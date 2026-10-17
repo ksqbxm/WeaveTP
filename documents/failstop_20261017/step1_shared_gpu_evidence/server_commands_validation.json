@@ -1,0 +1,75 @@
+{
+  "implementation_commit": "d69d5950819626b0cbd09bfa4e32ed4ebbe9396c",
+  "bash_syntax": [
+    {
+      "file": "Step1_服务器命令.md",
+      "block": 1,
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "file": "Step1_服务器命令.md",
+      "block": 2,
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "file": "Step1_服务器命令.md",
+      "block": 3,
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "file": "Step1_服务器命令.md",
+      "block": 4,
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "file": "Step1_服务器命令.md",
+      "block": 5,
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "file": "Step1_服务器命令.md",
+      "block": 6,
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "file": "Step1_共享GPU服务器命令.md",
+      "block": 1,
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "file": "Step1_共享GPU服务器命令.md",
+      "block": 2,
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "file": "Step1_共享GPU服务器命令.md",
+      "block": 3,
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "file": "Step1_共享GPU服务器命令.md",
+      "block": 4,
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "file": "Step1_共享GPU服务器命令.md",
+      "block": 5,
+      "exit_code": 0,
+      "stderr": ""
+    }
+  ],
+  "missing_relative_links": [],
+  "committed_source_matches_tested_hashes": true,
+  "shared_preflight_and_runner_flag_present_on_both_nodes": true,
+  "gpu_executed": false
+}

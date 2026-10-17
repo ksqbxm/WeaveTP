@@ -2,7 +2,7 @@
 
 日期：2026-10-17。分支：`codex/failstop`。范围：独立 real 玩具探针；不加载 DeepSeek，不修改原实验入口、模型、迁移算法或 AnchorTP。开始实施前完整阅读了根目录 `CODEX.md`、本目录总计划、Step 1、`code/current/AGENTS.md` 和贡献规范；后续修改核对同一组规范。阅读文件的 SHA256 保存在 [validation.json](step1_evidence/validation.json)。
 
-**已实现并完成审阅修正；31 项 CPU 测试通过；服务器 GPU 未运行；real 集成未放行。** 本轮问题与修正见 [审阅报告](Step1_审阅与修正.md)。 固定提交和两节点操作见 [服务器命令](Step1_服务器命令.md)。本地 CPU 包为 PyTorch 2.14.0+cpu，不能证明服务器 PyTorch 2.11 / NCCL 2.28 的能力。
+**已实现并完成审阅修正；40 项 CPU 测试通过；服务器 GPU 未运行；real 集成未放行。** 历史问题与修正见 [审阅报告](Step1_审阅与修正.md)；当前增加默认关闭的 [共享 GPU 正确性模式](Step1_共享GPU正确性模式.md)，下述独占检查仅在默认模式生效，MPS/身份/正确性检查在两模式均生效。 固定提交和两节点操作见 [服务器命令](Step1_服务器命令.md)。本地 CPU 包为 PyTorch 2.14.0+cpu，不能证明服务器 PyTorch 2.11 / NCCL 2.28 的能力。
 
 ## 交付文件
 
@@ -16,7 +16,7 @@
 | `worker.py` | 保留 CUDA 张量，显式 abort 和新前缀重建，逐位校验、本地计算、CUDA all-gather/all-reduce |
 | `safety.py` | 只读 `nvidia-smi`/MPS 查询、PID fd 信号、启动时间/launch/角色/GPU UUID 校验 |
 | `common.py` | 坐标/rank 映射、控制 store、时钟记录、稳定回收判据和汇总 |
-| `test_probe.py`、`test_protocol.py`、`test_cleanup.py` | CPU 单元测试和真实 TCPStore 联调；不调用 GPU |
+| `test_probe.py`、`test_protocol.py`、`test_cleanup.py`、`test_shared_gpu.py` | CPU 单元测试和真实 TCPStore 联调；不调用 GPU |
 
 没有增加通用故障层或修改默认生产路径。此入口是 Step 1 专用 real 探针，不作为总计划后续默认 emulate 的服务入口。
 
@@ -50,9 +50,9 @@ kill 的身份核对包括 Popen 登记、Linux `/proc` 启动 tick、launch/角
 
 ## 本地验证与已知限制
 
-`python -X utf8 -m unittest discover -s code/current/tools/resharding/failstop -p 'test_*.py' -v`：**31 tests 通过，无跳过**。新增覆盖独立通知连接、终态清理失败传播、登记失败资源回收、退出确认及前台 MPS。其中真实 TCPStore 联调用 CPU actor 覆盖 idle/inflight 两条完整控制协议、epoch 前缀隔离和缺失消息超时。其他覆盖坐标映射、PID/张量身份反例、监管器注入范围、禁止提前重启、MPS 查询失败、pidfd 信号前身份校验、四卡稳定回收、重叠计时和失败样本统计。
+`python -X utf8 -m unittest discover -s code/current/tools/resharding/failstop -p 'test_*.py' -v`：**40 tests 通过，无跳过**。新增覆盖独立通知连接、终态清理失败传播、登记失败资源回收、退出确认及前台 MPS。其中真实 TCPStore 联调用 CPU actor 覆盖 idle/inflight 两条完整控制协议、epoch 前缀隔离和缺失消息超时。其他覆盖坐标映射、PID/张量身份反例、监管器注入范围、禁止提前重启、MPS 查询失败、pidfd 信号前身份校验、四卡稳定回收、重叠计时和失败样本统计。
 
-`uv run isort`、Ruff F 类检查、Python 编译，以及主矩阵/可选 shrink 的 dry-run 均通过。实际 argv、退出码、源码 SHA256 与原始输出见 [验证记录](step1_review_evidence/validation.json) 和 [测试日志](step1_review_evidence/cpu_tests.log)。
+`uv run isort`、Ruff F 类检查、Python 编译，以及主矩阵/可选 shrink 的 dry-run 均通过。实际 argv、退出码、源码 SHA256 与原始输出见 [验证记录](step1_shared_gpu_evidence/validation.json) 和 [测试日志](step1_shared_gpu_evidence/cpu_tests.log)。
 
 初版真实 TCPStore 联调在 Windows 缺少 `signal.SIGKILL` 的测试夹具处失败；测试显式注入 Linux 常量后通过，没有为服务器生产代码添加平台降级。Windows c10d 输出过 IPv6/主机名连接警告，随后 loopback TCPStore 联调成功，原文保留。首次 isort 的 PowerShell 通配符未展开，改为目录参数后成功；Ruff 首次指出两个新文件的未用 import，已删除并复验。
 
