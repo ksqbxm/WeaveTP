@@ -208,7 +208,7 @@ def main():
     started, deadline = time.monotonic(), time.monotonic() + args.budget_seconds
     run = args.log_dir
     status = {'check': 'router_determinism', 'node': args.node, 'sha': args.sha, 'result': 'FAIL',
-              'quick_mode': True, 'timing_valid': False, 'accepted': False, 'layouts': {}}
+              'quick_mode': True, 'timing_valid': False, 'accepted': False}
     restore, child, results = False, None, {}
 
     def git(*argv):
@@ -247,7 +247,6 @@ def main():
             if code or not result_path.exists():
                 raise RuntimeError(f'{layout} torchrun exited {code}; see {output / "torchrun.log"}')
             results[layout] = json.loads(result_path.read_text())
-            status['layouts'][layout] = results[layout]['modes']
         status.update(summarize(layouts, results, modes))
     except BaseException:
         status.update(result='FAIL', error=traceback.format_exc())
@@ -281,8 +280,7 @@ def main():
         (run / 'final.json').write_text(json.dumps(status, indent=2) + '\n')
         code = 0 if status['result'] == 'PASS' else 1
         (run / 'exit_code').write_text(f'{code}\n')
-        verdicts = '; '.join(f"{l}: {r.get('verdict', r['status'])}" for l, r in status['layouts'].items()
-                             if isinstance(r, dict) and 'status' in r)
+        verdicts = '; '.join(f"{l}: {r.get('verdict', r['status'])}" for l, r in status.get('layouts', {}).items())
         if not verdicts and status.get('error'):
             verdicts = status['error'].strip().splitlines()[-1]
         print(json.dumps(status, indent=2), flush=True)

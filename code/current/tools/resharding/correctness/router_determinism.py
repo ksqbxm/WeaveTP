@@ -28,18 +28,22 @@ def first_mismatch(reference, candidate):
     if reference.shape != candidate.shape or reference.dtype != candidate.dtype:
         return {'kind': 'shape/dtype', 'reference': [list(reference.shape), str(reference.dtype)],
                 'candidate': [list(candidate.shape), str(candidate.dtype)]}
-    a = reference.contiguous().view(INT_VIEW[reference.element_size()]).reshape(-1)
-    b = candidate.contiguous().view(INT_VIEW[candidate.element_size()]).reshape(-1)
+    size = reference.element_size()
+    a = reference.contiguous().view(INT_VIEW[size]).reshape(-1)
+    b = candidate.contiguous().view(INT_VIEW[size]).reshape(-1)
     different = (a != b).nonzero()
     if different.numel() == 0:
         return None
     flat = int(different[0])
-    index = [int(i) for i in torch.unravel_index(torch.tensor(flat), reference.shape)]
-    width = reference.element_size() * 2
-    return {'kind': 'value', 'index': index, 'count': int(different.numel()), 'dtype': str(reference.dtype),
-            'shape': list(reference.shape),
-            'reference': {'value': reference.reshape(-1)[flat].item(), 'bits': f'0x{int(a[flat]) & (1 << reference.element_size() * 8) - 1:0{width}x}'},
-            'candidate': {'value': candidate.reshape(-1)[flat].item(), 'bits': f'0x{int(b[flat]) & (1 << candidate.element_size() * 8) - 1:0{width}x}'}}
+    mask = (1 << size * 8) - 1
+
+    def bits(value):
+        return f'0x{int(value) & mask:0{size * 2}x}'
+
+    return {'kind': 'value', 'index': [int(i) for i in torch.unravel_index(torch.tensor(flat), reference.shape)],
+            'count': int(different.numel()), 'dtype': str(reference.dtype), 'shape': list(reference.shape),
+            'reference': {'value': reference.reshape(-1)[flat].item(), 'bits': bits(a[flat])},
+            'candidate': {'value': candidate.reshape(-1)[flat].item(), 'bits': bits(b[flat])}}
 
 
 def compare_runs(reference, candidate):
@@ -68,17 +72,19 @@ def coverage(run):
 
 
 def add_args(parser):
+    """Megatron's parse_args uses the provider's return value as the parser."""
     from examples.rl.benchmark_live_moe_tp import add_live_args
 
-    add_live_args(parser)
+    parser = add_live_args(parser)
     group = parser.add_argument_group(title='router determinism')
     group.add_argument('--rd-output', type=Path, required=True)
     group.add_argument('--rd-decode-steps', type=int, default=4)
     group.add_argument('--rd-repeats', type=int, default=3)
     group.add_argument('--rd-modes', default='default,deterministic')
+    return parser
 
 
-def run_sequence(live, model, args, capture, hooks_layers):
+def run_sequence(live, model, args, capture, layers):
     """Prefill + greedy decode with a fresh KV cache; returns per-step logits and routing."""
     from megatron.core.inference.contexts import StaticInferenceContext
 
@@ -87,8 +93,8 @@ def run_sequence(live, model, args, capture, hooks_layers):
     records = []
 
     def record(logits):
-        if set(capture) != set(hooks_layers):
-            raise RuntimeError(f'router hooks fired for layers {sorted(capture)}, expected {sorted(hooks_layers)}')
+        if set(capture) != set(layers):
+            raise RuntimeError(f'router hooks fired for layers {sorted(capture)}, expected {sorted(layers)}')
         records.append({'logits': logits.detach().clone(), 'routing': dict(capture)})
         capture.clear()
         return int(logits.reshape(-1, logits.shape[-1])[-1].argmax())
@@ -123,11 +129,12 @@ def main():
     args.gradient_accumulation_fusion = False
     args.sequence_parallel = False
     initialize_megatron()
-    args = get_args()
     if args.live_model_preset != 'deepseek-v2-lite' or args.live_router_mode != 'native':
         raise ValueError('this check is defined for the DeepSeek-V2-Lite preset with the native router')
     live._validate_model_preset(args)
-    args.live_active_experts_tuple = tuple(range(args.moe_router_topk))  # read by _configure_live_model; unused natively
+    # benchmark_live_moe_tp.main derives these from its routing-override options; the
+    # native path reads them only to configure the model (unused) and to skip hotspot pressure.
+    args.live_active_experts_tuple = tuple(range(args.moe_router_topk))
     args.live_pressure_ranks_tuple = ()
     modes = args.rd_modes.split(',')
     rank = dist.get_rank()

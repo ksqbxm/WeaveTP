@@ -108,6 +108,21 @@ class SummaryTests(unittest.TestCase):
 
 
 class CommandTests(unittest.TestCase):
+    def test_real_megatron_parse_args_accepts_the_entry_arguments(self):
+        # The real parser contract: the provider must return the parser Megatron continues with.
+        from megatron.training.arguments import parse_args
+
+        command = driver.torchrun_command('py', 'tp2', [0, 1, 2, 3], '/ckpt', Path('/out'), 32, 4, 3,
+                                          ['default', 'deterministic'], 128)
+        argv = command[command.index('tools/resharding/correctness/router_determinism.py'):]
+        with patch.object(sys, 'argv', argv):
+            args = parse_args(gpu.add_args)
+        self.assertEqual((args.live_model_preset, args.live_router_mode), ('deepseek-v2-lite', 'native'))
+        self.assertEqual((args.tensor_model_parallel_size, args.expert_tensor_parallel_size, args.expert_model_parallel_size), (2, 2, 2))
+        self.assertEqual((args.moe_router_topk, args.moe_router_score_function, args.moe_router_pre_softmax, args.num_experts), (6, 'softmax', True, 64))
+        self.assertEqual((args.rd_output, args.rd_decode_steps, args.rd_repeats, args.rd_modes), (Path('/out'), 4, 3, 'default,deterministic'))
+        self.assertEqual((args.load, args.ckpt_format, args.live_prompt_tokens, args.transformer_impl), ('/ckpt', 'torch_dist', 32, 'local'))
+
     def test_torchrun_command_pins_layout_native_router_and_checkpoint(self):
         command = driver.torchrun_command('py', 'tp4', [0, 1, 2, 3, 4, 5, 6, 7], '/ckpt', Path('/out'), 32, 4, 3, ['default'], 128)
         text = ' '.join(command)
