@@ -145,7 +145,9 @@ def main():
         copier.join(timeout=10)
         if code:
             progress = run / args.node / 'progress.json'
-            if progress.exists():
+            if args.step == 5:
+                hint = f"inspect {run / args.node / 'error.txt'} and the <layout>/<role>/torchrun.log files"
+            elif progress.exists():
                 status['failed_cases'] = [r for r in json.loads(progress.read_text()) if r['status'] != 'passed']
                 hint = 'inspect per-round worker_error/controller_result logs'
             else:

@@ -52,9 +52,11 @@ def command(python, layout, role, checkpoint, output, prompt_tokens, decode_step
     return argv
 
 
-def environment(role, gpus, mps_pipe, base=None):
-    """Live-launcher runtime plus the pinned deterministic environment, or the clean default for timing."""
-    env = {k: v for k, v in (os.environ if base is None else base).items() if k not in DETERMINISTIC_ENVIRONMENT}
+def environment(role, gpus, mps_pipe):
+    """Live-launcher runtime with the default CUDA allocator, plus the pinned deterministic environment
+    for reference/candidate or the clean default configuration for timing."""
+    stripped = set(DETERMINISTIC_ENVIRONMENT) | {'PYTORCH_ALLOC_CONF', 'PYTORCH_CUDA_ALLOC_CONF'}
+    env = {k: v for k, v in os.environ.items() if k not in stripped}
     env.update(CUDA_VISIBLE_DEVICES=','.join(map(str, gpus)), NCCL_DEBUG='WARN', TORCH_NCCL_ASYNC_ERROR_HANDLING='1',
                CUDA_DEVICE_MAX_CONNECTIONS='8', CUDA_MPS_PIPE_DIRECTORY=mps_pipe, PYTHONDONTWRITEBYTECODE='1')
     if role != 'timing':
@@ -63,18 +65,15 @@ def environment(role, gpus, mps_pipe, base=None):
 
 
 def evaluate(results):
-    """Per-layout verdict from the three roles' result.json files."""
+    """Per-layout verdict. Each process already enforces its own mode (require_deterministic/require_default)
+    and the candidate refuses records whose history or parameters differ, so the only outcome left to judge
+    is the candidate's bitwise result; the manifests are kept as evidence."""
     reference, candidate, timing = (results[role] for role in ROLES)
-    checks = {'reference_deterministic': reference['manifest']['mode'] == 'deterministic' and reference['manifests_identical'],
-              'candidate_deterministic': candidate['manifest']['mode'] == 'deterministic' and candidate['manifests_identical'],
-              'timing_default': timing['manifest']['mode'] == 'default',
-              'parameter_checksums_match': reference['parameter_checksums'] == candidate['parameter_checksums'],
-              'history_match': reference['history_sha256'] == candidate['history_sha256'],
-              'candidate_bitwise': candidate.get('bitwise') is True}
-    ratio = step_time_ratio(reference['timing_rank0'], timing['timing_rank0'])
-    return {'passed': all(checks.values()), 'checks': checks, 'first_mismatch': candidate.get('first_mismatch'),
-            'candidate_kind': candidate.get('candidate_kind'), 'step_time_ratio': ratio,
-            'manifests': {role: results[role]['manifest'] for role in ROLES}}
+    return {'passed': candidate['bitwise'], 'first_mismatch': candidate['first_mismatch'],
+            'candidate_kind': candidate['candidate_kind'],
+            'step_time_ratio': step_time_ratio(reference['timing_rank0'], timing['timing_rank0']),
+            'manifests': {role: results[role]['manifest'] for role in ROLES},
+            'manifests_identical_across_ranks': {role: results[role]['manifests_identical'] for role in ROLES}}
 
 
 def summarize(layouts, evaluations, memory, *, quick, correctness_only):
@@ -82,8 +81,8 @@ def summarize(layouts, evaluations, memory, *, quick, correctness_only):
     ratios = {layout: e['step_time_ratio'] for layout, e in evaluations.items()}
     return {'step': 5, 'probe': MODEL_PROBE, 'status': 'passed' if passed else 'failed', 'all_checks_passed': passed,
             'layouts_requested': list(layouts), 'layouts': evaluations, 'deterministic_step_time_ratio': ratios,
-            'memory_preflight': {key: memory.get(key) for key in ('scenario_sufficient_on_this_node', 'scenario_shortages',
-                                                                     'run_shortages')},
+            'memory_preflight': {key: memory[key] for key in ('scenario_sufficient_on_this_node', 'scenario_shortages',
+                                                                 'run_shortages')},
             'quick_mode': quick, 'correctness_only': correctness_only, 'shared_gpu_mode': correctness_only,
             'timing_valid': False, 'accepted': False,
             'timing_note': SHARED_GPU_NOTE if correctness_only else
@@ -127,7 +126,7 @@ def main(argv=None):
     correctness_only = args.correctness_only or args.quick
     layouts = (args.layouts.split(',') if args.layouts else (QUICK_LAYOUTS if args.quick else FORMAL_LAYOUTS)[args.node])
     gpus = [int(x) for x in args.gpus.split(',')]
-    require(layouts and set(layouts) <= set(LAYOUTS) and len(gpus) == 8 and len(set(gpus)) == 8, 'invalid --layouts/--gpus')
+    require(layouts and set(layouts) <= set(LAYOUTS) and sorted(gpus) == list(range(8)), 'invalid --layouts/--gpus')
     require(bool(re.fullmatch(r'[A-Za-z0-9_-]{1,65}', args.suite_id)), 'invalid suite id')
     require(math.isfinite(args.budget_seconds) and args.budget_seconds > 0, 'invalid budget')
     require(math.isfinite(args.min_free_disk_gb) and args.min_free_disk_gb >= 0, 'invalid free disk threshold')
@@ -178,7 +177,7 @@ def main(argv=None):
                 results[role] = json.loads(result.read_text())
             evaluations[layout] = evaluate(results)
             write_json(root / f'model_checks_{layout}.json', evaluations[layout])
-            require(evaluations[layout]['passed'], f'{layout} checks failed: {evaluations[layout]["checks"]}')
+            require(evaluations[layout]['passed'], f'{layout} candidate differs bitwise: {evaluations[layout]["first_mismatch"]}')
     except BaseException:
         (root / 'error.txt').write_text(traceback.format_exc())
         print(traceback.format_exc(), flush=True)

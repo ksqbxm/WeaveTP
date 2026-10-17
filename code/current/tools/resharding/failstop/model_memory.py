@@ -73,15 +73,15 @@ def scenario_table(inventory, seq_length):
     """All sixteen scenario GPUs with role and requirement; free memory is known only where queried."""
     rows = []
     for name in NODES:
-        gpus = inventory.get(name) or [{'index': i, 'uuid': f'unqueried-{name}-{i}'} for i in range(8)]
+        gpus = inventory.get(name) or [{'index': i, 'uuid': f'unqueried-{name}-{i}', 'free_bytes': None, 'total_bytes': None}
+                                       for i in range(8)]
         for row in node_rows(name, gpus, len(rows)):
             gpu = next(g for g in gpus if g['index'] == row['gpu_index'])
             need = requirement(role(row), seq_length)
-            free = gpu.get('free_bytes')
             rows.append({**row, 'role': need['role'], 'binding_window': need['binding_window'],
-                         'required_free_bytes': need['required_free_bytes'], 'free_bytes': free,
-                         'total_bytes': gpu.get('total_bytes'),
-                         'sufficient': None if free is None else free >= need['required_free_bytes']})
+                         'required_free_bytes': need['required_free_bytes'], 'free_bytes': gpu['free_bytes'],
+                         'total_bytes': gpu['total_bytes'],
+                         'sufficient': None if gpu['free_bytes'] is None else gpu['free_bytes'] >= need['required_free_bytes']})
     return rows
 
 

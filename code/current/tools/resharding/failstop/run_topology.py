@@ -1,7 +1,6 @@
 """Explicit Step 2/3/4 suites. Nothing runs unless invoked; default mode is emulate."""
 
 import argparse
-import hashlib
 import json
 import math
 import os
@@ -86,11 +85,8 @@ def main(argv=None, *, step=2):
         require(args.weight_elements >= 64 and args.weight_elements % 4 == 0 and args.memory_budget_mib > 0,
                 'invalid weight size or memory budget')
     profile_only = step == 3 and args.profile_only
-    profile_sha256 = None
-    if step == 3 and args.profile_file:
-        require(not profile_only, '--profile-file and --profile-only are exclusive')
-        frozen = json.loads(args.profile_file.read_text(encoding='utf-8'))
-        profile_sha256 = hashlib.sha256(json.dumps(frozen, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+    profile_file = None if step != 3 or args.profile_file is None else str(args.profile_file)
+    require(not (profile_only and profile_file), '--profile-file and --profile-only are exclusive')
     correctness_only = args.correctness_only or args.quick
     mode_flags = {'quick_mode': args.quick, 'correctness_only': correctness_only,
                   'shared_gpu_mode': correctness_only, 'timing_valid': not correctness_only}
@@ -104,7 +100,7 @@ def main(argv=None, *, step=2):
     if args.dry_run:
         print(json.dumps({'cases': selected, **mode_flags, 'output': str(args.output), 'node': args.node,
                           'step': step, 'profile_only': profile_only,
-                          **({'host_library_mode': args.host_library_mode, 'profile_sha256': profile_sha256}
+                          **({'host_library_mode': args.host_library_mode, 'profile_file': profile_file}
                              if step == 3 else {})}, indent=2))
         return 0
     require(sys.platform == 'linux' and Path('/data').is_mount(), 'requires Linux and mounted /data')
@@ -143,8 +139,7 @@ def main(argv=None, *, step=2):
                   'launch_timeout_s': remaining}
         if step == 3:
             config.update(host_library_mode=args.host_library_mode, source_width=4096 if args.quick else 262144,
-                          profile_file=None if args.profile_file is None else str(args.profile_file),
-                          profile_sha256=profile_sha256)
+                          profile_file=profile_file)
         if step == 4:
             config.update(weight_elements=args.weight_elements, memory_budget_bytes=args.memory_budget_mib << 20)
         print(f"Starting {case['launch']} mode={case['mode']} rounds={case['rounds']}", flush=True)

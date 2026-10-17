@@ -40,8 +40,7 @@ class SourceProtocolTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory, contextlib.ExitStack() as stack:
             root = Path(directory)
             sim = Simulation(mode, root, rounds, {'probe': TOPOLOGY_PROBES[3], 'source_width': 64,
-                                                  'host_library_mode': library_mode,
-                                                  'profile_file': None, 'profile_sha256': None})
+                                                  'host_library_mode': library_mode, 'profile_file': None})
             sim.cuda_stream = Stream()
             owners = []
             for node in ('SL3060', 'SL3061'):
@@ -57,7 +56,7 @@ class SourceProtocolTests(unittest.TestCase):
             if frozen:
                 # A frozen profile replaces measurement entirely; the collector must not run.
                 (root / 'profile.json').write_text(json.dumps(measured))
-                sim.extra_config.update(profile_file=str(root / 'profile.json'), profile_sha256=digest(measured))
+                sim.extra_config['profile_file'] = str(root / 'profile.json')
             attachments = []
 
             def attach(report, **kwargs):

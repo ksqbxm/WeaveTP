@@ -5,6 +5,7 @@ forward itself runs only on the server."""
 import contextlib
 import io
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -69,7 +70,6 @@ class RecordTests(unittest.TestCase):
 
     def test_comparison_reports_one_ulp_shape_and_hashes(self):
         reference, candidate = self.record(), self.record(bump=5)
-        self.assertNotEqual(reference['bits_sha256'], candidate['bits_sha256'])
         result = determinism.compare_records(reference, candidate)
         self.assertFalse(result['equal'])
         mismatch = result['first_mismatch']
@@ -201,10 +201,10 @@ class MemoryTests(unittest.TestCase):
             model_memory.preflight('SL3060', 128, range(4), ['tp2'], query=lambda _: inventory()[:4])
 
 
-def result(role, *, mode='deterministic', bitwise=True, checksums=None, ms=(30.0, 12.0)):
+def result(role, *, mode='deterministic', bitwise=True, ms=(30.0, 12.0)):
     manifest = DETERMINISTIC if mode == 'deterministic' else DEFAULT
     row = {'role': role, 'manifest': manifest, 'manifests_identical': True, 'history_sha256': 'h',
-           'parameter_checksums': checksums or {'0': 'a', '1': 'b'},
+           'parameter_checksums': {'0': 'a', '1': 'b'},
            'timing_rank0': [{'layout': 'tp2', 'step': i, 'context': 32 + i, 'gpu_ms': m} for i, m in enumerate(ms)]}
     if role == 'candidate':
         row.update(bitwise=bitwise, first_mismatch=None if bitwise else {'rank': 1, 'step': 1}, candidate_kind='fresh_checkpoint_load')
@@ -224,13 +224,15 @@ class DriverTests(unittest.TestCase):
         self.assertNotIn('--mr-reference', reference)
         self.assertIn('--nproc_per_node=8', timing)
         self.assertIn('--live-router-mode', timing)
-        base = {'PATH': '/bin', 'NCCL_ALGO': 'Tree', 'CUBLAS_WORKSPACE_CONFIG': ':16:8'}
-        deterministic = run_model.environment('reference', [0, 1, 2, 3], '/absent', base=base)
-        default = run_model.environment('timing', [0, 1, 2, 3, 4, 5, 6, 7], '/absent', base=base)
+        inherited = {'NCCL_ALGO': 'Tree', 'CUBLAS_WORKSPACE_CONFIG': ':16:8', 'PYTORCH_CUDA_ALLOC_CONF': 'expandable_segments:True'}
+        with patch.dict(os.environ, inherited):
+            deterministic = run_model.environment('reference', [0, 1, 2, 3], '/absent')
+            default = run_model.environment('timing', [4, 5, 6, 7, 0, 1, 2, 3], '/absent')
         self.assertEqual((deterministic['NCCL_ALGO'], deterministic['CUBLAS_WORKSPACE_CONFIG'], deterministic['CUDA_VISIBLE_DEVICES']),
                          ('Ring', ':4096:8', '0,1,2,3'))
         self.assertTrue(all(key not in default for key in DETERMINISTIC_ENVIRONMENT))
-        self.assertEqual((default['PATH'], default['CUDA_VISIBLE_DEVICES']), ('/bin', '0,1,2,3,4,5,6,7'))
+        self.assertTrue(all('PYTORCH_CUDA_ALLOC_CONF' not in env for env in (deterministic, default)))
+        self.assertEqual(default['CUDA_VISIBLE_DEVICES'], '4,5,6,7,0,1,2,3')
 
     def test_real_megatron_parse_args_accepts_the_entry_arguments(self):
         from megatron.training.arguments import parse_args
@@ -248,25 +250,21 @@ class DriverTests(unittest.TestCase):
 
     def test_evaluate_and_summarize(self):
         results = {'reference': result('reference'), 'candidate': result('candidate'), 'timing': result('timing', mode='default', ms=(20.0, 10.0))}
+        memory = {'scenario_sufficient_on_this_node': False, 'scenario_shortages': ['x'], 'run_shortages': []}
         evaluation = run_model.evaluate(results)
         self.assertTrue(evaluation['passed'])
         self.assertEqual(evaluation['step_time_ratio']['median_ratio'], 1.35)
-        failures = {'candidate_bitwise': {**results, 'candidate': result('candidate', bitwise=False)},
-                    'timing_default': {**results, 'timing': result('timing', ms=(20.0, 10.0))},
-                    'candidate_deterministic': {**results, 'candidate': result('candidate', mode='default')},
-                    'parameter_checksums_match': {**results, 'candidate': result('candidate', checksums={'0': 'x', '1': 'b'})}}
-        for check, broken in failures.items():
-            with self.subTest(check=check):
-                evaluation = run_model.evaluate(broken)
-                self.assertFalse(evaluation['passed'])
-                self.assertFalse(evaluation['checks'][check])
-        summary = run_model.summarize(['tp2'], {'tp2': run_model.evaluate(results)}, {'scenario_sufficient_on_this_node': False,
-                                      'scenario_shortages': ['x'], 'run_shortages': []}, quick=True, correctness_only=True)
+        self.assertEqual(evaluation['manifests']['timing']['mode'], 'default')
+        failed = run_model.evaluate({**results, 'candidate': result('candidate', bitwise=False)})
+        self.assertEqual((failed['passed'], failed['first_mismatch']), (False, {'rank': 1, 'step': 1}))
+        with self.assertRaisesRegex(RuntimeError, 'pair up'):
+            run_model.evaluate({**results, 'timing': result('timing', mode='default', ms=(20.0,))})
+        summary = run_model.summarize(['tp2'], {'tp2': evaluation}, memory, quick=True, correctness_only=True)
         self.assertTrue(summary['all_checks_passed'] and summary['quick_mode'] and summary['shared_gpu_mode'])
         self.assertFalse(summary['accepted'] or summary['timing_valid'])
         self.assertEqual(summary['deterministic_step_time_ratio']['tp2']['median_ratio'], 1.35)
-        self.assertEqual(summary['plan_consistency']['status'], 'pending')
-        self.assertFalse(run_model.summarize(['tp2', 'tp4'], {'tp2': run_model.evaluate(results)}, {}, quick=True,
+        self.assertEqual((summary['plan_consistency']['status'], summary['memory_preflight']['scenario_shortages']), ('pending', ['x']))
+        self.assertFalse(run_model.summarize(['tp2', 'tp4'], {'tp2': evaluation}, memory, quick=True,
                                              correctness_only=True)['all_checks_passed'])
 
     def test_dry_run_layouts_and_plan_comparison_cli(self):
@@ -281,9 +279,12 @@ class DriverTests(unittest.TestCase):
         self.assertTrue(dry('--node', 'SL3061', '--quick')[1]['shared_gpu_mode'])
         with self.assertRaisesRegex(RuntimeError, 'layouts'):
             run_model.main(['--node', 'SL3061', '--suite-id', 's', '--output', '/data/x', '--dry-run', '--layouts', 'tp8'])
+        with self.assertRaisesRegex(RuntimeError, 'gpus'):
+            run_model.main(['--node', 'SL3061', '--suite-id', 's', '--output', '/data/x', '--dry-run', '--gpus', '0,1,2,3'])
         with self.assertRaisesRegex(RuntimeError, 'seq-length'):
             run_model.main(['--node', 'SL3061', '--suite-id', 's', '--output', '/data/x', '--dry-run', '--prompt-tokens', '128'])
-        plan = {'tasks': [], 'profile_sha256': 'f' * 64}
+        plan = {'tasks': [], 'profile_sha256': 'f' * 64, 'membership': [], 'epoch': 1, 'sources': [], 'targets': [],
+                'environment': dict(DETERMINISTIC_ENVIRONMENT)}
         with tempfile.TemporaryDirectory() as temporary:
             for name in ('a', 'b'):
                 Path(temporary, name).mkdir()

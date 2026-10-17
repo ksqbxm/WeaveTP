@@ -17,8 +17,6 @@ from pathlib import Path
 from common import DETERMINISTIC_ENVIRONMENT, require
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
-import torch
-
 from tools.resharding.correctness.router_determinism import first_mismatch
 
 
@@ -62,7 +60,6 @@ def bitwise_record(tensor, *, step, manifest, layout, history, parameter_checksu
     """Original-dtype CPU bits plus every identity a comparison must match before looking at them."""
     bits = tensor.detach().cpu().contiguous()
     return {'step': step, 'dtype': str(bits.dtype), 'shape': list(bits.shape), 'bits': bits,
-            'bits_sha256': hashlib.sha256(bits.view(torch.uint8).numpy().tobytes()).hexdigest(),
             'manifest': manifest, 'layout': layout, 'history': history, 'parameter_checksum': parameter_checksum}
 
 
@@ -127,9 +124,8 @@ def compare_launch_plans(reference_root, candidate_root):
         row = plan_consistency(reference['tasks'], candidate['tasks'])
         row['profile_sha256'] = [reference['profile_sha256'], candidate['profile_sha256']]
         row['profile_equal'] = reference['profile_sha256'] == candidate['profile_sha256']
-        row['inputs_equal'] = {key: reference.get(key) == candidate.get(key)
-                               for key in ('membership', 'epoch', 'sources', 'targets')}
-        row['environments'] = [reference.get('environment'), candidate.get('environment')]
+        row['inputs_equal'] = {key: reference[key] == candidate[key] for key in ('membership', 'epoch', 'sources', 'targets')}
+        row['environments'] = [reference['environment'], candidate['environment']]
         row['equal'] = row['equal'] and row['profile_equal']
         plans[name] = row
     return {'equal': all(p['equal'] for p in plans.values()), 'plans': plans,

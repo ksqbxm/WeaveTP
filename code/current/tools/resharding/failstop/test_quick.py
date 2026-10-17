@@ -113,6 +113,7 @@ class QuickTests(unittest.TestCase):
         for failure in ('suite', 'restore', 'package', 'dirty', 'timeout', 'metric'):
             self.assertEqual(self.run_driver(step=5, failure=failure)['result'], 'FAIL')
         self.assertIn('deterministic-contract', self.run_driver(step=5, failure='metric')['error'])
+        self.assertIn('error.txt', self.run_driver(step=5, failure='suite')['error'])
         self.assertEqual(self.run_driver(step=5, peer='FAIL')['result'], 'FAIL')
 
     def test_preflight_failure_reports_runner_error_and_disk_threshold(self):

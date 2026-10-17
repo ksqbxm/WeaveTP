@@ -46,8 +46,11 @@ def add_args(parser):
 
 
 def parameter_checksum(model):
-    """Identity of this rank's loaded shards: exact integer sums of every parameter's bits, by name."""
-    rows = [[name, list(p.shape), str(p.dtype), int(p.detach().view(INT_VIEW[p.element_size()]).to(torch.int64).sum())]
+    """Identity of this rank's loaded shards: exact integer sums of every parameter's bits, by name.
+
+    The reduction accumulates in int64 without materialising an int64 copy of the shard.
+    """
+    rows = [[name, list(p.shape), str(p.dtype), int(p.detach().view(INT_VIEW[p.element_size()]).sum(dtype=torch.int64))]
             for name, p in model.named_parameters()]
     return {'parameters': len(rows), 'sha256': canonical_digest(rows)}
 
@@ -119,12 +122,16 @@ def main():
     iteration, _ = load_checkpoint([model], None, None)
     checksum = parameter_checksum(model)
     prompt = live._make_tokens(args, args.live_prompt_tokens)[0].tolist()
+    # One discarded sequence absorbs lazy CUDA/cuBLAS/NCCL initialisation so the measured
+    # per-step times (and the deterministic/default ratio built from them) are steady-state.
+    run_sequence(live, model, args, prompt)
     steps, tokens = run_sequence(live, model, args, prompt)
     name = f"tp{layout['tp']}"
     report = {'rank': rank, 'role': args.mr_role, 'layout': layout, 'manifest': manifest,
               'checkpoint': {'path': args.load, 'iteration': iteration}, 'parameter_checksum': checksum,
               'input': {'prompt_tokens': args.live_prompt_tokens, 'decode_steps': args.mr_decode_steps,
-                        'request_id': args.mr_request_id, 'router': 'native TopKRouter, softmax pre-softmax top-6'},
+                        'request_id': args.mr_request_id, 'warmup_sequences': 1,
+                        'router': 'native TopKRouter, softmax pre-softmax top-6'},
               'history': history(args.mr_request_id, tokens), 'greedy_tokens': [s['token'] for s in steps],
               'timing': [{'layout': name, 'step': s['step'], 'context': s['context'], 'gpu_ms': s['gpu_ms']} for s in steps],
               'memory': {'parameter_bytes': sum(p.numel() * p.element_size() for p in model.parameters()),
@@ -133,7 +140,6 @@ def main():
         records = [bitwise_record(s['logits'], step=s['step'], manifest=manifest, layout=layout,
                                   history=history(args.mr_request_id, s['history']), parameter_checksum=checksum['sha256'])
                    for s in steps]
-        args.mr_output.mkdir(parents=True, exist_ok=True)
         if args.mr_role == 'candidate':
             reference = torch.load(args.mr_reference / f'rank_{rank}.pt', weights_only=False)
             require(len(reference['records']) == len(records), 'reference/candidate step counts differ')
@@ -159,7 +165,6 @@ def main():
             result.update(bitwise=all(r['comparison']['bitwise'] for r in reports),
                           first_mismatch=None if not failed else {'rank': failed[0][0], **failed[0][1]},
                           candidate_kind='fresh_checkpoint_load')
-        args.mr_output.mkdir(parents=True, exist_ok=True)
         (args.mr_output / 'result.json').write_text(json.dumps(result, indent=2) + '\n')
         print(json.dumps({k: v for k, v in result.items() if k != 'ranks'}, indent=2), flush=True)
     dist.barrier(group=control)
