@@ -65,8 +65,8 @@ scp -P 43061 $Bundle "$Bundle.sha256" ubuntu@hdssh01.casdao.com:/data/ubuntu/lxh
 $Repo = 'C:/Users/ksqbx/.codex/worktrees/failstop-step4/WeaveTP_代码与实验资料_20260920'
 $Bundle = 'C:/Users/ksqbx/.codex/worktrees/failstop-step4/step4_1f5400d_rebuilt.bundle'
 if (Test-Path -LiteralPath $Bundle) { throw '文件已存在，请先核对，不覆盖' }
-git -C $Repo update-ref refs/heads/codex/step4-dce3d90 1f5400d0fac899f5003db2663a555d214cf481cf
-git -C $Repo bundle create $Bundle refs/heads/codex/step4-dce3d90 '^f7d555998b45756998465924d733fd70e553d6b4'
+git -C $Repo update-ref refs/heads/codex/step4-1f5400d 1f5400d0fac899f5003db2663a555d214cf481cf
+git -C $Repo bundle create $Bundle refs/heads/codex/step4-1f5400d '^f7d555998b45756998465924d733fd70e553d6b4'
 if ($LASTEXITCODE) { throw 'bundle create failed' }
 git -C $Repo bundle verify $Bundle
 if ($LASTEXITCODE) { throw 'bundle verify failed' }
@@ -87,7 +87,7 @@ cd /data/ubuntu/lxh/weavetp
 sha256sum -c step4_1f5400d.bundle.sha256
 test -z "$(git -C "$REPO" status --porcelain --untracked-files=no)"
 git -C "$REPO" bundle verify "$PWD/step4_1f5400d.bundle"
-git -C "$REPO" fetch "$PWD/step4_1f5400d.bundle" refs/heads/codex/step4-dce3d90
+git -C "$REPO" fetch "$PWD/step4_1f5400d.bundle" refs/heads/codex/step4-1f5400d
 test "$(git -C "$REPO" rev-parse FETCH_HEAD)" = 1f5400d0fac899f5003db2663a555d214cf481cf
 git -C "$REPO" checkout --detach 1f5400d0fac899f5003db2663a555d214cf481cf
 scp step4_1f5400d.bundle step4_1f5400d.bundle.sha256 ubuntu@10.60.14.1:/data/ubuntu/lxh/weavetp/
@@ -104,7 +104,7 @@ cd /data/ubuntu/lxh/weavetp
 sha256sum -c step4_1f5400d.bundle.sha256
 test -z "$(git -C "$REPO" status --porcelain --untracked-files=no)"
 git -C "$REPO" bundle verify "$PWD/step4_1f5400d.bundle"
-git -C "$REPO" fetch "$PWD/step4_1f5400d.bundle" refs/heads/codex/step4-dce3d90
+git -C "$REPO" fetch "$PWD/step4_1f5400d.bundle" refs/heads/codex/step4-1f5400d
 test "$(git -C "$REPO" rev-parse FETCH_HEAD)" = 1f5400d0fac899f5003db2663a555d214cf481cf
 git -C "$REPO" checkout --detach 1f5400d0fac899f5003db2663a555d214cf481cf
 ```
