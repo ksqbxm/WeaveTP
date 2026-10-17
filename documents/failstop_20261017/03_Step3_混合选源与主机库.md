@@ -1,6 +1,6 @@
 # Step 3：本地代价修复、主机库、profile 与混合布局选源
 
-状态：待实现。专用 GPU 测试标识：`step03_sources_and_transport`。
+状态：公共/emulate/real 独立切片测试路径已实现，CPU 已验证；服务器 GPU 待验证。专用 GPU 测试标识：`step03_sources_and_transport`。
 
 ## 1. 必读与前置
 
@@ -78,4 +78,4 @@ HostTask 在目标 rank 的专用 CUDA stream 提交异步 H2D，与 NCCL 接收
 
 ## 7. 验收登记
 
-实现 SHA：待填。CPU：未运行。profile GPU：未运行。emulate GPU：未运行。real 放行及 GPU：待确认、未运行。
+实现 SHA：`bcc61aeb86ddc1bcce403785493ac38ad59486db`。99 项 failstop CPU、56 项 packing/选源回归、4 进程 Gloo 通过。profile/emulate/real GPU 与 300 秒服务器预算：未运行。本轮用户明确开始 Step 3 并要求 real 两阶段核查，因此实现 real 测试路径；Step 2 real GPU 通过结论仍待回传，不越过验收关口。详见 [实现与验证](Step3_实现与验证.md)。
