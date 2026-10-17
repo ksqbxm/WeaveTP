@@ -1,0 +1,56 @@
+................
+============================== warnings summary ===============================
+code\current\megatron\core\optimizer\__init__.py:25
+  C:\Users\ksqbx\.codex\worktrees\failstop\WeaveTP_代码与实验资料_20260920\code\current\megatron\core\optimizer\__init__.py:25: UserWarning: Transformer Engine and Apex are not installed. Falling back to Torch optimizers.
+    warnings.warn(
+
+code\current\megatron\core\distributed\fsdp\src\megatron_fsdp\mixed_precision.py:115
+  C:\Users\ksqbx\.codex\worktrees\failstop\WeaveTP_代码与实验资料_20260920\code\current\megatron\core\distributed\fsdp\src\megatron_fsdp\mixed_precision.py:115: UserWarning: Transformer Engine and Apex are not installed. Falling back to local implementations of multi_tensor_applier and multi_tensor_scale
+    warnings.warn(
+
+code\current\megatron\core\optimizer\optimizer.py:29
+  C:\Users\ksqbx\.codex\worktrees\failstop\WeaveTP_代码与实验资料_20260920\code\current\megatron\core\optimizer\optimizer.py:29: UserWarning: Transformer Engine and Apex are not installed. Falling back to local implementations of multi_tensor_applier and multi_tensor_scale
+    warnings.warn(
+
+code\current\megatron\core\optimizer\clip_grads.py:32
+  C:\Users\ksqbx\.codex\worktrees\failstop\WeaveTP_代码与实验资料_20260920\code\current\megatron\core\optimizer\clip_grads.py:32: UserWarning: Transformer Engine and Apex are not installed. Falling back to local implementations of multi_tensor_applier, multi_tensor_l2norm, and multi_tensor_scale
+    warnings.warn(
+
+code\current\megatron\core\hyper_comm_grid.py:26
+  C:\Users\ksqbx\.codex\worktrees\failstop\WeaveTP_代码与实验资料_20260920\code\current\megatron\core\hyper_comm_grid.py:26: UserWarning: absl.logging is not installed. Using logging.getLogger(__name__) instead. Please install absl.logging with `pip install absl-py` to use absl.logging.
+    warnings.warn(
+
+code\current\megatron\core\inference\contexts\__init__.py:9
+  C:\Users\ksqbx\.codex\worktrees\failstop\WeaveTP_代码与实验资料_20260920\code\current\megatron\core\inference\contexts\__init__.py:9: DeprecationWarning: The following imports from `dynamic_context.py` will be removed in this file in `megatron-core` 0.14. The imports here result in a cyclic import issue that causes rotary embeddings to import from Apex rather than Transformer Engine.
+    warnings.warn(
+
+code\current\megatron\core\models\backends.py:34
+  C:\Users\ksqbx\.codex\worktrees\failstop\WeaveTP_代码与实验资料_20260920\code\current\megatron\core\models\backends.py:34: UserWarning: Apex is not installed. Falling back to Torch Norm
+    warnings.warn("Apex is not installed. Falling back to Torch Norm")
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=================================== PASSES ====================================
+============================ slowest 15 durations =============================
+0.03s call     tests/unit_tests/resharding/test_nccl_packing.py::test_temporary_send_address_reuse_does_not_reuse_payload
+0.01s setup    tests/unit_tests/resharding/test_nccl_packing.py::test_temporary_send_address_reuse_does_not_reuse_payload
+0.01s call     tests/unit_tests/resharding/test_nccl_packing.py::test_launcher_classifies_send_storage_before_configuring_service[stable]
+
+(12 durations < 0.005s hidden.  Use -vv to show these durations.)
+=========================== short test summary info ===========================
+PASSED code\current\tests\unit_tests\resharding\test_nccl_packing.py::test_temporary_send_address_reuse_does_not_reuse_payload
+PASSED code\current\tests\unit_tests\resharding\test_nccl_packing.py::test_launcher_classifies_send_storage_before_configuring_service[stable]
+PASSED code\current\tests\unit_tests\resharding\test_nccl_packing.py::test_launcher_classifies_send_storage_before_configuring_service[strided]
+PASSED code\current\tests\unit_tests\resharding\test_nccl_packing.py::test_launcher_classifies_send_storage_before_configuring_service[dequantized]
+PASSED code\current\tests\unit_tests\resharding\test_nccl_packing.py::test_launcher_classifies_send_storage_before_configuring_service[mxfp8]
+PASSED code\current\tests\unit_tests\resharding\test_nccl_packing.py::test_launcher_classifies_send_storage_before_configuring_service[transformed]
+PASSED code\current\tests\unit_tests\resharding\test_nccl_packing.py::test_temporary_eligibility_does_not_change_peer_bucket_geometry
+PASSED code\current\tests\unit_tests\resharding\test_nccl_packing.py::test_least_stream_priority_falls_back_for_older_torch
+PASSED code\current\tests\unit_tests\resharding\test_nccl_packing.py::test_block_current_stream_prefers_nonblocking_work_dependency
+PASSED code\current\tests\unit_tests\resharding\test_nccl_packing.py::test_copy_handle_done_is_a_pure_query_until_wait
+PASSED code\current\tests\unit_tests\resharding\test_nccl_packing.py::test_bounded_unpack_splits_foreach_submission_by_bytes
+PASSED code\current\tests\unit_tests\resharding\test_nccl_packing.py::test_remote_packing_coalesces_by_peer_and_preserves_mixed_dtypes
+PASSED code\current\tests\unit_tests\resharding\test_nccl_packing.py::test_remote_packing_leaves_large_and_unaddressed_tensors_direct
+PASSED code\current\tests\unit_tests\resharding\test_nccl_packing.py::test_remote_packing_only_coalesces_rerouted_tasks
+PASSED code\current\tests\unit_tests\resharding\test_nccl_packing.py::test_persistent_send_bucket_is_reused_after_warmup
+PASSED code\current\tests\unit_tests\resharding\test_nccl_packing.py::test_persistent_send_bucket_never_caches_mutable_kv_tasks
+16 passed, 7 warnings in 9.54s

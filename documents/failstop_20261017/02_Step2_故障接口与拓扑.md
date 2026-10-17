@@ -71,3 +71,8 @@ real 使用 Step 1 已验收策略 abort/rebuild，不能预建未来 world 复�
 ## 7. 验收登记
 
 公共/emulate/real 实现 SHA：`9ca323f3b97dc4830468cf9ebabfb5f3a8d254c6`；快验清单：`566cf8e65ffcf547bb83e98ed88ed1f81b6c3f99`。75 项 failstop CPU 测试 + 16 项 packing 回归 + 4 进程真实 Gloo 通过。Step 1 原共享 20/20 已确认，用户本轮明确开始 Step 2，按此实现 real；两阶段优化新版 GPU 未另行登记通过。emulate/real GPU、实际 300 秒预算：待运行。详见 [实现报告](Step2_实现与验证.md) 与 [服务器命令](Step2_服务器命令.md)。
+
+
+## 8. 审阅修正版
+
+实现 `fa152b134107f3efdf4335c2a99752d02b61bcf0`，快验清单 `df4d0096243024ca1a1f92447181362e1411f885`。修正 emulate 监管器回归预检、TP 排序后的 EP/DP 配对、旧绑定跨 epoch forward、嵌套异常锁释放、native 组持有者检查、轮次缓存及多 launch 汇总。新增测试专用 `--correctness-only`，允许共享 GPU，accepted=false、timing_valid=false；快验自动开启，旧 Step 2 共享参数删除。86 项 failstop CPU、16 项 packing、4 进程真实 Gloo 通过；最终 round 边界定向复验 1 项通过。GPU 与 300 秒实际预算仍待运行。见[审阅与修正](Step2_审阅与修正.md)及[当前服务器命令](Step2_服务器命令.md)。

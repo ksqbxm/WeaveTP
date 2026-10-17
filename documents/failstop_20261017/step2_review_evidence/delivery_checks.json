@@ -1,0 +1,11 @@
+{
+  "bash_blocks": 8,
+  "bash_syntax": "passed",
+  "literal_commits_resolve": [
+    "df4d0096243024ca1a1f92447181362e1411f885",
+    "f7d555998b45756998465924d733fd70e553d6b4",
+    "fa152b134107f3efdf4335c2a99752d02b61bcf0"
+  ],
+  "manifest_matches_runtime": true,
+  "local_links": "passed"
+}

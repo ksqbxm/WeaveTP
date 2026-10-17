@@ -1,0 +1,32 @@
+{
+  "format": {
+    "chunk_id": "ae7128",
+    "wall_time_seconds": 0.942901,
+    "exit_code": 0,
+    "original_token_count": 77,
+    "output": "WARN `--no-project` was provided, but no project was found\nwarning: The top-level linter settings are deprecated in favour of their counterparts in the `lint` section. Please update the following options in `code\\current\\pyproject.toml`:\n  - 'per-file-ignores' -> 'lint.per-file-ignores'\nAll checks passed!\n"
+  },
+  "dry_run": {
+    "chunk_id": "5cd9e1",
+    "wall_time_seconds": 0.4361183,
+    "exit_code": 0,
+    "original_token_count": 95,
+    "output": "{\r\n  \"cases\": [\r\n    {\r\n      \"mode\": \"emulate\",\r\n      \"rounds\": 1,\r\n      \"launch\": \"s2_review_cpu_emulate\"\r\n    },\r\n    {\r\n      \"mode\": \"real\",\r\n      \"rounds\": 1,\r\n      \"launch\": \"s2_review_cpu_real_00\"\r\n    }\r\n  ],\r\n  \"quick_mode\": true,\r\n  \"correctness_only\": true,\r\n  \"shared_gpu_mode\": true,\r\n  \"timing_valid\": false,\r\n  \"output\": \"\\\\data\\\\cpu\",\r\n  \"node\": \"SL3060\"\r\n}\r\n"
+  },
+  "remote_before_commit": {
+    "chunk_id": "326839",
+    "wall_time_seconds": 1.1466031,
+    "exit_code": 0,
+    "original_token_count": 67,
+    "output": "From https://github.com/ksqbxm/WeaveTP\n * branch            codex/failstop -> FETCH_HEAD\nbd63f10 Document pinned Step 2 delivery and CPU validation\n566cf8e Pin Step 2 quick-check runtime commit\n9ca323f Implement fail-stop Step 2 topology and safe model rebinding\n0\t0\n"
+  },
+  "syntax": {
+    "command": "compile() over failstop core and tools/*.py; no bytecode output",
+    "files": 24,
+    "status": "passed"
+  },
+  "bash": {
+    "command": "bash -n code/current/tools/resharding/failstop/quick_check.sh",
+    "status": "passed"
+  }
+}

@@ -1,0 +1,71 @@
+{
+  "code_commit": "fa152b134107f3efdf4335c2a99752d02b61bcf0",
+  "quick_manifest_commit": "df4d0096243024ca1a1f92447181362e1411f885",
+  "review_base": "bd63f105dfb0bb42fa3e3e5e4c9fd1cd74966f55",
+  "read_before_code": [
+    "CODEX.md",
+    "documents/failstop_20261017/00_总计划.md",
+    "documents/failstop_20261017/02_Step2_故障接口与拓扑.md",
+    "code/current/AGENTS.md",
+    "code/current/docs/developer/contribute.md"
+  ],
+  "source_sha256": {
+    "code/current/megatron/core/failstop.py": "7fd340e494547aa726c9e5abcadbd0e32c7f6e55802cd3651018f5df0eb89c21",
+    "code/current/megatron/core/failstop_rebind.py": "6a21abe949f9cbe9cf91a8afb99fe4a153fe7e895be82b7e2f8bb129e0fe15af",
+    "code/current/tools/resharding/failstop/common.py": "887881f46e94c9ac7e676497f75a96b706c5a210be58dee7c80f5446ee7dcadf",
+    "code/current/tools/resharding/failstop/cpu_topology_gloo.py": "5ae2485e6a19f4034d1dda84fcf3f68fe34f20befacbf17acc4b326631e2ba5a",
+    "code/current/tools/resharding/failstop/quick_driver.py": "42584a3881f22657a4a0625bc9a7f171101ec539488cd0bedbdd9820183576ff",
+    "code/current/tools/resharding/failstop/run_probe.py": "8d3eafead46b842ef89bbca9b216b58d78f118eac9da122ce7cfe1b1057c3ee7",
+    "code/current/tools/resharding/failstop/run_topology.py": "b5a536e2971aa90e5f576118d27e1d4768c91647c50fda9315c7b3738a9a19a2",
+    "code/current/tools/resharding/failstop/supervisor.py": "92b766d385c148ac6ed5a29979eef2e978408de4a1900530a9699fae568fdcc8",
+    "code/current/tools/resharding/failstop/test_quick.py": "0f6de36e70f51789163e7a1dd9c0947fff339cd84fc97ee7a2e00aba8f7364ac",
+    "code/current/tools/resharding/failstop/test_topology_protocol.py": "3069b30e07fa486ef6b920a3bf1e6b615d0bcb9b431f3bb8bfe6ff22f98d4c63",
+    "code/current/tools/resharding/failstop/test_topology_review.py": "c21e1580092b9e34d914c642b130ba84398cb4dfcbce7353f99ac9386473bd3e",
+    "code/current/tools/resharding/failstop/topology_probe.py": "cb54c13d260f9b9bc005d503f72c783cae18f28489b02806716f018af4794423"
+  },
+  "tests": {
+    "unittest": {
+      "count": 86,
+      "status": "passed",
+      "log": "cpu_tests.log",
+      "command": "python -B -X utf8 -m unittest discover -s code/current/tools/resharding/failstop -p 'test_*.py' -v"
+    },
+    "final_round_boundary": {
+      "count": 1,
+      "status": "passed",
+      "log": "round_boundary.log",
+      "note": "After full suite, require ready at next_round boundary and rerun affected test.",
+      "command": "python -B -X utf8 -m unittest test_topology_review.ReviewTests.test_next_round_rekeys_caches_and_keeps_current_forward_available -v"
+    },
+    "packing": {
+      "count": 16,
+      "status": "passed",
+      "log": "packing.log",
+      "command": "python -B -X utf8 -m pytest --noconftest code/current/tests/unit_tests/resharding/test_nccl_packing.py -q"
+    },
+    "gloo": {
+      "processes": 4,
+      "status": "passed",
+      "log": "gloo.log",
+      "command": "python -B -X utf8 code/current/tools/resharding/failstop/cpu_topology_gloo.py"
+    },
+    "gpu": {
+      "status": "not_run"
+    }
+  },
+  "logs_sha256": {
+    "cpu_tests.log": "903888b3c61db21e427903088c1336eca4a1c700b771c59bbea4da2651730d40",
+    "gloo.log": "150fc83a836f6d30313467884e5c1979862f7f347c9126c1dbc0eac90de7b928",
+    "packing.log": "0a2c6fb0c1c23c669e8a2fad2df5adb68054b1f52a2d6bb8fd39b5403c6621c5",
+    "round_boundary.log": "e592636464970e3917e0f6b8ee28dafd0d9e68c7f1a3d4d2de132f697e134182"
+  },
+  "bundle": {
+    "path": "C:\\Users\\ksqbx\\.codex\\worktrees\\failstop\\step2_df4d009.bundle",
+    "bytes": 807816,
+    "sha256": "86ceb7234aeb1b10409f8ccadaf60311f2ae21d13e22a66f6628f967b243a7d4",
+    "base": "f7d555998b45756998465924d733fd70e553d6b4",
+    "ref": "refs/heads/codex/step2-df4d009",
+    "verified": true
+  },
+  "source_hash_kind": "Git blob bytes at code_commit"
+}
