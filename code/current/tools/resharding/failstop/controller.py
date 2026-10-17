@@ -194,7 +194,11 @@ def run(config):
                 for child, record in children.children:
                     require(child.poll() in (None, 0), f"{record['role']} exited {child.returncode}")
 
-            if config.get("probe") == "step02_topology_rebind":
+            if config.get("probe") == "step04_async_driver_and_memory":
+                from async_probe import control as async_control
+
+                result = async_control(config, bus, journal, check)
+            elif config.get("probe") == "step02_topology_rebind":
                 from topology_probe import control as topology_control
 
                 result = topology_control(config, bus, journal, check)

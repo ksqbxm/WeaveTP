@@ -16,7 +16,7 @@ import run_topology
 
 
 class QuickTests(unittest.TestCase):
-    def run_driver(self, *, failure=None, peer='PASS'):
+    def run_driver(self, *, failure=None, peer='PASS', step=2):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             logs = root / 'kickoff' / 'local'
@@ -49,7 +49,7 @@ class QuickTests(unittest.TestCase):
             conn, stream = Mock(), Mock()
             with contextlib.ExitStack() as stack:
                 stack.enter_context(patch.dict(sys.modules, fcntl=SimpleNamespace(LOCK_EX=1, LOCK_NB=2, flock=Mock())))
-                stack.enter_context(patch.object(sys, 'argv', ['quick_driver', '--node', 'SL3060', '--sha', 'a' * 40,
+                stack.enter_context(patch.object(sys, 'argv', ['quick_driver', '--step', str(step), '--node', 'SL3060', '--sha', 'a' * 40,
                                                               '--repo', str(root), '--log-dir', str(logs)]))
                 stack.enter_context(patch.object(subprocess, 'check_output', side_effect=git))
                 stack.enter_context(patch.object(subprocess, 'Popen', return_value=child))
@@ -81,6 +81,12 @@ class QuickTests(unittest.TestCase):
             with self.subTest(failure=failure):
                 self.assertEqual(self.run_driver(failure=failure)['result'], 'FAIL')
         self.assertEqual(self.run_driver(peer='FAIL')['result'], 'FAIL')
+
+    def test_step4_success_and_all_finalization_failures(self):
+        self.assertEqual(self.run_driver(step=4)['result'], 'PASS')
+        for failure in ('suite', 'restore', 'package', 'dirty', 'timeout'):
+            self.assertEqual(self.run_driver(step=4, failure=failure)['result'], 'FAIL')
+        self.assertEqual(self.run_driver(step=4, peer='FAIL')['result'], 'FAIL')
 
     def test_default_and_quick_case_matrices(self):
         cases = run_topology.cases('both', 5, 3, 'test')

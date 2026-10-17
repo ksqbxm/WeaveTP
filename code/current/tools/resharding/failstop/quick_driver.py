@@ -29,7 +29,7 @@ def receive(stream):
     return json.loads(data)
 
 
-def rendezvous(node, sha, port=29839):
+def rendezvous(node, sha, port=29839, step=2):
     """SL3060 owns the run ID; neither node uses an independent suite timestamp."""
     handshake_deadline = time.monotonic() + 60
     if node == 'SL3060':
@@ -42,9 +42,9 @@ def rendezvous(node, sha, port=29839):
         conn.settimeout(max(1, handshake_deadline - time.monotonic()))
         stream = conn.makefile('rwb')
         request = receive(stream)
-        if request != {'node': 'SL3061', 'sha': sha, 'step': 2}:
+        if request != {'node': 'SL3061', 'sha': sha, 'step': step}:
             raise RuntimeError('peer step/SHA/node mismatch')
-        suite = 's2q_' + datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S') + '_' + uuid.uuid4().hex[:8]
+        suite = f's{step}q_' + datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S') + '_' + uuid.uuid4().hex[:8]
         send(stream, {'suite': suite, 'sha': sha})
     else:
         deadline = time.monotonic() + 60
@@ -58,9 +58,9 @@ def rendezvous(node, sha, port=29839):
                 time.sleep(0.25)
         conn.settimeout(max(1, handshake_deadline - time.monotonic()))
         stream = conn.makefile('rwb')
-        send(stream, {'node': node, 'sha': sha, 'step': 2})
+        send(stream, {'node': node, 'sha': sha, 'step': step})
         reply = receive(stream)
-        if reply['sha'] != sha or not re.fullmatch(r's2q_[A-Za-z0-9_]+', reply['suite']):
+        if reply['sha'] != sha or not re.fullmatch(fr's{step}q_[A-Za-z0-9_]+', reply['suite']):
             raise RuntimeError('invalid peer run ID/SHA')
         suite = reply['suite']
     return conn, stream, suite
@@ -74,12 +74,14 @@ def main():
     parser.add_argument('--sha', required=True)
     parser.add_argument('--repo', type=Path, required=True)
     parser.add_argument('--log-dir', type=Path, required=True)
+    parser.add_argument('--step', type=int, choices=(2, 4), default=2)
     args = parser.parse_args()
+    step = args.step
     started, deadline = time.monotonic(), time.monotonic() + 300
     run = args.log_dir
     conn = stream = child = None
     restore = False
-    status = {'step': 2, 'node': args.node, 'quick_mode': True, 'correctness_only': True,
+    status = {'step': step, 'node': args.node, 'quick_mode': True, 'correctness_only': True,
               'shared_gpu_mode': True, 'timing_valid': False, 'accepted': False, 'result': 'FAIL'}
     lock = (args.log_dir.parent / f'{args.node}.lock').open('w')
 
@@ -99,12 +101,12 @@ def main():
             raise RuntimeError('checkout identity mismatch')
         print('Waiting for peer: timeout=60s; total quick budget=300s', flush=True)
         status['peer_wait_start'] = time.monotonic()
-        conn, stream, suite = rendezvous(args.node, args.sha)
+        conn, stream, suite = rendezvous(args.node, args.sha, port=29879 if step == 4 else 29839, step=step)
         status['peer_wait_s'] = time.monotonic() - status['peer_wait_start']
         run = args.log_dir.parent.parent / suite
         status['suite'], status['run'] = suite, str(run)
         (args.log_dir / 'run_path.txt').write_text(str(run) + '\n')
-        entry = args.repo / 'code/current/tools/resharding/failstop/run_topology.py'
+        entry = args.repo / 'code/current/tools/resharding/failstop' / ('run_async.py' if step == 4 else 'run_topology.py')
         argv = [sys.executable, '-B', str(entry), '--node', args.node, '--suite-id', suite,
                 '--output', str(run), '--mode', 'both', '--rounds', '1', '--real-launches', '1',
                 '--quick', '--correctness-only', '--budget-seconds', str(max(1, deadline - time.monotonic() - 45))]
@@ -175,7 +177,7 @@ def main():
         code = 0 if status['result'] == 'PASS' else 1
         (args.log_dir / 'exit_code').write_text(str(code) + '\n')
         print(json.dumps(status, indent=2), flush=True)
-        print(f"QUICK CHECK step=2 result={status['result']} (emulate shrink/expand, real shrink/expand) shared_gpu_mode=true logs={run}", flush=True)
+        print(f"QUICK CHECK step={step} result={status['result']} (emulate shrink/expand, real shrink/expand) shared_gpu_mode=true logs={run}", flush=True)
         lock.close()
     return code
 
