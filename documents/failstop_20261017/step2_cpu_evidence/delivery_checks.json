@@ -1,0 +1,39 @@
+{
+  "bash_blocks": [
+    {
+      "bash_block": 0,
+      "exit_code": 0
+    },
+    {
+      "bash_block": 1,
+      "exit_code": 0
+    },
+    {
+      "bash_block": 2,
+      "exit_code": 0
+    },
+    {
+      "bash_block": 3,
+      "exit_code": 0
+    },
+    {
+      "bash_block": 4,
+      "exit_code": 0
+    },
+    {
+      "bash_block": 5,
+      "exit_code": 0
+    },
+    {
+      "bash_block": 6,
+      "exit_code": 0
+    },
+    {
+      "bash_block": 7,
+      "exit_code": 0
+    }
+  ],
+  "fixed_shas_resolve": true,
+  "relative_links": true,
+  "release_pin": true
+}

@@ -1,0 +1,18 @@
+{
+  "cases": [
+    {
+      "mode": "emulate",
+      "rounds": 1,
+      "launch": "step2_dry_emulate"
+    },
+    {
+      "mode": "real",
+      "rounds": 1,
+      "launch": "step2_dry_real_00"
+    }
+  ],
+  "quick_mode": true,
+  "shared_gpu_mode": true,
+  "output": "\\data\\step2_dry",
+  "node": "SL3060"
+}

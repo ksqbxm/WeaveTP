@@ -1,0 +1,108 @@
+{
+  "cpu_unittest": {
+    "command": "python -B -X utf8 -m unittest discover -s code/current/tools/resharding/failstop -p test_*.py -v",
+    "tests": 75,
+    "exit_code": 0,
+    "log": "cpu_tests.log"
+  },
+  "packing_regression": {
+    "command": "python -B -X utf8 -m pytest --noconftest code/current/tests/unit_tests/resharding/test_nccl_packing.py -q",
+    "tests": 16,
+    "exit_code": 0,
+    "observed_terminal_summary": "16 passed, 7 warnings in 8.55s"
+  },
+  "checks": [
+    {
+      "argv": [
+        "C:\\Users\\ksqbx\\miniforge3\\python.exe",
+        "-B",
+        "-X",
+        "utf8",
+        "code/current/tools/resharding/failstop/cpu_topology_gloo.py"
+      ],
+      "exit_code": 0,
+      "log": "check_0.log"
+    },
+    {
+      "argv": [
+        "C:\\Users\\ksqbx\\miniforge3\\python.exe",
+        "-B",
+        "code/current/tools/resharding/failstop/run_topology.py",
+        "--node",
+        "SL3060",
+        "--suite-id",
+        "step2_dry",
+        "--output",
+        "/data/step2_dry",
+        "--mode",
+        "both",
+        "--rounds",
+        "1",
+        "--real-launches",
+        "1",
+        "--quick",
+        "--allow-foreign-gpu-processes",
+        "--dry-run"
+      ],
+      "exit_code": 0,
+      "log": "check_1.log"
+    },
+    {
+      "argv": [
+        "C:/Program Files/Git/bin/bash.exe",
+        "-n",
+        "code/current/tools/resharding/failstop/quick_check.sh"
+      ],
+      "exit_code": 0,
+      "log": "check_2.log"
+    },
+    {
+      "argv": [
+        "git",
+        "diff",
+        "--check"
+      ],
+      "exit_code": 0,
+      "log": "check_3.log"
+    }
+  ],
+  "compiled_files": 25,
+  "file_sha256": {
+    "code/current/megatron/core/failstop.py": "61338ef3e7f3bc19fe755823e70095b0a813abc2ff8e1d2b61469dcecd9b9165",
+    "code/current/megatron/core/failstop_rebind.py": "ea235ff13770dcb9e451b570952faa1a9a0b931a485bda9ee82768be414d03cb",
+    "code/current/megatron/core/resharding/copy_services/nccl_copy_service.py": "a1af0ba3d872cc8e1371813f886635fd03896f8ba2c535ff6a4d896ddb453f3e",
+    "code/current/megatron/rl/parallel_utils.py": "685bb4053ba817fd0bcbc73bc4a78042360b00d6a4a152668cbe2c0498c57103",
+    "code/current/tools/resharding/failstop/common.py": "2973195db4a4a3344dd5f4b574aba4ba22589c740c96ca52093caa29a2ba7e34",
+    "code/current/tools/resharding/failstop/controller.py": "81f33c8cb37753311658bccbab906533d836b59df0d968835e3042cede0b0091",
+    "code/current/tools/resharding/failstop/cpu_topology_gloo.py": "3f473f75a6130ff24c0db15ae658b832ceee31d8e052bef6dd0f8079a31c0dbd",
+    "code/current/tools/resharding/failstop/quick_driver.py": "607e968558d26d32c7c5627d23dd16d3175e941fe1860ccc1de91230ee5836e8",
+    "code/current/tools/resharding/failstop/run_probe.py": "0ad6debca8a62c4df43bd9ed0dd3e65ac30ad81969700058c9128bd3af6bb8b6",
+    "code/current/tools/resharding/failstop/run_topology.py": "e36d3e3cfc5f9b33a60227a1a82a7f76ae5391b264a3cbd61b7af509d71bbf0f",
+    "code/current/tools/resharding/failstop/safety.py": "a938834efc61857c3d4c6dbb6d56d8673eaf4816e97bd460855f68a8e4b8642d",
+    "code/current/tools/resharding/failstop/supervisor.py": "d45deb754e09b0c143af59daf8a9fa11c6f5de99d796db111a2432f3a85f1b3d",
+    "code/current/tools/resharding/failstop/test_cleanup.py": "67e553003be74ae54856d6658c37cb7662b2b30a324a8fb3a9890683ee9026ee",
+    "code/current/tools/resharding/failstop/test_probe.py": "28b0b4032154248a08c955a4b0f56d2fc76800c1a0163e0cd5d8a9ea17c6d4f4",
+    "code/current/tools/resharding/failstop/test_protocol.py": "2a8e2b7366ae4b8692290dfdb587093e9412f706a5eb4087a00f083946fe0d3b",
+    "code/current/tools/resharding/failstop/test_quick.py": "1456e2401476ec7c1f5da4ad02c37d27d3ea38bc2eb35cc20bf169524b18754e",
+    "code/current/tools/resharding/failstop/test_rejoin.py": "99dacdb2a5130982c14a23e96c5edce2b0070f7fb15bd87065afc08e9b11913b",
+    "code/current/tools/resharding/failstop/test_server_environment.py": "e7a84dcf43206712b23eb49fb99887ae1dea7d75a4b31a5b5ba84645caf19ca8",
+    "code/current/tools/resharding/failstop/test_shared_gpu.py": "eaf7d0fa73a67276045740a91aebb52d2174b49b661b4361b219e859c1614a94",
+    "code/current/tools/resharding/failstop/test_topology.py": "1cd735d474aab7ce937a48b2fe677c70ab9fa580f0102b55842e737c058031c1",
+    "code/current/tools/resharding/failstop/test_topology_protocol.py": "e66cf72bc4ee739f8f80beeb2a94a3596abce3a71bf54aa002bef7097f321e37",
+    "code/current/tools/resharding/failstop/topology_fixture.py": "03e43dff83d19ce354734703f92e5709824c56f34744a4483251116c5fe97950",
+    "code/current/tools/resharding/failstop/topology_probe.py": "e1fc6b03c0505ab40372c52a2772d637e93688e6617d9cd8ac9aaecdd78d98d7",
+    "code/current/tools/resharding/failstop/topology_worker.py": "9f77f057cbd37483e9a49873d45ff2cc23c6b100cb5ac1c9a5400ca4deebe873",
+    "code/current/tools/resharding/failstop/worker.py": "e88aa88d07b54419b47ab2ea366e7bb5bcc7e40ed2f6e21a64240a9f0d0a22d8"
+  },
+  "gpu": "NOT_RUN",
+  "five_minute_server_budget": "IMPLEMENTED_NOT_GPU_VALIDATED",
+  "required_read": {
+    "CODEX.md": "a4bf8b49f323b090da2aa3cb695534285b0b3998254a9a8ea6eabf997c2ee8d3",
+    "code/current/AGENTS.md": "3c070ba5881775cd6c9681946a39b68b42f9b01c130e088632fd5d2e8b086fc1",
+    "documents/failstop_20261017/00_总计划.md": "4781a026a72cea83ecb0dfe0e721b9326db1c8997019c233bc6aa687d2e686cc",
+    "documents/failstop_20261017/02_Step2_故障接口与拓扑.md": "37fc5358c1d74b9c4a6e38b56c2d7b1afc8e2ed02784370b247292f37b6a424b"
+  },
+  "implementation_commit": "9ca323f3b97dc4830468cf9ebabfb5f3a8d254c6",
+  "quick_bootstrap_commit": "566cf8e65ffcf547bb83e98ed88ed1f81b6c3f99",
+  "bundle_sha256": "ce553745969b4387acb50550a2ba0baf948483f2d060caf073f51c844ed6ffc9"
+}

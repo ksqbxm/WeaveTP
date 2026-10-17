@@ -1,6 +1,6 @@
 # Step 2：公共故障接口、异构副本拓扑与模型进程组替换
 
-状态：待实现。专用 GPU 测试标识：`step02_topology_rebind`。
+状态：公共/emulate/real 玩具集成已实现，CPU 已验证；GPU 待运行。专用 GPU 测试标识：`step02_topology_rebind`。
 
 ## 1. 必读与前置
 
@@ -70,4 +70,4 @@ real 使用 Step 1 已验收策略 abort/rebuild，不能预建未来 world 复�
 
 ## 7. 验收登记
 
-公共/emulate SHA 与 CPU：待填。emulate GPU：待运行。Step 1 real 放行：待确认。real SHA / GPU：待填、待运行。
+公共/emulate/real 实现 SHA：`9ca323f3b97dc4830468cf9ebabfb5f3a8d254c6`；快验清单：`566cf8e65ffcf547bb83e98ed88ed1f81b6c3f99`。75 项 failstop CPU 测试 + 16 项 packing 回归 + 4 进程真实 Gloo 通过。Step 1 原共享 20/20 已确认，用户本轮明确开始 Step 2，按此实现 real；两阶段优化新版 GPU 未另行登记通过。emulate/real GPU、实际 300 秒预算：待运行。详见 [实现报告](Step2_实现与验证.md) 与 [服务器命令](Step2_服务器命令.md)。
