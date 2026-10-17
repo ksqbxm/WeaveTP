@@ -77,6 +77,10 @@ python -B -X utf8 -m pytest --noconftest code/current/tests/unit_tests/reshardin
 
 16 卡 fail-stop 场景表（存活卡 21.85 GiB 等）仍在 `memory_preflight.json` 中记录，单节点快验不以其为拒绝条件。138 项 failstop 单测通过（新增单节点驱动路径、`--single-node` 仅限 step 5、预检逐卡需求 3 项断言），见 [cpu_tests_single_node.log](step5_cpu_evidence/cpu_tests_single_node.log)。
 
+### 服务器结果
+
+2026-10-18 服务器结果（用户回传）：SL3061 单节点快验，清单 `420eec3c405f9de846308283c436e71e7498430f`，suite `s5q_20261017T165421_80b77c92_single`，exit_code=0，tp2 与 tp4 的确定性参考/候选均逐位一致，step_time_ratio tp2=1.18、tp4=1.13（共享 GPU，只作开销评估）。该结果证明 Megatron `--deterministic-mode` 下 DeepSeek-V2-Lite 两次独立加载在同输入同历史下逐位一致、预检表与真实显存一致、默认模式耗时基线可得；它不是 A6/A7 通过。两节点形式在 SL3060 空出后用同一清单运行。
+
 ## 边界与未完成项
 
 - 本批的 candidate 是独立的新加载进程（`candidate_kind=fresh_checkpoint_load`），用于在真实模型上验证跨进程参考/候选比较合同（manifest、参数校验和、历史 hash、逐位）；它不是迁移后的被测模型。A6 各检查点的被测对象要等 Step 3/4 GPU 通过后接入真实模型的 fail→shrink→rejoin→expand。
