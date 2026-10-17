@@ -1,0 +1,13 @@
+{
+  "bash_document_blocks": 10,
+  "bash_syntax": "passed",
+  "fixed_commits_verified": [
+    "1c5dea241e4b001434c0615ffe98ee909951efc9",
+    "bcc61aeb86ddc1bcce403785493ac38ad59486db",
+    "f7d555998b45756998465924d733fd70e553d6b4"
+  ],
+  "relative_links": "passed",
+  "bundle_prerequisite": "f7d555998b45756998465924d733fd70e553d6b4",
+  "bundle_sha256": "69a2666528aeaec7f72a83957c5823b9b85f156a0b96a8239d37dd85cf37543a",
+  "gpu_execution": "not_run"
+}
