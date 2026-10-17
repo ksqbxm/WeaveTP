@@ -1,6 +1,6 @@
 # Step 4 服务器命令
 
-实现 `7b33df6591815bb5db8d98d97a6898bc9ab1c0af`，快验清单 `dce3d902edb258d3b028ee8bc333d1448853929f`，见[实现与验证](Step4_实现与验证.md)。先用下方默认共享 GPU 的快验；本轮尚无服务器 GPU 通过结论。fix2 GPU 复验证据仍未登记，runner 结果固定 `prerequisites_verified=false`。
+实现 `05d942e682e3d96b85c7c7db164ba09a8dd13841`，快验清单 `1f5400d0fac899f5003db2663a555d214cf481cf`，见[实现与验证](Step4_实现与验证.md)。本版修正首次服务器快验的失败原因：SL3060 `/data` 仅剩 4.88 GB，低于 runner 默认 5 GB 门槛，预检拒绝运行。快验门槛改为默认 1 GB（`quick_check.sh --min-free-disk-gb N` 可调），正式验收保持 5 GB；预检失败时 receipt/nohup 直接写出子进程真实错误（如 `insufficient /data space`），并保存完整 runner 输出到 kickoff 目录的 runner.log。先用下方默认共享 GPU 的快验；本轮尚无服务器 GPU 通过结论。fix2 GPU 复验证据仍未登记，runner 结果固定 `prerequisites_verified=false`。
 
 ## 1. 快速正确性测试（先完成下方离线导入）
 
@@ -9,16 +9,16 @@ SL3060 执行一行，随后 60 秒内在 SL3061 执行对应一行；也支持�
 SL3060：
 
 ```bash
-source /data/ubuntu/lxh/weavetp/env.sh && git -C "$REPO" checkout --detach dce3d902edb258d3b028ee8bc333d1448853929f && bash "$REPO/code/current/tools/resharding/failstop/quick_check.sh" --step 4 --node SL3060
+source /data/ubuntu/lxh/weavetp/env.sh && git -C "$REPO" checkout --detach 1f5400d0fac899f5003db2663a555d214cf481cf && bash "$REPO/code/current/tools/resharding/failstop/quick_check.sh" --step 4 --node SL3060
 ```
 
 SL3061：
 
 ```bash
-source /data/ubuntu/lxh/weavetp/env.sh && git -C "$REPO" checkout --detach dce3d902edb258d3b028ee8bc333d1448853929f && bash "$REPO/code/current/tools/resharding/failstop/quick_check.sh" --step 4 --node SL3061
+source /data/ubuntu/lxh/weavetp/env.sh && git -C "$REPO" checkout --detach 1f5400d0fac899f5003db2663a555d214cf481cf && bash "$REPO/code/current/tools/resharding/failstop/quick_check.sh" --step 4 --node SL3061
 ```
 
-入口内部再次 source env.sh，并按 releases.json 检出固定实现 `7b33df6591815bb5db8d98d97a6898bc9ab1c0af`；结束后无论成功失败都切回 `f7d555998b45756998465924d733fd70e553d6b4`。握手端口 29879，runner 端口 29880/29881，不能与 Step 2 快验或 Step 4 正式验收同时启动。
+入口内部再次 source env.sh，并按 releases.json 检出固定实现 `05d942e682e3d96b85c7c7db164ba09a8dd13841`；结束后无论成功失败都切回 `f7d555998b45756998465924d733fd70e553d6b4`。握手端口 29879，runner 端口 29880/29881，不能与 Step 2 快验或 Step 4 正式验收同时启动。
 
 启动命令打印实际 nohup.log 路径；退出码保存在同目录 exit_code。完成时日志必须包含：
 
@@ -43,12 +43,12 @@ test ! -f "$LATEST/final.json" || cat "$LATEST/final.json"
 
 ## 2. Windows 离线 bundle 生成与上传
 
-本轮已生成并验证：`C:/Users/ksqbx/.codex/worktrees/failstop-step4/step4_dce3d90.bundle`，843307 字节，SHA256 `07047c2ba350c631f4df3c75029eb926a5641a4bc4bb10026e42e36d8b9cecf9`。配套 `.sha256` 在同目录。bundle 基线严格为 `f7d555998b45756998465924d733fd70e553d6b4`，包含 Step 1、Step 2 与本步提交，不含 Step 3。
+本轮已生成并验证：`C:/Users/ksqbx/.codex/worktrees/failstop-step4/step4_1f5400d.bundle`，872222 字节，SHA256 `8ee7e272f1b5c5e7a1c04723b8796a5a30c9ad271cde142cda4ea3b7caf1cc48`。配套 `.sha256` 在同目录。bundle 基线严格为 `f7d555998b45756998465924d733fd70e553d6b4`，包含 Step 1、Step 2 与本步提交，不含 Step 3。
 
 上传：
 
 ```powershell
-$Bundle = 'C:/Users/ksqbx/.codex/worktrees/failstop-step4/step4_dce3d90.bundle'
+$Bundle = 'C:/Users/ksqbx/.codex/worktrees/failstop-step4/step4_1f5400d.bundle'
 Get-FileHash -LiteralPath $Bundle -Algorithm SHA256
 scp $Bundle "$Bundle.sha256" 5090-SL3061:/data/ubuntu/lxh/weavetp/
 ```
@@ -63,9 +63,9 @@ scp -P 43061 $Bundle "$Bundle.sha256" ubuntu@hdssh01.casdao.com:/data/ubuntu/lxh
 
 ```powershell
 $Repo = 'C:/Users/ksqbx/.codex/worktrees/failstop-step4/WeaveTP_代码与实验资料_20260920'
-$Bundle = 'C:/Users/ksqbx/.codex/worktrees/failstop-step4/step4_dce3d90_rebuilt.bundle'
+$Bundle = 'C:/Users/ksqbx/.codex/worktrees/failstop-step4/step4_1f5400d_rebuilt.bundle'
 if (Test-Path -LiteralPath $Bundle) { throw '文件已存在，请先核对，不覆盖' }
-git -C $Repo update-ref refs/heads/codex/step4-dce3d90 dce3d902edb258d3b028ee8bc333d1448853929f
+git -C $Repo update-ref refs/heads/codex/step4-dce3d90 1f5400d0fac899f5003db2663a555d214cf481cf
 git -C $Repo bundle create $Bundle refs/heads/codex/step4-dce3d90 '^f7d555998b45756998465924d733fd70e553d6b4'
 if ($LASTEXITCODE) { throw 'bundle create failed' }
 git -C $Repo bundle verify $Bundle
@@ -84,13 +84,13 @@ cd /data
 mountpoint -q /data
 source /data/ubuntu/lxh/weavetp/env.sh
 cd /data/ubuntu/lxh/weavetp
-sha256sum -c step4_dce3d90.bundle.sha256
+sha256sum -c step4_1f5400d.bundle.sha256
 test -z "$(git -C "$REPO" status --porcelain --untracked-files=no)"
-git -C "$REPO" bundle verify "$PWD/step4_dce3d90.bundle"
-git -C "$REPO" fetch "$PWD/step4_dce3d90.bundle" refs/heads/codex/step4-dce3d90
-test "$(git -C "$REPO" rev-parse FETCH_HEAD)" = dce3d902edb258d3b028ee8bc333d1448853929f
-git -C "$REPO" checkout --detach dce3d902edb258d3b028ee8bc333d1448853929f
-scp step4_dce3d90.bundle step4_dce3d90.bundle.sha256 ubuntu@10.60.14.1:/data/ubuntu/lxh/weavetp/
+git -C "$REPO" bundle verify "$PWD/step4_1f5400d.bundle"
+git -C "$REPO" fetch "$PWD/step4_1f5400d.bundle" refs/heads/codex/step4-dce3d90
+test "$(git -C "$REPO" rev-parse FETCH_HEAD)" = 1f5400d0fac899f5003db2663a555d214cf481cf
+git -C "$REPO" checkout --detach 1f5400d0fac899f5003db2663a555d214cf481cf
+scp step4_1f5400d.bundle step4_1f5400d.bundle.sha256 ubuntu@10.60.14.1:/data/ubuntu/lxh/weavetp/
 ```
 
 ### SL3060：校验、导入
@@ -101,12 +101,12 @@ cd /data
 mountpoint -q /data
 source /data/ubuntu/lxh/weavetp/env.sh
 cd /data/ubuntu/lxh/weavetp
-sha256sum -c step4_dce3d90.bundle.sha256
+sha256sum -c step4_1f5400d.bundle.sha256
 test -z "$(git -C "$REPO" status --porcelain --untracked-files=no)"
-git -C "$REPO" bundle verify "$PWD/step4_dce3d90.bundle"
-git -C "$REPO" fetch "$PWD/step4_dce3d90.bundle" refs/heads/codex/step4-dce3d90
-test "$(git -C "$REPO" rev-parse FETCH_HEAD)" = dce3d902edb258d3b028ee8bc333d1448853929f
-git -C "$REPO" checkout --detach dce3d902edb258d3b028ee8bc333d1448853929f
+git -C "$REPO" bundle verify "$PWD/step4_1f5400d.bundle"
+git -C "$REPO" fetch "$PWD/step4_1f5400d.bundle" refs/heads/codex/step4-dce3d90
+test "$(git -C "$REPO" rev-parse FETCH_HEAD)" = 1f5400d0fac899f5003db2663a555d214cf481cf
+git -C "$REPO" checkout --detach 1f5400d0fac899f5003db2663a555d214cf481cf
 ```
 
 然后运行第 1 节命令。SL3060 全流程无需访问 GitHub。
@@ -125,8 +125,8 @@ cd /data
 mountpoint -q /data
 source /data/ubuntu/lxh/weavetp/env.sh
 test -z "$(git -C "$REPO" status --porcelain --untracked-files=no)"
-git -C "$REPO" checkout --detach 7b33df6591815bb5db8d98d97a6898bc9ab1c0af
-export NODE=SL3060 SUITE=s4_formal_dce3d90_r1
+git -C "$REPO" checkout --detach 05d942e682e3d96b85c7c7db164ba09a8dd13841
+export NODE=SL3060 SUITE=s4_formal_1f5400d_r1
 export RUN="/data/ubuntu/lxh/weavetp/acceptance/step04_async_driver_and_memory/$SUITE"
 export ENTRY="$REPO/code/current/tools/resharding/failstop/run_async.py"
 export REPO PYTHON
@@ -144,8 +144,8 @@ cd /data
 mountpoint -q /data
 source /data/ubuntu/lxh/weavetp/env.sh
 test -z "$(git -C "$REPO" status --porcelain --untracked-files=no)"
-git -C "$REPO" checkout --detach 7b33df6591815bb5db8d98d97a6898bc9ab1c0af
-export NODE=SL3061 SUITE=s4_formal_dce3d90_r1
+git -C "$REPO" checkout --detach 05d942e682e3d96b85c7c7db164ba09a8dd13841
+export NODE=SL3061 SUITE=s4_formal_1f5400d_r1
 export RUN="/data/ubuntu/lxh/weavetp/acceptance/step04_async_driver_and_memory/$SUITE"
 export ENTRY="$REPO/code/current/tools/resharding/failstop/run_async.py"
 export REPO PYTHON

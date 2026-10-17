@@ -3,8 +3,8 @@
   "label": "step04_async_driver_and_memory",
   "branch": "codex/failstop-step4",
   "branch_base": "69927c7effe6e2ff87133c80c4daaedad30aac89",
-  "code_commit": "7b33df6591815bb5db8d98d97a6898bc9ab1c0af",
-  "quick_manifest_commit": "dce3d902edb258d3b028ee8bc333d1448853929f",
+  "code_commit": "05d942e682e3d96b85c7c7db164ba09a8dd13841",
+  "quick_manifest_commit": "1f5400d0fac899f5003db2663a555d214cf481cf",
   "read_before_code": [
     "CODEX.md",
     "documents/failstop_20261017/00_总计划.md",
@@ -39,7 +39,10 @@
       "status": "passed",
       "log": "cpu_tests.log",
       "command": "python -B -X utf8 -m unittest discover -s code/current/tools/resharding/failstop -p 'test_*.py' -v",
-      "env": {"PYTHONPATH": "code/current;%TEMP%/weavetp-step2-deps", "OMP_NUM_THREADS": "1"}
+      "env": {
+        "PYTHONPATH": "code/current;%TEMP%/weavetp-step2-deps",
+        "OMP_NUM_THREADS": "1"
+      }
     },
     "packing": {
       "count": 16,
@@ -47,29 +50,99 @@
       "log": "packing.log",
       "command": "python -B -X utf8 -m pytest --noconftest code/current/tests/unit_tests/resharding/test_nccl_packing.py -q"
     },
-    "gpu": {"status": "not_run", "emulate": "not_run", "real": "not_run", "quick_300s_budget": "not_measured"}
+    "gpu": {
+      "status": "not_run",
+      "emulate": "not_run",
+      "real": "not_run",
+      "quick_300s_budget": "not_measured"
+    }
   },
   "static_checks": {
-    "isort": {"command": "python -m isort <changed files>", "status": "passed", "note": "import order of async_worker.py, async_probe.py, test_async_protocol.py fixed before the implementation commit; recheck exit 0"},
-    "ruff": {"command": "uv run --no-project --with ruff ruff check --select F <changed files>", "status": "passed", "output": "All checks passed!"},
-    "compile": {"command": "compile() over tools/resharding/failstop/*.py, megatron/core/failstop.py, failstop_rebind.py, standby_weights.py", "files": 33, "status": "passed"},
-    "bash": {"command": "bash -n code/current/tools/resharding/failstop/quick_check.sh", "status": "passed"},
-    "dry_run": {"command": "python -B -X utf8 code/current/tools/resharding/failstop/run_async.py --node SL3060 --suite-id step4_dry --output /data/step4_dry --mode both --rounds 1 --real-launches 1 --quick --correctness-only --dry-run", "status": "passed", "log": "dry_run.log"},
-    "git_diff_check": {"status": "passed"},
-    "committed_line_endings": {"status": "LF", "checked": ["quick_check.sh", "async_worker.py", "async_probe.py", "run_async.py", "controller.py", "releases.json"]}
+    "isort": {
+      "command": "python -m isort <changed files>",
+      "status": "passed",
+      "note": "import order of async_worker.py, async_probe.py, test_async_protocol.py fixed before the implementation commit; recheck exit 0"
+    },
+    "ruff": {
+      "command": "uv run --no-project --with ruff ruff check --select F <changed files>",
+      "status": "passed",
+      "output": "All checks passed!"
+    },
+    "compile": {
+      "command": "compile() over tools/resharding/failstop/*.py, megatron/core/failstop.py, failstop_rebind.py, standby_weights.py",
+      "files": 33,
+      "status": "passed"
+    },
+    "bash": {
+      "command": "bash -n code/current/tools/resharding/failstop/quick_check.sh",
+      "status": "passed"
+    },
+    "dry_run": {
+      "command": "python -B -X utf8 code/current/tools/resharding/failstop/run_async.py --node SL3060 --suite-id step4_dry --output /data/step4_dry --mode both --rounds 1 --real-launches 1 --quick --correctness-only --dry-run",
+      "status": "passed",
+      "log": "dry_run.log"
+    },
+    "git_diff_check": {
+      "status": "passed"
+    },
+    "committed_line_endings": {
+      "status": "LF",
+      "checked": [
+        "quick_check.sh",
+        "async_worker.py",
+        "async_probe.py",
+        "run_async.py",
+        "controller.py",
+        "releases.json"
+      ]
+    }
   },
   "logs_sha256": {
     "cpu_tests.log": "fc03f90e24486a6829314d0e295c19ebaea419eb940f6b4d8764a671c12b234b",
-    "packing.log": "57a916fa70cd75be895a151e77362a9412efc1a265e9a8ab73ab9bdc6c654631"
+    "packing.log": "57a916fa70cd75be895a151e77362a9412efc1a265e9a8ab73ab9bdc6c654631",
+    "cpu_tests_fix1.log": "3db6724f4cecd33481411452a8923259f8d23df7f371b66866b32a7bed10a4bd"
   },
   "bundle": {
-    "path": "C:\\Users\\ksqbx\\.codex\\worktrees\\failstop-step4\\step4_dce3d90.bundle",
-    "bytes": 843307,
-    "sha256": "07047c2ba350c631f4df3c75029eb926a5641a4bc4bb10026e42e36d8b9cecf9",
+    "path": "C:\\Users\\ksqbx\\.codex\\worktrees\\failstop-step4\\step4_1f5400d.bundle",
+    "bytes": 872222,
+    "sha256": "8ee7e272f1b5c5e7a1c04723b8796a5a30c9ad271cde142cda4ea3b7caf1cc48",
     "base": "f7d555998b45756998465924d733fd70e553d6b4",
-    "ref": "refs/heads/codex/step4-dce3d90",
-    "head": "dce3d902edb258d3b028ee8bc333d1448853929f",
+    "ref": "refs/heads/codex/step4-1f5400d",
+    "head": "1f5400d0fac899f5003db2663a555d214cf481cf",
     "verified": true
   },
-  "remote_before_commit": "origin/codex/failstop = 69927c7effe6e2ff87133c80c4daaedad30aac89; origin has no codex/failstop-step4"
+  "remote_before_commit": "origin/codex/failstop = 69927c7effe6e2ff87133c80c4daaedad30aac89; origin has no codex/failstop-step4",
+  "first_delivery": {
+    "code_commit": "7b33df6591815bb5db8d98d97a6898bc9ab1c0af",
+    "quick_manifest_commit": "dce3d902edb258d3b028ee8bc333d1448853929f",
+    "bundle": {
+      "path": "C:\\Users\\ksqbx\\.codex\\worktrees\\failstop-step4\\step4_dce3d90.bundle",
+      "bytes": 843307,
+      "sha256": "07047c2ba350c631f4df3c75029eb926a5641a4bc4bb10026e42e36d8b9cecf9",
+      "base": "f7d555998b45756998465924d733fd70e553d6b4",
+      "ref": "refs/heads/codex/step4-dce3d90",
+      "head": "dce3d902edb258d3b028ee8bc333d1448853929f",
+      "verified": true
+    },
+    "server_quick_check": "FAIL before any case: SL3060 /data free 4.88 GB < 5 GB default threshold (user report, 2026-10-17)"
+  },
+  "fix1": {
+    "changes": [
+      "quick_check.sh --min-free-disk-gb (default 1) forwarded to quick_driver and runner",
+      "quick_driver mirrors runner output to runner.log and reports the child exception line on failure",
+      "formal acceptance runner default stays 5 GB"
+    ],
+    "unittest": {
+      "count": 103,
+      "status": "passed",
+      "log": "cpu_tests_fix1.log"
+    },
+    "static_checks": {
+      "isort": "passed",
+      "ruff_F": "passed",
+      "compile": "passed",
+      "bash_n": "passed",
+      "git_diff_check": "passed"
+    }
+  }
 }

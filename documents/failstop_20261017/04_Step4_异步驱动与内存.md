@@ -68,4 +68,4 @@
 
 ## 7. 验收登记
 
-fix2 GPU SHA/证据/用户确认：待填；用户 2026-10-17 明确指示在此前置未登记时开始本步，runner 固定输出 `prerequisites_verified=false`。实现 SHA：`7b33df6591815bb5db8d98d97a6898bc9ab1c0af`；快验清单：`dce3d902edb258d3b028ee8bc333d1448853929f`（分支 `codex/failstop-step4`，基于 Step 2 交付 `69927c7`，不含 Step 3）。CPU：102 项 failstop 单测（含本步 16 项）、16 项 packing 回归及静态检查通过。emulate/real GPU、300 秒快验预算：均未运行。传输为显式切片夹具，Step 3 集成另行验收。详见 [实现与验证](Step4_实现与验证.md) 与 [服务器命令](Step4_服务器命令.md)。
+fix2 GPU SHA/证据/用户确认：待填；用户 2026-10-17 明确指示在此前置未登记时开始本步，runner 固定输出 `prerequisites_verified=false`。实现 SHA：`05d942e682e3d96b85c7c7db164ba09a8dd13841`（首版 `7b33df6591815bb5db8d98d97a6898bc9ab1c0af`，修正 1 调整快验磁盘门槛为 1 GB 并透出预检错误）；快验清单：`1f5400d0fac899f5003db2663a555d214cf481cf`（分支 `codex/failstop-step4`，基于 Step 2 交付 `69927c7`，不含 Step 3）。CPU：103 项 failstop 单测（含本步 17 项）、16 项 packing 回归及静态检查通过。emulate/real GPU、300 秒快验预算：均未运行；首次服务器快验因 SL3060 /data 剩余 4.88 GB 低于 5 GB 门槛在预检终止，无 GPU 结果。传输为显式切片夹具，Step 3 集成另行验收。详见 [实现与验证](Step4_实现与验证.md) 与 [服务器命令](Step4_服务器命令.md)。

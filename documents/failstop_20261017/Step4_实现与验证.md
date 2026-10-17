@@ -1,6 +1,6 @@
 # Step 4 实现与验证
 
-实现提交：`7b33df6591815bb5db8d98d97a6898bc9ab1c0af`。快速入口固定版本清单提交：`dce3d902edb258d3b028ee8bc333d1448853929f`。分支 `codex/failstop-step4`，从 `codex/failstop` 的 Step 2 交付提交 `69927c7effe6e2ff87133c80c4daaedad30aac89` 建立独立工作树，与 Step 3 并行实现；本分支不包含、不读取 Step 3 提交，合入 `codex/failstop` 由后续单独处理。服务器命令见 [Step 4 服务器命令](Step4_服务器命令.md)。
+当前实现提交：`05d942e682e3d96b85c7c7db164ba09a8dd13841`。当前快速入口固定版本清单提交：`1f5400d0fac899f5003db2663a555d214cf481cf`（见下方“修正 1”）。首版实现提交：`7b33df6591815bb5db8d98d97a6898bc9ab1c0af`，首版清单：`dce3d902edb258d3b028ee8bc333d1448853929f`。分支 `codex/failstop-step4`，从 `codex/failstop` 的 Step 2 交付提交 `69927c7effe6e2ff87133c80c4daaedad30aac89` 建立独立工作树，与 Step 3 并行实现；本分支不包含、不读取 Step 3 提交，合入 `codex/failstop` 由后续单独处理。服务器命令见 [Step 4 服务器命令](Step4_服务器命令.md)。
 
 本轮已阅读 CODEX.md、总计划、Step 4 文档、Step 2 服务器命令和 code/current/AGENTS.md。用户 2026-10-17 明确指示开始实现 Step 4；**standby fix2 的 GPU 复验证据仍未登记**，runner 输出固定 `prerequisites_verified=false`，不把释放已验证写成事实。本轮没有登录服务器、运行 GPU 或改动其他用户任务。
 
@@ -45,4 +45,14 @@ python -B -X utf8 -m pytest --noconftest code/current/tests/unit_tests/reshardin
 - 本步 runner 使用玩具权重/KV 和显式切片传输，验证副本独立推进、迁移重叠、KV 恢复/增量和单套权重机制；不是 Step 3 混合选源/主机库，也不是 Step 5 DeepSeek 正确性。
 - 阶段 A 单请求负载下，恢复容量不足回队逻辑由 CPU 单测覆盖，GPU runner 只执行容量充足分支。
 - `accepted` 在本步永远为 false：fix2 GPU 前置与 Step 3 集成分别验收；独占完整矩阵的机制结果写在 `mechanism_matrix_passed`。
-- 增量包：`C:/Users/ksqbx/.codex/worktrees/failstop-step4/step4_dce3d90.bundle`，843307 字节，基线 `f7d555998b45756998465924d733fd70e553d6b4`，SHA256 `07047c2ba350c631f4df3c75029eb926a5641a4bc4bb10026e42e36d8b9cecf9`。
+- 首版增量包：`C:/Users/ksqbx/.codex/worktrees/failstop-step4/step4_dce3d90.bundle`，843307 字节，基线 `f7d555998b45756998465924d733fd70e553d6b4`，SHA256 `07047c2ba350c631f4df3c75029eb926a5641a4bc4bb10026e42e36d8b9cecf9`；已被下方修正版取代。
+
+## 修正 1：快验磁盘门槛与预检错误透出
+
+用户回传首次 Step 4 服务器快验失败：SL3060 `/data` 剩余 4.88 GB，低于 runner 默认 5 GB，`check_data_space` 在预检拒绝运行，不是机制代码问题；且 quick_driver 的最终报错只提示查看逐轮日志，而预检失败时没有任何一轮日志。
+
+- `quick_check.sh` 新增 `--min-free-disk-gb`（默认 1，校验为非负数字），透传 `quick_driver.py --min-free-disk-gb`，再透传给 `run_async.py/run_topology.py`；正式验收入口的 runner 默认值保持 5 GB。门槛只改变磁盘预检阈值，不放宽任何正确性、身份、隔离或清理检查。
+- `quick_driver.py` 将 runner 输出同时镜像到 nohup.log 和 kickoff 目录的 `runner.log`，失败时取子进程自己的异常行写入 `runner_error` 与最终 error （例如 `RuntimeError: insufficient /data space: {...}`）；progress.json 不存在时明确写“no case started; the runner failed during preflight”。
+- 新增测试：预检失败输出必须出现在 receipt 的 runner_error/error 中，`--min-free-disk-gb` 必须透传到 runner argv，runner.log 内容与子进程输出一致；无输出时报 “runner produced no output”。两个 step 的既有异常路径（suite、restore、package、dirty、timeout、对端失败）全部重跑。
+
+验证：failstop unittest 103/103（[日志](step4_cpu_evidence/cpu_tests_fix1.log)）、isort、Ruff F、编译、bash -n、git diff --check 通过。修正实现 `05d942e682e3d96b85c7c7db164ba09a8dd13841`，清单 `1f5400d0fac899f5003db2663a555d214cf481cf`。增量包：`C:/Users/ksqbx/.codex/worktrees/failstop-step4/step4_1f5400d.bundle`，872222 字节，基线 `f7d555998b45756998465924d733fd70e553d6b4`，SHA256 `8ee7e272f1b5c5e7a1c04723b8796a5a30c9ad271cde142cda4ea3b7caf1cc48`。服务器 GPU 仍未运行。
