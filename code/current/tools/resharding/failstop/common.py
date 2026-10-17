@@ -13,6 +13,7 @@ SHARED_GPU_NOTE = "与其他任务共享 GPU，仅用于正确性和可行性判
 FAIL_COORDS = {(0, 0), (0, 1), (1, 0), (1, 1)}  # (ep, etp)
 DEFAULTS = {
     "shared_gpu_mode": False,
+    "repeats": 10,
     "sample_s": 0.1,
     "stable_samples": 3,
     "memory_slack_mib": 8,
@@ -198,7 +199,8 @@ def join_timing(kill, reclaim_done, request, spawn, ready):
             "join_interval": [request, ready]}
 
 
-def summarize(results, shared_gpu_mode=False):
+def summarize(results, shared_gpu_mode=False, repeats=10):
+    require(repeats > 0, "repeats must be positive")
     require(all(r["shared_gpu_mode"] == shared_gpu_mode for r in results), "mixed GPU modes in summary")
     groups = {}
     for kind in ("idle", "inflight"):
@@ -211,8 +213,9 @@ def summarize(results, shared_gpu_mode=False):
                             "sample_std": statistics.stdev(values) if len(values) > 1 else None,
                             "max": max(values)}
         groups[kind] = {"count": len(rows), "passed": len(good), "metrics": metrics}
-    passed = all(groups[k]["count"] == groups[k]["passed"] == 10 for k in groups)
-    return {"accepted": passed, "groups": groups, "launches": results,
+    passed = all(groups[k]["count"] == groups[k]["passed"] == repeats for k in groups)
+    return {"accepted": passed and repeats >= 10, "all_cases_passed": passed,
+            "quick_mode": repeats < 10, "repeats": repeats, "groups": groups, "launches": results,
             "shared_gpu_mode": shared_gpu_mode,
             "timing_note": SHARED_GPU_NOTE if shared_gpu_mode else "exclusive GPU acceptance",
-            "real_integration": "requires_user_confirmation"}
+            "real_integration": "deferred_pending_two_phase_gpu_validation"}

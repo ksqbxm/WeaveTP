@@ -2,7 +2,7 @@
 
 固定实现提交：`d16b5e80cbc6f7f4cf7edcf1494b16f73a4bbe6c`（`codex/failstop`，个人仓库 `ksqbxm/WeaveTP`）。本文件是实现后的交付说明，后续文档提交不改变该实现 SHA。
 
-50 项 CPU 测试通过；**服务器 GPU 尚未执行**。本次只跑玩具探针，不需要 checkpoint。两节点各八卡，允许其他任务占用 GPU；预检与运行均加 `--allow-foreign-gpu-processes`。共享模式允许 foreign MPS 客户端，无法定位实际管道的 daemon 记录后跳过查询；本测试 worker 必须在内部证明独立 GPU context，已定位管道查询报错仍失败，不修改服务。服务器需现有 PyTorch 2.11 / NCCL 2.28 构建，不在此安装或升级。
+50 项 CPU 测试通过；**此实现已获用户确认：s1_shared_20261017_d16b5e8_r2 的 20/20 共享 GPU 正确性验收通过**。本次只跑玩具探针，不需要 checkpoint。两节点各八卡，允许其他任务占用 GPU；预检与运行均加 `--allow-foreign-gpu-processes`。共享模式允许 foreign MPS 客户端，无法定位实际管道的 daemon 记录后跳过查询；本测试 worker 必须在内部证明独立 GPU context，已定位管道查询报错仍失败，不修改服务。服务器需现有 PyTorch 2.11 / NCCL 2.28 构建，不在此安装或升级。
 
 本次包含通知连接隔离、前台 MPS 识别、登记失败回收和两节点最终清理确认修正，见 [审阅报告](Step1_审阅与修正.md)。旧版命令固定的 `a609198` 不再用于本次验收。store 由最外层 launcher 持有，完成两节点清理终态交换后关闭；最终结果以 `result.json` 为准。
 
@@ -20,7 +20,7 @@ cd /data
 mountpoint -q /data
 source /data/ubuntu/lxh/weavetp/env.sh
 cd "$REPO"
-test -z "$(git status --porcelain)"
+test -z "$(git status --porcelain --untracked-files=no)"
 git cat-file -e d16b5e80cbc6f7f4cf7edcf1494b16f73a4bbe6c^{commit}
 git checkout --detach d16b5e80cbc6f7f4cf7edcf1494b16f73a4bbe6c
 export NODE=SL3060
@@ -44,7 +44,7 @@ cd /data
 mountpoint -q /data
 source /data/ubuntu/lxh/weavetp/env.sh
 cd "$REPO"
-test -z "$(git status --porcelain)"
+test -z "$(git status --porcelain --untracked-files=no)"
 git cat-file -e d16b5e80cbc6f7f4cf7edcf1494b16f73a4bbe6c^{commit}
 git checkout --detach d16b5e80cbc6f7f4cf7edcf1494b16f73a4bbe6c
 export NODE=SL3061
@@ -87,7 +87,7 @@ test -f "$RUN/$NODE.exit_code"
 tar -czf "${RUN}_${NODE}.tar.gz" -C "$(dirname "$RUN")" "$(basename "$RUN")"
 printf '%s\n' "${RUN}_${NODE}.tar.gz"
 cd "$REPO"
-test -z "$(git status --porcelain)"
+test -z "$(git status --porcelain --untracked-files=no)"
 git checkout --detach f7d555998b45756998465924d733fd70e553d6b4
 ```
 

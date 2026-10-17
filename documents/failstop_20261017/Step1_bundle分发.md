@@ -12,7 +12,7 @@ cd /data
 mountpoint -q /data
 source /data/ubuntu/lxh/weavetp/env.sh
 cd "$REPO"
-test -z "$(git status --porcelain)"
+test -z "$(git status --porcelain --untracked-files=no)"
 SHA=d16b5e80cbc6f7f4cf7edcf1494b16f73a4bbe6c
 BASE=f7d555998b45756998465924d733fd70e553d6b4
 git fetch https://github.com/ksqbxm/WeaveTP.git codex/failstop
@@ -42,7 +42,7 @@ source /data/ubuntu/lxh/weavetp/env.sh
 cd /data/ubuntu/lxh/weavetp
 sha256sum -c step1_d16b5e8.bundle.sha256
 cd "$REPO"
-test -z "$(git status --porcelain)"
+test -z "$(git status --porcelain --untracked-files=no)"
 git bundle verify /data/ubuntu/lxh/weavetp/step1_d16b5e8.bundle
 git fetch /data/ubuntu/lxh/weavetp/step1_d16b5e8.bundle refs/heads/codex/step1-d16b5e8
 git checkout --detach d16b5e80cbc6f7f4cf7edcf1494b16f73a4bbe6c

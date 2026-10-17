@@ -1,0 +1,170 @@
+{
+  "node": "SL3060",
+  "defaults": {
+    "shared_gpu_mode": false,
+    "repeats": 10,
+    "sample_s": 0.1,
+    "stable_samples": 3,
+    "memory_slack_mib": 8,
+    "baseline_noise_mib": 8,
+    "reclaim_timeout_s": 120,
+    "stage_timeout_s": 120,
+    "startup_timeout_s": 600,
+    "launch_timeout_s": 1200,
+    "tensor_elements": 262144,
+    "repair_wait_s": 0
+  },
+  "cases": [
+    {
+      "launch": "two_phase_idle_00",
+      "kind": "idle",
+      "index": 0
+    },
+    {
+      "launch": "two_phase_inflight_00",
+      "kind": "inflight",
+      "index": 1
+    },
+    {
+      "launch": "two_phase_idle_01",
+      "kind": "idle",
+      "index": 2
+    },
+    {
+      "launch": "two_phase_inflight_01",
+      "kind": "inflight",
+      "index": 3
+    },
+    {
+      "launch": "two_phase_idle_02",
+      "kind": "idle",
+      "index": 4
+    },
+    {
+      "launch": "two_phase_inflight_02",
+      "kind": "inflight",
+      "index": 5
+    },
+    {
+      "launch": "two_phase_idle_03",
+      "kind": "idle",
+      "index": 6
+    },
+    {
+      "launch": "two_phase_inflight_03",
+      "kind": "inflight",
+      "index": 7
+    },
+    {
+      "launch": "two_phase_idle_04",
+      "kind": "idle",
+      "index": 8
+    },
+    {
+      "launch": "two_phase_inflight_04",
+      "kind": "inflight",
+      "index": 9
+    },
+    {
+      "launch": "two_phase_idle_05",
+      "kind": "idle",
+      "index": 10
+    },
+    {
+      "launch": "two_phase_inflight_05",
+      "kind": "inflight",
+      "index": 11
+    },
+    {
+      "launch": "two_phase_idle_06",
+      "kind": "idle",
+      "index": 12
+    },
+    {
+      "launch": "two_phase_inflight_06",
+      "kind": "inflight",
+      "index": 13
+    },
+    {
+      "launch": "two_phase_idle_07",
+      "kind": "idle",
+      "index": 14
+    },
+    {
+      "launch": "two_phase_inflight_07",
+      "kind": "inflight",
+      "index": 15
+    },
+    {
+      "launch": "two_phase_idle_08",
+      "kind": "idle",
+      "index": 16
+    },
+    {
+      "launch": "two_phase_inflight_08",
+      "kind": "inflight",
+      "index": 17
+    },
+    {
+      "launch": "two_phase_idle_09",
+      "kind": "idle",
+      "index": 18
+    },
+    {
+      "launch": "two_phase_inflight_09",
+      "kind": "inflight",
+      "index": 19
+    },
+    {
+      "launch": "two_phase_idle_10",
+      "kind": "idle",
+      "index": 20
+    },
+    {
+      "launch": "two_phase_inflight_10",
+      "kind": "inflight",
+      "index": 21
+    },
+    {
+      "launch": "two_phase_idle_11",
+      "kind": "idle",
+      "index": 22
+    },
+    {
+      "launch": "two_phase_inflight_11",
+      "kind": "inflight",
+      "index": 23
+    }
+  ],
+  "shared_gpu_mode": false,
+  "repeats": 12,
+  "quick_mode": false,
+  "min_free_disk_gb": 5,
+  "ports": [
+    29750,
+    29751,
+    29752,
+    29753,
+    29754,
+    29755,
+    29756,
+    29757,
+    29758,
+    29759,
+    29760,
+    29761,
+    29762,
+    29763,
+    29764,
+    29765,
+    29766,
+    29767,
+    29768,
+    29769,
+    29770,
+    29771,
+    29772,
+    29773
+  ],
+  "output": "\\data\\probe\\SL3060"
+}

@@ -71,7 +71,7 @@ def control(config, bus, journal, check):
     for node, report in zip(NODES, preflight):
         require(report["host"].split(".")[0].upper() == node, f"{node} is running on wrong host: {report['host']}")
         for key in ("commit", "launch", "kind", "port", "tensor_elements", "memory_slack_mib",
-                    "stable_samples", "sample_s", "reclaim_timeout_s", "stage_timeout_s", "shared_gpu_mode"):
+                    "stable_samples", "sample_s", "reclaim_timeout_s", "stage_timeout_s", "shared_gpu_mode", "repeats"):
             require(report["config"][key] == config[key], f"node configuration differs: {key}")
     rows = topology(dict(zip(NODES, [r["gpus"] for r in preflight])))
     victims = failed_slots(rows)
@@ -103,13 +103,14 @@ def control(config, bus, journal, check):
     epoch1 = wait([f"ready/1/{s}" for s in survivors])
     validate_epoch(rows, 1, epoch1, initial, {})
     ready1 = journal.event("world12_ready")["t"]
+    wait([f"serving/{s}" for s in survivors])
     request = publish("rejoin_request", repair_wait_s=0, policy="toy probe: request immediately after world12 validation")
     reclaimed = wait(["reclaimed"], config["reclaim_timeout_s"])[0]
     require(set(reclaimed["cards"]) == {rows[s]["gpu_uuid"] for s in victims}, "incomplete four-GPU reclaim evidence")
     # Use controller receipt as the conservative barrier; never schedule from a remote estimate.
     reclaim_received = journal.event("reclaim_received", evidence=reclaimed)["t"]
     spawn = publish("spawn")
-    wait([f"verified/2/{n}" for n in NODES])
+    wait([f"verified/2/{n}" for n in NODES], config["startup_timeout_s"])
     returned = {s: r for s, r in zip(victims, wait([f"cuda/2/{s}" for s in victims]))}
     require(all(returned[s]["pid"] != initial[s]["pid"] for s in victims), "returned worker PID did not change")
     spawned = wait([f"spawned/{n}" for n in NODES])
@@ -121,6 +122,9 @@ def control(config, bus, journal, check):
             require(record["start"]["t_local"] >= max(v["confirmed_t_local"] for v in reclaimed["cards"].values()),
                     "spawn precedes local reclaim confirmation")
     publish("cuda_verified/2")
+    # Each survivor must keep making progress during background process startup.
+    progress = wait([f"service_after_spawn/{s}" for s in survivors])
+    prepared = publish("rejoin_ready", returned_pids=[returned[s]["pid"] for s in victims])
     publish("transition/2", membership=membership(rows, 2), epoch=2)
     abort2 = wait([f"aborted/2/{s}" for s in survivors])
     build2 = publish("build/2", prefix=prefix(config["launch"], 2))
@@ -133,15 +137,23 @@ def control(config, bus, journal, check):
     timing = join_timing(t_fail, reclaimed["t_done"], request, actual_spawn, ready2)
     timing["reclaim_receipt_delay_s"] = reclaim_received - reclaimed["t_done"]
     timing.update(t_rejoin_request=request, t_rejoin_start=actual_spawn,
-                  t_spawn_command=spawn, t_world16_ready=ready2,
+                  t_spawn_command=spawn, t_rejoin_ready=prepared, t_world16_ready=ready2,
+                  spawn_to_ready_s=max(r["t_local"] for r in returned.values()) - min(r["start"]["t_local"] for r in replacements),
+                  rejoin_preparation_s=prepared - spawn,
                   spawn_control_delay_s=actual_spawn - spawn)
     metrics = {k: v for k, v in timing.items() if k.endswith("_s")}
     for name, aborts, built, ready in (("shrink", abort1, build1, ready1), ("rejoin", abort2, build2, ready2)):
         metrics[f"abort_{name}_s"] = max(r["end"]["t"] for r in aborts) - min(r["start"]["t"] for r in aborts)
         metrics[f"rebuild_and_validate_{name}_s"] = ready - built
-    # Probe pause from last validated progress to next validated progress, per EDP1 PID.
+    # Use actual last service progress before rejoin, not the world12-ready event.
     pauses = []
-    for before, after in ((epoch0, epoch1), (epoch1, epoch2)):
+    service = {s: r["service"] for s, r in zip(survivors, abort2)}
+    for s, report in zip(survivors, progress):
+        require(report["pid"] == initial[s]["pid"] and service[s]["last"]["pid"] == initial[s]["pid"],
+                "service progress PID mismatch")
+        require(service[s]["last"]["step"] >= report["step"] > service[s]["first"]["step"],
+                "survivor did not compute during replacement preparation")
+    for before, after in ((epoch0, epoch1), ([service[s]["last"] for s in survivors], epoch2)):
         old = {r["slot"]: r for r in before}
         for report in after:
             if rows[report["slot"]]["replica"] == "EDP1":
@@ -150,17 +162,18 @@ def control(config, bus, journal, check):
                                "interval": [previous["t"], report["t"]],
                                "seconds": report["t_local"] - previous["t_local"]})
     metrics["edp1_shrink_pause_max_s"] = max(p["seconds"] for p in pauses if p["epoch"] == 1)
-    metrics["edp1_rejoin_pause_max_s"] = max(p["seconds"] for p in pauses if p["epoch"] == 2)
+    metrics["edp1_rejoin_pause_s"] = max(p["seconds"] for p in pauses if p["epoch"] == 2)
     result = {"status": "passed", "kind": config["kind"], "launch": config["launch"],
               "shared_gpu_mode": config["shared_gpu_mode"],
               "commit": config["commit"], "metrics": metrics, "timing": timing,
               "clock_calibration": calibrations, "gpu_reclaim": reclaimed,
               "kill_signals": signals, "aborts": {1: abort1, 2: abort2},
               "epochs": {0: epoch0, 1: epoch1, 2: epoch2}, "edp1_probe_pauses": pauses,
-              "edp1_pause_semantics": "toy validated-compute progress gap; includes control/MPS/spawn waits",
+              "preparation_service": service,
+              "edp1_pause_semantics": "rejoin: last validated local service step to validated world16; shrink: world16 to world12 progress gap",
               "prefixes": ["inherited_by_shrink_group" if config["kind"] == "shrink" and e == 1
                            else prefix(config["launch"], e) for e in range(3)],
-              "real_integration": "requires_user_confirmation"}
+              "real_integration": "deferred_pending_two_phase_gpu_validation"}
     return result
 
 

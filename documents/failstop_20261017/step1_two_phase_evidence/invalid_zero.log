@@ -1,0 +1,10 @@
+Traceback (most recent call last):
+  File "C:\Users\ksqbx\.codex\worktrees\failstop\WeaveTP_代码与实验资料_20260920\code\current\tools\resharding\failstop\run_probe.py", line 249, in <module>
+    sys.exit(main())
+             ~~~~^^
+  File "C:\Users\ksqbx\.codex\worktrees\failstop\WeaveTP_代码与实验资料_20260920\code\current\tools\resharding\failstop\run_probe.py", line 168, in main
+    require(args.repeats > 0, "repeats must be positive")
+    ~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\ksqbx\.codex\worktrees\failstop\WeaveTP_代码与实验资料_20260920\code\current\tools\resharding\failstop\common.py", line 32, in require
+    raise RuntimeError(message)
+RuntimeError: repeats must be positive

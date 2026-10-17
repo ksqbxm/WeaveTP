@@ -1,12 +1,12 @@
 # Step 1：real fail-stop 独立可行性验证
 
-状态：已实现、CPU 已验证、服务器 GPU 待验收。测试标识：`step01_real_probe`。
+状态：d16b5e8 共享 GPU 正确性验收已获用户确认；两阶段回归优化在本步验证，暂不推进 Step 2。测试标识：`step01_real_probe`。
 
 ## 1. 必读与范围
 
 **需要阅读 [CODEX.md](../../CODEX.md) 进行代码编写，需要阅读[总计划](00_总计划.md)。** 每次代码修改前核对本 Step、总计划及适用 AGENTS.md；Python imports 变动须执行 `uv run isort`。发现实现与已确认设计不符，报告差异再确认。
 
-本步只用玩具张量/模型验证真实 kill 后存活进程继续使用 CUDA、重建 world 和重新加入的可行性；不接入 DeepSeek、模型权重迁移或新服务驱动。完成 GPU 验证后等待用户确认，才集成 real 到 Step 2–3。交付本步后，用户跑服务器期间可继续 Step 2–3 公共部分与 emulate。
+本步只用玩具张量/模型验证真实 kill 后存活进程继续使用 CUDA、重建 world 和重新加入的可行性；不接入 DeepSeek、模型权重迁移或新服务驱动。完成 GPU 验证后等待用户确认，才集成 real 到 Step 2–3。本轮最新用户指示覆盖原并行安排：先完成两阶段回归优化与 N=1 GPU 快验，暂不推进 Step 2/task2 或模型集成。
 
 ## 2. 输入及固定放置
 
@@ -36,7 +36,7 @@ NVIDIA 文档说明管道变量控制连接位置，并列出绕开 MPS 的设�
 4. 存活进程显式 abort 旧通信器；记录每组/每进程开始结束和未完成 work 的处理。使用新 PrefixStore 命名空间建立 12 rank world，所有新 rank 连续且映射明确。使用带外同步协调重建，不在坏组上 barrier。
 5. 验证 12 个存活 PID 未替换、原 CUDA 张量指针和逐位内容保留，继续做本地算子以及新 world collective，结果正确。
 6. 并行采样四故障 GPU 回收状态，满足第 3.3 节条件后才允许 SL3061 监管器启动四新进程。玩具探针不必等待正式负载的 45 s，但必须记录等待策略；正式入口沿用总计划 45 s 规则。
-7. 发布 rejoin epoch，存活进程退出旧 collective 流、abort 12 world，16 个进程以另一新前缀重建 16 world。原 12 张量仍可用，新 4 有新 PID/新张量；再次校验计算和 collective。
+7. 回归分两阶段：回收确认后，新 worker 后台启动、CUDA 分配与独立 context 验证并上报就绪；存活 12 worker 持续校验本地玩具 CUDA 计算，不进入任何 collective 或 barrier 等待新进程。全部新 worker 及 MPS 验证就绪、存活 worker 有 spawn 后计算进度证据后，发布 rejoin epoch，存活进程才停止服务并 abort 12 world，16 个进程以另一新前缀重建 16 world。原 12 张量仍可用，新 4 有新 PID/新张量；再次校验计算和 collective。
 8. 有界退出，收集所有进程结果，只清理本次登记资源。下一次启动不复用旧 store 前缀或错误 PG。
 
 必须覆盖空闲边界与未完成 collective 场景，避免只证明安全停在 barrier 时可重建。实现先用小张量、最少组，再加可控在途 collective；不以全进程重启替代存活者保留状态。
@@ -86,7 +86,7 @@ NVIDIA 文档说明管道变量控制连接位置，并列出绕开 MPS 的设�
 
 实施交付必须补齐两节点 `source env.sh`、fetch/checkout 完整 SHA、先启动 SL3060 store/监管器再启动 SL3061 监管器的命令、nohup 日志、打包回传路径、结束后切回 `f7d5559`。脚本未实现前不提供假定能运行的命令。
 
-**用户回传并确认通过后，才开始 real 路径集成；本 Step 交付即继续 Step 2–3 的公共部分与 emulate。Step 4 另受 fix2 GPU 关口限制。**
+**原 Step 1 共享 GPU 关口已获确认；当前只优化两阶段回归玩具探针并等待快验，不推进 Step 2 或模型集成。Step 4 另受 fix2 GPU 关口限制。**
 
 ## 7. 验收登记
 
@@ -94,8 +94,16 @@ NVIDIA 文档说明管道变量控制连接位置，并列出绕开 MPS 的设�
 
 上一版审阅修正版实现 SHA：`ca72cd23d2e6a92cb58e38b6b3ea8b91936ca254`。31 项 CPU 测试通过，无跳过；通知、MPS、进程清理及终态验收问题已修正，见 [审阅报告](Step1_审阅与修正.md)。该 SHA 保留为历史审阅记录。
 
-当前实现 SHA：`d69d5950819626b0cbd09bfa4e32ed4ebbe9396c`；新增默认关闭的共享 GPU 正确性开关，40 项 CPU 测试通过。运行见 [共享 GPU 命令](Step1_共享GPU服务器命令.md)，默认独占验收仍见 [服务器命令](Step1_服务器命令.md)。
+历史共享模式实现 SHA：`d69d5950819626b0cbd09bfa4e32ed4ebbe9396c`；新增默认关闭的共享 GPU 正确性开关，40 项 CPU 测试通过。运行见 [共享 GPU 命令](Step1_共享GPU服务器命令.md)，默认独占验收仍见 [服务器命令](Step1_服务器命令.md)。
 
-GPU：未运行。20 次结果：待回传。Linux PID/MPS/CUDA/NCCL 可行性：待服务器验证。用户 real 集成确认：待确认。
+该历史版本的待验收状态已由下述 d16b5e8 用户确认记录更新；两阶段优化的 GPU 验证独立登记。
 
 - 2026-10-17 服务器环境适配：pidfd 原生 Python 接口缺失时仅在 x86_64 Linux 使用 syscall 434/424，不退回 os.kill；result.json 记录实现。`/data` 每轮启动前检查，`--min-free-disk-gb` 默认 5（十进制 GB），不足打印总量/已用/可用并失败。共享 MPS 规则按本次用户核查调整；Step 3 增补 `/dev/shm` 空间预检、按需分片加载及各模式占用报告。SL3061 拉取 GitHub，通过增量 bundle 分发 SL3060。
+
+## 两阶段回归更新与关口登记
+
+2026-10-17 用户确认：SUITE `s1_shared_20261017_d16b5e8_r2`，实现 `d16b5e80cbc6f7f4cf7edcf1494b16f73a4bbe6c`，SL3060 accepted=true，idle 10/10、inflight 10/10，两节点 exit=0；Step 1 共享 GPU 正确性/可行性关口通过。依据为本轮用户回传结论，本地未重新解包核验结果包；耗时仅为共享 GPU 诊断数据。
+
+当前范围：只优化 Step 1，不推进 Step 2/task2 或模型集成。`--repeats N` 默认 10，按 idle/inflight 交替运行共 2N 轮；N<10 标记 quick_mode=true，all_cases_passed 表示所选快验矩阵完整成功，accepted 保留至少每类 10 轮全部成功的主验收要求。两节点 repeats 必须一致。仓库检查只拒绝已跟踪文件的暂存/未暂存改动，忽略未跟踪文件。
+
+计时：spawn_to_ready_s 使用 SL3061 本地单调时钟，从四新 worker 最早 spawn 到最后 CUDA 就绪；rejoin_preparation_s 包含两节点 MPS/身份检查的后台准备墙钟；rejoin_join_s 保留完整回归请求到 world16 ready 的总时长。edp1_rejoin_pause_s 改为 EDP1 重建前最后一次有效服务计算到 world16 校验完成的最大进程间隙，包含 abort、协调和重建验证，不包括新进程初始化。旧 edp1_rejoin_pause_max_s 字段移除，不保留两种回归停顿口径。逐 worker service_progress、步数和最大进度间隙用于证明准备期间持续计算。

@@ -1,4 +1,4 @@
-"""Explicit opt-in Step 1 suite: 20 independent launches, no torchrun restart policy."""
+"""Explicit opt-in Step 1 suite: alternating idle/inflight launches, no automatic restarts."""
 
 import argparse
 import csv
@@ -36,11 +36,18 @@ from safety import (
 HERE = Path(__file__).resolve().parent
 
 
-def matrix(suite, optional_shrink=False):
+def matrix(suite, optional_shrink=False, repeats=10):
+    require(repeats > 0, "repeats must be positive")
     if optional_shrink:
-        return [{"launch": f"{suite}_shrink", "kind": "shrink", "index": 20}]
-    return [{"launch": f"{suite}_{kind}_{repeat:02d}", "kind": kind, "index": offset + repeat}
-            for kind, offset in (("idle", 0), ("inflight", 10)) for repeat in range(10)]
+        return [{"launch": f"{suite}_shrink", "kind": "shrink", "index": 2 * repeats}]
+    return [{"launch": f"{suite}_{kind}_{repeat:02d}", "kind": kind, "index": 2 * repeat + offset}
+            for repeat in range(repeats) for offset, kind in enumerate(("idle", "inflight"))]
+
+
+def repository_commit():
+    dirty = subprocess.check_output(["git", "status", "--porcelain", "--untracked-files=no"], cwd=HERE, text=True)
+    require(not dirty, "tracked server repository files must be clean at the delivered commit")
+    return subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=HERE, text=True).strip()
 
 
 def cleanup_registered(root, journal, exclude_pids=()):
@@ -128,6 +135,7 @@ def run_case(config):
                 result.update(status="failed", store_cleanup_error=traceback.format_exc())
         write_json(root / "launcher_lifecycle.json", [r for _, r in children.children + service.children])
     result.update(kind=config["kind"], launch=config["launch"], shared_gpu_mode=config["shared_gpu_mode"],
+                  repeats=config["repeats"], quick_mode=config["repeats"] < 10,
                   pidfd_open_impl=config["pidfd_open_impl"], pidfd_send_signal_impl=config["pidfd_send_signal_impl"],
                   timing_note=SHARED_GPU_NOTE if config["shared_gpu_mode"] else "exclusive GPU acceptance")
     write_json(root / "result.json", result)
@@ -146,6 +154,8 @@ def main():
     parser.add_argument("--mps-pipe", help="actual existing service pipe, for read-only queries only")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--preflight-only", action="store_true")
+    parser.add_argument("--repeats", type=int, default=DEFAULTS["repeats"],
+                        help="repeats per kind, alternating idle/inflight; N < 10 is quick mode")
     parser.add_argument("--min-free-disk-gb", type=float, default=5,
                         help="minimum free /data space in decimal GB (default: 5)")
     parser.add_argument("--allow-foreign-gpu-processes", action="store_true",
@@ -155,14 +165,17 @@ def main():
     shared = args.allow_foreign_gpu_processes
     require(math.isfinite(args.min_free_disk_gb) and args.min_free_disk_gb >= 0,
             "--min-free-disk-gb must be finite and nonnegative")
-    cases = matrix(args.suite_id, args.optional_shrink)
+    require(args.repeats > 0, "repeats must be positive")
+    last_index = 2 * args.repeats - (0 if args.optional_shrink else 1)
+    require(1024 <= args.port_base and args.port_base + last_index <= 65535, "port range invalid")
+    cases = matrix(args.suite_id, args.optional_shrink, args.repeats)
+    mode = {"shared_gpu_mode": shared, "repeats": args.repeats, "quick_mode": args.repeats < 10}
     for case in cases:
         prefix(case["launch"], 0)
-    require(1024 <= args.port_base <= 65514, "port range invalid")
     require(str(args.output).replace("\\", "/").startswith("/data/") and ".." not in args.output.parts,
             "output must be an absolute /data path")
     if args.dry_run:
-        print(json.dumps({"node": args.node, "defaults": DEFAULTS, "cases": cases, "shared_gpu_mode": shared,
+        print(json.dumps({"node": args.node, "defaults": DEFAULTS, "cases": cases, **mode,
                           "min_free_disk_gb": args.min_free_disk_gb,
                           "ports": [args.port_base + c["index"] for c in cases],
                           "output": str(args.output / args.node)}, indent=2))
@@ -173,12 +186,10 @@ def main():
     require(args.output.resolve().is_relative_to(Path("/data").resolve()), "output symlink escapes /data")
     root = args.output / args.node
     root.mkdir(parents=True, exist_ok=False)
-    commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=HERE, text=True).strip()
-    dirty = subprocess.check_output(["git", "status", "--porcelain"], cwd=HERE, text=True)
-    require(not dirty, "server repository must be clean at the delivered commit")
+    commit = repository_commit()
     write_json(root / "invocation.json", {"argv": sys.argv, "commit": commit, "defaults": DEFAULTS,
                                          **pidfd_impl, "min_free_disk_gb": args.min_free_disk_gb,
-                                         "shared_gpu_mode": shared,
+                                         **mode,
                                          "pid": os.getpid(), "start_monotonic": time.monotonic(), "node": args.node,
                                          "original_environment": {k: v for k, v in os.environ.items()
                                                                   if k.startswith(("NCCL_", "TORCH_", "CUDA_", "PYTORCH_", "UCX_", "GLOO_", "FI_"))}})
@@ -197,39 +208,39 @@ def main():
             foreign = check_gpu_processes(snapshot, mps, shared_gpu_mode=shared)
             write_json(root / "preflight.json", {"status": "passed", "snapshot": snapshot, "mps": mps,
                                                  **pidfd_impl, "disk_space": disk,
-                                                 "shared_gpu_mode": shared, "foreign": foreign})
+                                                 **mode, "foreign": foreign})
             return 0
         except Exception:
             write_json(root / "preflight.json", {"status": "failed", "traceback": traceback.format_exc(),
-                                                 "shared_gpu_mode": shared})
+                                                 **mode})
             raise
     results = []
     for case in cases:
         if results and results[-1]["status"] != "passed":
             results.append({**case, "status": "not_run", "reason": "prior launch failed; preserve evidence",
-                            "shared_gpu_mode": shared})
+                            **mode})
             continue
         config = {**DEFAULTS, **case, "output": str(root / case["launch"]), "node": args.node,
                   **pidfd_impl, "min_free_disk_gb": args.min_free_disk_gb,
                   "master": args.master, "port": args.port_base + case["index"],
-                  "mps_pipe": args.mps_pipe, "commit": commit, "shared_gpu_mode": shared}
+                  "mps_pipe": args.mps_pipe, "commit": commit, **mode}
         print(f"Starting {case['launch']} on {args.node}", flush=True)
         result = run_case(config)
         results.append(result)
         write_json(root / "progress.json", results)
         print(f"{case['launch']}: {result['status']}", flush=True)
-    summary = summarize(results, shared)
+    summary = summarize(results, shared, args.repeats)
     if args.node != "SL3060" or args.optional_shrink:
         summary["accepted"] = False
         summary["acceptance_note"] = "main 20-launch acceptance is only reported by SL3060"
     write_json(root / "summary.json", summary)
     with (root / "summary.csv").open("w", newline="", encoding="utf-8") as stream:
         writer = csv.writer(stream)
-        writer.writerow(["kind", "metric", "count", "mean", "sample_std", "max", "shared_gpu_mode", "timing_note"])
+        writer.writerow(["kind", "metric", "count", "mean", "sample_std", "max", "shared_gpu_mode", "quick_mode", "repeats", "timing_note"])
         for kind, group in summary["groups"].items():
             for key, values in group["metrics"].items():
                 writer.writerow([kind, key, values["count"], values["mean"], values["sample_std"], values["max"],
-                                 shared, summary["timing_note"]])
+                                 shared, summary["quick_mode"], args.repeats, summary["timing_note"]])
     print(f"Evidence: {root}; main acceptance={summary['accepted']}", flush=True)
     return 0 if all(r["status"] == "passed" for r in results) else 1
 

@@ -7,6 +7,7 @@ import os
 import queue
 import sys
 import threading
+import time
 import traceback
 from datetime import timedelta
 from pathlib import Path
@@ -26,6 +27,39 @@ def listen(config, slot, journal, notifications):
             notifications.put((epoch, arrival))
     except Exception as error:
         notifications.put(error)
+
+
+def serve_until_rejoin(config, slot, journal, bus, notifications, compute):
+    """Local validated toy service; no world collective or barrier while replacements prepare."""
+    deadline = time.monotonic() + config["launch_timeout_s"]
+    first, last, steps, max_gap = None, None, 0, 0
+    after_spawn = False
+    while True:
+        try:
+            notification = notifications.get_nowait()
+        except queue.Empty:
+            notification = None
+        if isinstance(notification, Exception):
+            raise notification
+        if notification is not None:
+            require(notification[0] == 2 and last is not None, "rejoin before service started or wrong epoch")
+            return notification, {"first": first, "last": last, "steps": steps, "max_progress_gap_s": max_gap}
+        require(time.monotonic() < deadline, "rejoin preparation timed out")
+        compute()
+        steps += 1
+        progress = journal.event("service_progress", epoch=1, slot=slot, step=steps)
+        if first is None:
+            first = progress
+            bus.put(f"serving/{slot}", progress)
+        if last is not None:
+            max_gap = max(max_gap, progress["t_local"] - last["t_local"])
+        last = progress
+        if not after_spawn and bus.has("spawn"):
+            # The next iteration proves completed computation after observing spawn.
+            after_spawn = True
+        elif after_spawn and not bus.has(f"service_after_spawn/{slot}"):
+            bus.put(f"service_after_spawn/{slot}", progress)
+        time.sleep(0.02)
 
 
 def run(config, slot, initial_epoch):
@@ -137,7 +171,11 @@ def run(config, slot, initial_epoch):
         bus.put(f"armed/{slot}", journal.event("armed", slot=slot, victim=victim,
                                               pending=pending is not None))
     for epoch in range(initial_epoch + 1, 3):
-        notification = notifications.get(timeout=config["launch_timeout_s"])
+        service = None
+        if epoch == 2:
+            notification, service = serve_until_rejoin(config, slot, journal, bus, notifications, validate_tensor)
+        else:
+            notification = notifications.get(timeout=config["launch_timeout_s"])
         if isinstance(notification, Exception):
             raise notification
         require(notification[0] == epoch, "out-of-order epoch")
@@ -156,7 +194,7 @@ def run(config, slot, initial_epoch):
         # Aborted results are discarded, never treated as completed application data.
         pending, payload = None, None
         end = journal.event("abort_end", epoch=epoch, slot=slot, work_disposition="discarded_after_abort")
-        bus.put(f"aborted/{epoch}/{slot}", {"start": start, "end": end})
+        bus.put(f"aborted/{epoch}/{slot}", {"start": start, "end": end, "service": service})
         bus.wait([f"build/{epoch}"])
         validate_tensor()
         if config["kind"] == "shrink" and epoch == 1:

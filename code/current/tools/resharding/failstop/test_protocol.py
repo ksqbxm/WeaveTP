@@ -8,7 +8,7 @@ import time
 import unittest
 from datetime import timedelta
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import common
 import controller
@@ -118,6 +118,7 @@ class ProtocolTests(unittest.TestCase):
         rows = common.topology(inventory)
         victims = common.failed_slots(rows)
         errors = []
+        service_threads, notifications, services, computations = [], {}, {}, {}
 
         def event(**extra):
             now = time.monotonic()
@@ -165,22 +166,53 @@ class ProtocolTests(unittest.TestCase):
                     remote.put(f"aborted/1/{slot}", {"start": event(), "end": event()})
                 remote.wait(["build/1"])
                 ready(1, {})
+                for slot in common.membership(rows, 1):
+                    notifications[slot] = queue.Queue()
+                    computations[slot] = 0
+
+                    def serve(slot=slot):
+                        def compute():
+                            computations[slot] += 1
+
+                        journal = Mock()
+                        journal.event.side_effect = lambda stage, **fields: event(pid=initial[slot]["pid"], **fields)
+                        try:
+                            _, services[slot] = worker.serve_until_rejoin(
+                                config, slot, journal, remote, notifications[slot], compute)
+                        except BaseException as error:
+                            errors.append(error)
+                            remote.put("failure", str(error))
+
+                    service_thread = threading.Thread(target=serve, daemon=True)
+                    service_threads.append(service_thread)
+                    service_thread.start()
                 remote.wait(["rejoin_request"])
                 reclaimed = time.monotonic()
                 remote.put("reclaimed", {"t_done": reclaimed,
                                          "cards": {rows[s]["gpu_uuid"]: {"confirmed_t": reclaimed,
                                                                           "confirmed_t_local": reclaimed} for s in victims}})
                 remote.wait(["spawn"])
+                starts = {s: event() for s in victims}
+                before = dict(computations)
+                time.sleep(0.2)  # Simulated slow torch/CUDA startup, while real service loops run.
+                self.assertTrue(all(computations[s] > before[s] for s in computations))
+                self.assertFalse(remote.has("transition/2"))
+                self.assertFalse(remote.has("build/2"))
                 returned = {s: cuda(s, 2) for s in victims}
                 for slot, data in returned.items():
                     remote.put(f"cuda/2/{slot}", data)
                 for node in common.NODES:
                     remote.put(f"verified/2/{node}", {})
-                    remote.put(f"spawned/{node}", [{"slot": s, "start": event()}
+                    remote.put(f"spawned/{node}", [{"slot": s, "start": starts[s]}
                                                    for s in victims] if node == "SL3061" else [])
                 remote.wait(["transition/2"])
+                for slot in notifications:
+                    notifications[slot].put((2, event()))
+                for service_thread in service_threads:
+                    service_thread.join(timeout=5)
+                    self.assertFalse(service_thread.is_alive())
                 for slot in common.membership(rows, 1):
-                    remote.put(f"aborted/2/{slot}", {"start": event(), "end": event()})
+                    remote.put(f"aborted/2/{slot}", {"start": event(), "end": event(), "service": services[slot]})
                 remote.wait(["build/2"])
                 ready(2, returned)
                 remote.wait(["finish"])
@@ -202,8 +234,18 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual(result["status"], "passed")
         self.assertEqual(result["shared_gpu_mode"], shared)
         self.assertEqual([len(result["epochs"][e]) for e in range(3)], [16, 12, 16])
+        self.assertGreaterEqual(result["metrics"]["spawn_to_ready_s"], 0.2)
+        self.assertTrue(all(r["steps"] >= 2 for r in result["preparation_service"].values()))
+        self.assertEqual(result["metrics"]["edp1_rejoin_pause_s"], max(
+            r["seconds"] for r in result["edp1_probe_pauses"] if r["epoch"] == 2))
+        previous = {r["slot"]: r for r in result["epochs"][1]}
+        for pause in result["edp1_probe_pauses"]:
+            if pause["epoch"] == 2:
+                self.assertGreater(pause["interval"][0], previous[pause["slot"]]["t"])
+                self.assertGreater(pause["interval"][0], result["timing"]["t_spawn_command"])
         events = [json.loads(line)["stage"] for line in (Path(directory) / "events.jsonl").read_text().splitlines()]
-        for earlier, later in (("kill", "transition/1"), ("reclaim_received", "spawn"), ("transition/2", "build/2")):
+        for earlier, later in (("kill", "transition/1"), ("reclaim_received", "spawn"),
+                               ("spawn", "rejoin_ready"), ("rejoin_ready", "transition/2"), ("transition/2", "build/2")):
             self.assertLess(events.index(earlier), events.index(later))
 
 

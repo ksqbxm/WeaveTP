@@ -20,7 +20,7 @@ cd /data
 mountpoint -q /data
 source /data/ubuntu/lxh/weavetp/env.sh
 cd "$REPO"
-test -z "$(git status --porcelain)"
+test -z "$(git status --porcelain --untracked-files=no)"
 git cat-file -e d16b5e80cbc6f7f4cf7edcf1494b16f73a4bbe6c^{commit}
 git checkout --detach d16b5e80cbc6f7f4cf7edcf1494b16f73a4bbe6c
 export NODE=SL3060
@@ -44,7 +44,7 @@ cd /data
 mountpoint -q /data
 source /data/ubuntu/lxh/weavetp/env.sh
 cd "$REPO"
-test -z "$(git status --porcelain)"
+test -z "$(git status --porcelain --untracked-files=no)"
 git cat-file -e d16b5e80cbc6f7f4cf7edcf1494b16f73a4bbe6c^{commit}
 git checkout --detach d16b5e80cbc6f7f4cf7edcf1494b16f73a4bbe6c
 export NODE=SL3061
@@ -87,7 +87,7 @@ test -f "$RUN/$NODE.exit_code"
 tar -czf "${RUN}_${NODE}.tar.gz" -C "$(dirname "$RUN")" "$(basename "$RUN")"
 printf '%s\n' "${RUN}_${NODE}.tar.gz"
 cd "$REPO"
-test -z "$(git status --porcelain)"
+test -z "$(git status --porcelain --untracked-files=no)"
 git checkout --detach f7d555998b45756998465924d733fd70e553d6b4
 ```
 
@@ -102,7 +102,7 @@ git checkout --detach f7d555998b45756998465924d733fd70e553d6b4
 
 ```bash
 cd "$REPO"
-test -z "$(git status --porcelain)"
+test -z "$(git status --porcelain --untracked-files=no)"
 git checkout --detach d16b5e80cbc6f7f4cf7edcf1494b16f73a4bbe6c
 export SUITE=s1_shrink_20261017_d16b5e8_r1
 export RUN="/data/ubuntu/lxh/weavetp/acceptance/step01_real_probe/$SUITE"

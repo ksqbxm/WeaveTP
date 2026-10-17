@@ -64,7 +64,7 @@ class TopologyTests(unittest.TestCase):
     def test_twenty_independent_launches_and_sixty_prefixes(self):
         cases = run_probe.matrix("cpu_test")
         self.assertEqual(len(cases), 20)
-        self.assertEqual([c["kind"] for c in cases], ["idle"] * 10 + ["inflight"] * 10)
+        self.assertEqual([c["kind"] for c in cases], ["idle", "inflight"] * 10)
         self.assertEqual(len({common.prefix(c["launch"], e) for c in cases for e in range(3)}), 60)
         with self.assertRaises(RuntimeError):
             common.prefix("../escape", 0)
@@ -177,8 +177,8 @@ class ControlTests(unittest.TestCase):
                     "metrics": {"abort_s": c["index"] + 1}} for c in run_probe.matrix("cpu")]
         summary = common.summarize(results)
         self.assertTrue(summary["accepted"])
-        self.assertEqual(summary["groups"]["idle"]["metrics"]["abort_s"]["mean"], 5.5)
-        self.assertAlmostEqual(summary["groups"]["idle"]["metrics"]["abort_s"]["sample_std"], 3.027650354)
+        self.assertEqual(summary["groups"]["idle"]["metrics"]["abort_s"]["mean"], 10)
+        self.assertAlmostEqual(summary["groups"]["idle"]["metrics"]["abort_s"]["sample_std"], 6.055300708)
         self.assertFalse(common.summarize(results[:-1])["accepted"])
         results[0]["status"] = "failed"
         self.assertFalse(common.summarize(results)["accepted"])
