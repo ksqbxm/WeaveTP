@@ -63,3 +63,7 @@ kill 的身份核对包括 Popen 登记、Linux `/proc` 启动 tick、launch/角
 输出位于 `/data/ubuntu/lxh/weavetp/acceptance/step01_real_probe/<suite>/<node>/<launch>/`。每轮包括 `config.json`、`rank_map.json`（SL3060）、`runtime_*`、`worker_*`、`process_lifecycle.json`、控制进程/launcher 生命周期、登记表、MPS 原始响应、基线和回收采样、NCCL 日志、`controller_result.json`（仅控制器阶段结果）、`events_actual.json`（SL3060）、`result.json`（launcher 最终结果，与 events_actual 同源）。每节点保留 `progress.json`、`summary.json` 和 `summary.csv`。
 
 主验收以 SL3060 `summary.json` 的 `accepted=true` 为必要条件，还需回传两节点完整包，核查 10 idle + 10 inflight、每轮无残留、四卡回收及 MPS 证据。SL3061 本地完成不会自行宣称全局通过。GPU 回传并经用户确认后才放行 real 集成。Step 2–3 公共部分/emulate 可按总计划另外推进；Step 4 仍要求 standby fix2 GPU 复验通过。
+
+## 服务器环境适配更新
+
+固定实现 `d16b5e80cbc6f7f4cf7edcf1494b16f73a4bbe6c`，50 项 CPU 测试通过，详见 [服务器环境适配](Step1_服务器环境适配.md)。新增 syscall pidfd、共享 foreign MPS 及 worker 内独立 context 证明、可配置磁盘预检；GPU 未运行。最新 [共享运行命令](Step1_共享GPU服务器命令.md) 使用 SL3061 拉取后 bundle 分发。

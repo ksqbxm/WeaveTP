@@ -1,14 +1,16 @@
 # Step 1 服务器测试命令
 
-固定实现提交：`d69d5950819626b0cbd09bfa4e32ed4ebbe9396c`（`codex/failstop`，个人仓库 `ksqbxm/WeaveTP`）。本文件是实现后的交付说明，后续文档提交不改变该实现 SHA。
+固定实现提交：`d16b5e80cbc6f7f4cf7edcf1494b16f73a4bbe6c`（`codex/failstop`，个人仓库 `ksqbxm/WeaveTP`）。本文件是实现后的交付说明，后续文档提交不改变该实现 SHA。
 
-40 项 CPU 测试通过；**服务器 GPU 尚未执行**。本次只跑玩具探针，不需要 checkpoint。要求两节点各八卡空闲，原 MPS 服务保留；查询权限不足、存在客户端或不能证明独立 GPU context 时，程序失败并留证据，不修改服务。服务器需现有 PyTorch 2.11 / NCCL 2.28 构建，不在此安装或升级。
+50 项 CPU 测试通过；**服务器 GPU 尚未执行**。本次只跑玩具探针，不需要 checkpoint。要求两节点各八卡空闲，原 MPS 服务保留；查询权限不足、存在客户端或不能证明独立 GPU context 时，程序失败并留证据，不修改服务。服务器需现有 PyTorch 2.11 / NCCL 2.28 构建，不在此安装或升级。
 
 本次包含通知连接隔离、前台 MPS 识别、登记失败回收和两节点最终清理确认修正，见 [审阅报告](Step1_审阅与修正.md)。旧版命令固定的 `a609198` 不再用于本次验收。store 由最外层 launcher 持有，完成两节点清理终态交换后关闭；最终结果以 `result.json` 为准。
 
 本页为默认独占模式，命令不加共享开关。当前允许共享 GPU 的正确性测试请使用 [共享 GPU 服务器命令](Step1_共享GPU服务器命令.md)。
 
 主测试固定 **10 idle + 10 inflight，共 20 次独立 launch**。默认控制地址 `10.60.14.1`，TCPStore 端口 `29750–29769`；只在两台机器执行各自一份命令，不需要 SSH 互相拉起。先执行 SL3060，再在 10 分钟内执行 SL3061。两处 `SUITE` 必须一致；以下是首次运行名，复跑必须在两处改成新的同名值，保留旧结果。
+
+先完成 [SL3061 拉取和 bundle 分发](Step1_bundle分发.md)，两节点均已导入固定实现提交后再启动。磁盘预检默认要求 `/data` 可用空间至少 5 GB；可在预检和运行两处同时加 `--min-free-disk-gb 5` 调整门槛。
 
 ## SL3060：预检并启动 store、控制器与本地监管器
 
@@ -19,10 +21,10 @@ mountpoint -q /data
 source /data/ubuntu/lxh/weavetp/env.sh
 cd "$REPO"
 test -z "$(git status --porcelain)"
-git fetch https://github.com/ksqbxm/WeaveTP.git codex/failstop
-git checkout --detach d69d5950819626b0cbd09bfa4e32ed4ebbe9396c
+git cat-file -e d16b5e80cbc6f7f4cf7edcf1494b16f73a4bbe6c^{commit}
+git checkout --detach d16b5e80cbc6f7f4cf7edcf1494b16f73a4bbe6c
 export NODE=SL3060
-export SUITE=s1_20261017_d69d595_r1
+export SUITE=s1_20261017_d16b5e8_r1
 export RUN="/data/ubuntu/lxh/weavetp/acceptance/step01_real_probe/$SUITE"
 export PROBE="$REPO/code/current/tools/resharding/failstop/run_probe.py"
 export PYTHON
@@ -43,10 +45,10 @@ mountpoint -q /data
 source /data/ubuntu/lxh/weavetp/env.sh
 cd "$REPO"
 test -z "$(git status --porcelain)"
-git fetch https://github.com/ksqbxm/WeaveTP.git codex/failstop
-git checkout --detach d69d5950819626b0cbd09bfa4e32ed4ebbe9396c
+git cat-file -e d16b5e80cbc6f7f4cf7edcf1494b16f73a4bbe6c^{commit}
+git checkout --detach d16b5e80cbc6f7f4cf7edcf1494b16f73a4bbe6c
 export NODE=SL3061
-export SUITE=s1_20261017_d69d595_r1
+export SUITE=s1_20261017_d16b5e8_r1
 export RUN="/data/ubuntu/lxh/weavetp/acceptance/step01_real_probe/$SUITE"
 export PROBE="$REPO/code/current/tools/resharding/failstop/run_probe.py"
 export PYTHON
@@ -91,8 +93,8 @@ git checkout --detach f7d555998b45756998465924d733fd70e553d6b4
 
 首次运行的回传路径分别为：
 
-- SL3060：`/data/ubuntu/lxh/weavetp/acceptance/step01_real_probe/s1_20261017_d69d595_r1_SL3060.tar.gz`
-- SL3061：`/data/ubuntu/lxh/weavetp/acceptance/step01_real_probe/s1_20261017_d69d595_r1_SL3061.tar.gz`
+- SL3060：`/data/ubuntu/lxh/weavetp/acceptance/step01_real_probe/s1_20261017_d16b5e8_r1_SL3060.tar.gz`
+- SL3061：`/data/ubuntu/lxh/weavetp/acceptance/step01_real_probe/s1_20261017_d16b5e8_r1_SL3061.tar.gz`
 
 ## 单独可选的 shrink 能力探针
 
@@ -101,8 +103,8 @@ git checkout --detach f7d555998b45756998465924d733fd70e553d6b4
 ```bash
 cd "$REPO"
 test -z "$(git status --porcelain)"
-git checkout --detach d69d5950819626b0cbd09bfa4e32ed4ebbe9396c
-export SUITE=s1_shrink_20261017_d69d595_r1
+git checkout --detach d16b5e80cbc6f7f4cf7edcf1494b16f73a4bbe6c
+export SUITE=s1_shrink_20261017_d16b5e8_r1
 export RUN="/data/ubuntu/lxh/weavetp/acceptance/step01_real_probe/$SUITE"
 mkdir -p "$RUN"
 nohup bash -c '"$PYTHON" -B "$PROBE" --node "$NODE" --suite-id "$SUITE" --output "$RUN" --optional-shrink; rc=$?; printf "%s\n" "$rc" > "$RUN/$NODE.exit_code"; exit "$rc"' > "$RUN/$NODE.nohup.log" 2>&1 < /dev/null &

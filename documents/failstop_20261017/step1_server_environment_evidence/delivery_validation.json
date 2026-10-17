@@ -1,0 +1,24 @@
+[
+  {
+    "file": "Step1_bundle分发.md",
+    "bash_blocks": 2,
+    "syntax": "passed"
+  },
+  {
+    "file": "Step1_服务器命令.md",
+    "bash_blocks": 6,
+    "syntax": "passed"
+  },
+  {
+    "file": "Step1_共享GPU服务器命令.md",
+    "bash_blocks": 5,
+    "syntax": "passed"
+  },
+  {
+    "bundle_base": "f7d555998b45756998465924d733fd70e553d6b4",
+    "implementation": "d16b5e80cbc6f7f4cf7edcf1494b16f73a4bbe6c",
+    "bundle_bytes": 729052,
+    "verification": "The bundle contains this ref:\nd16b5e80cbc6f7f4cf7edcf1494b16f73a4bbe6c refs/heads/codex/failstop\nThe bundle requires this ref:\nf7d555998b45756998465924d733fd70e553d6b4 \nThe bundle uses this hash algorithm: sha1\nC:/Users/ksqbx/AppData/Local/Temp/tmpw9qg37bt/step1.bundle is okay\n",
+    "heads": "d16b5e80cbc6f7f4cf7edcf1494b16f73a4bbe6c refs/heads/codex/failstop\n"
+  }
+]

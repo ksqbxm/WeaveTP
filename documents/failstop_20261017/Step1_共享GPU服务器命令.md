@@ -1,14 +1,16 @@
 # Step 1 共享 GPU 正确性测试命令
 
-固定实现提交：`d69d5950819626b0cbd09bfa4e32ed4ebbe9396c`（`codex/failstop`，个人仓库 `ksqbxm/WeaveTP`）。本文件是实现后的交付说明，后续文档提交不改变该实现 SHA。
+固定实现提交：`d16b5e80cbc6f7f4cf7edcf1494b16f73a4bbe6c`（`codex/failstop`，个人仓库 `ksqbxm/WeaveTP`）。本文件是实现后的交付说明，后续文档提交不改变该实现 SHA。
 
-40 项 CPU 测试通过；**服务器 GPU 尚未执行**。本次只跑玩具探针，不需要 checkpoint。两节点各八卡，允许其他任务占用 GPU；预检与运行均加 `--allow-foreign-gpu-processes`。MPS 客户端检查保持不变：查询权限不足、存在 MPS 客户端或不能证明本测试独立 GPU context 时仍失败，不修改服务。服务器需现有 PyTorch 2.11 / NCCL 2.28 构建，不在此安装或升级。
+50 项 CPU 测试通过；**服务器 GPU 尚未执行**。本次只跑玩具探针，不需要 checkpoint。两节点各八卡，允许其他任务占用 GPU；预检与运行均加 `--allow-foreign-gpu-processes`。共享模式允许 foreign MPS 客户端，无法定位实际管道的 daemon 记录后跳过查询；本测试 worker 必须在内部证明独立 GPU context，已定位管道查询报错仍失败，不修改服务。服务器需现有 PyTorch 2.11 / NCCL 2.28 构建，不在此安装或升级。
 
 本次包含通知连接隔离、前台 MPS 识别、登记失败回收和两节点最终清理确认修正，见 [审阅报告](Step1_审阅与修正.md)。旧版命令固定的 `a609198` 不再用于本次验收。store 由最外层 launcher 持有，完成两节点清理终态交换后关闭；最终结果以 `result.json` 为准。
 
 本页显式开启共享模式，结果标记 `shared_gpu_mode=true`。**与其他任务共享 GPU，仅用于正确性和可行性判断，各阶段耗时不作为正式数据。** 此模式的 accepted=true 仅表示正确性/可行性通过。默认独占口径见 [原服务器命令](Step1_服务器命令.md)，实现语义见 [共享模式说明](Step1_共享GPU正确性模式.md)。
 
 主测试固定 **10 idle + 10 inflight，共 20 次独立 launch**。默认控制地址 `10.60.14.1`，TCPStore 端口 `29750–29769`；只在两台机器执行各自一份命令，不需要 SSH 互相拉起。先执行 SL3060，再在 10 分钟内执行 SL3061。两处 `SUITE` 必须一致；以下是首次运行名，复跑必须在两处改成新的同名值，保留旧结果。
+
+先完成 [SL3061 拉取和 bundle 分发](Step1_bundle分发.md)，两节点均已导入固定实现提交后再启动。磁盘预检默认要求 `/data` 可用空间至少 5 GB；可在预检和运行两处同时加 `--min-free-disk-gb 5` 调整门槛。
 
 ## SL3060：预检并启动 store、控制器与本地监管器
 
@@ -19,10 +21,10 @@ mountpoint -q /data
 source /data/ubuntu/lxh/weavetp/env.sh
 cd "$REPO"
 test -z "$(git status --porcelain)"
-git fetch https://github.com/ksqbxm/WeaveTP.git codex/failstop
-git checkout --detach d69d5950819626b0cbd09bfa4e32ed4ebbe9396c
+git cat-file -e d16b5e80cbc6f7f4cf7edcf1494b16f73a4bbe6c^{commit}
+git checkout --detach d16b5e80cbc6f7f4cf7edcf1494b16f73a4bbe6c
 export NODE=SL3060
-export SUITE=s1_shared_20261017_d69d595_r1
+export SUITE=s1_shared_20261017_d16b5e8_r1
 export RUN="/data/ubuntu/lxh/weavetp/acceptance/step01_real_probe/$SUITE"
 export PROBE="$REPO/code/current/tools/resharding/failstop/run_probe.py"
 export PYTHON
@@ -43,10 +45,10 @@ mountpoint -q /data
 source /data/ubuntu/lxh/weavetp/env.sh
 cd "$REPO"
 test -z "$(git status --porcelain)"
-git fetch https://github.com/ksqbxm/WeaveTP.git codex/failstop
-git checkout --detach d69d5950819626b0cbd09bfa4e32ed4ebbe9396c
+git cat-file -e d16b5e80cbc6f7f4cf7edcf1494b16f73a4bbe6c^{commit}
+git checkout --detach d16b5e80cbc6f7f4cf7edcf1494b16f73a4bbe6c
 export NODE=SL3061
-export SUITE=s1_shared_20261017_d69d595_r1
+export SUITE=s1_shared_20261017_d16b5e8_r1
 export RUN="/data/ubuntu/lxh/weavetp/acceptance/step01_real_probe/$SUITE"
 export PROBE="$REPO/code/current/tools/resharding/failstop/run_probe.py"
 export PYTHON
@@ -56,7 +58,7 @@ nohup bash -c '"$PYTHON" -B "$PROBE" --node "$NODE" --suite-id "$SUITE" --output
 echo $! > "$RUN/$NODE.runner.pid"
 ```
 
-MPS 管道自动从原环境、默认路径或可读取的 daemon 环境定位，并匹配 PID 文件。若实际服务管道无法定位，停止并回传 `preflight`，不能通过给查询程序设置不存在的 worker 管道来绕过检查。已知真实服务路径时可对预检和运行同时使用 `--mps-pipe /实际服务路径`；它只用于只读查询，不改变 worker 隔离策略。
+MPS 管道自动从原环境、默认路径或可读取的 daemon 环境定位，并匹配 PID 文件。若实际服务管道无法定位，记录 `skipped_daemons`、`query_complete=false` 后继续；这不表示没有客户端。本测试每个 worker 分配 CUDA 张量后核对自身 PID/UUID 的独立计算 context。已知真实服务路径时可对预检和运行同时使用 `--mps-pipe /实际服务路径`；它只用于只读查询，不改变 worker 隔离策略。
 
 ## 查看状态与验收
 
@@ -91,6 +93,6 @@ git checkout --detach f7d555998b45756998465924d733fd70e553d6b4
 
 首次运行的回传路径分别为：
 
-- SL3060：`/data/ubuntu/lxh/weavetp/acceptance/step01_real_probe/s1_shared_20261017_d69d595_r1_SL3060.tar.gz`
-- SL3061：`/data/ubuntu/lxh/weavetp/acceptance/step01_real_probe/s1_shared_20261017_d69d595_r1_SL3061.tar.gz`
+- SL3060：`/data/ubuntu/lxh/weavetp/acceptance/step01_real_probe/s1_shared_20261017_d16b5e8_r1_SL3060.tar.gz`
+- SL3061：`/data/ubuntu/lxh/weavetp/acceptance/step01_real_probe/s1_shared_20261017_d16b5e8_r1_SL3061.tar.gz`
 
