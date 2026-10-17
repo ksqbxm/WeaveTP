@@ -1,8 +1,33 @@
 # Step 5 服务器命令（第一批）
 
-审阅修正后的交付。实现 `2fe4a9a0265580a47d0753dfd2b839e4bdb01f05`，快验清单 `f414fdc7c834b7935bc78aa51da74c635c37090a`（`releases.json["step5"]`），见[实现与验证](Step5_实现与验证.md)与[审阅与修正](Step5_审阅与修正.md)。此前的 `9405ed6`/`98c498b` 命令与 `step5_98c498b.bundle` 作废，不再使用。本批交付 §2.1 确定性模式合同、显存预检、真实模型的参考/候选/默认模式计时三类 torchrun 与跨模式迁移计划比较工具；**真实模型的 fail→shrink→rejoin→expand、A6/A7、smoke 与多轮尚未实现**，本批 summary 固定 `accepted=false`、`timing_valid=false`、`candidate_kind=fresh_checkpoint_load`、`fail_stop_integration=pending`。上机顺序：先完成 Step 3、Step 4 的快验，再运行本步；本步快验需要两节点各 8 张卡按下方预检表留出显存。本轮没有服务器 GPU 结论。
+审阅修正后的交付。实现 `2fe4a9a0265580a47d0753dfd2b839e4bdb01f05`，快验清单 `f414fdc7c834b7935bc78aa51da74c635c37090a`（`releases.json["step5"]`），见[实现与验证](Step5_实现与验证.md)与[审阅与修正](Step5_审阅与修正.md)。此前的 `9405ed6`/`98c498b` 命令与 `step5_98c498b.bundle` 作废，不再使用。本批交付 §2.1 确定性模式合同、显存预检、真实模型的参考/候选/默认模式计时三类 torchrun 与跨模式迁移计划比较工具；**真实模型的 fail→shrink→rejoin→expand、A6/A7、smoke 与多轮尚未实现**，本批 summary 固定 `accepted=false`、`timing_valid=false`、`candidate_kind=fresh_checkpoint_load`、`fail_stop_integration=pending`。上机顺序：先完成 Step 3、Step 4 的快验，再运行本步。2026-10-18 用户回传：两节点快验 suite `s5q_20261017T162447_15950af2` 在 SL3060 被显存预检拦下（`tp4 run GPU 7 free 2.72 GiB < required 5.98 GiB`，被其他用户占用，非代码问题）；当前批次只需一个节点的 8 张卡，因此新增单节点入口（第 1 节），两节点入口保留为第 1b 节。本轮没有服务器 GPU 结论。
 
-## 1. 快速正确性测试（先完成第 2 节离线导入）
+## 1. 单节点快速正确性测试（先完成第 2 节离线导入）
+
+一个节点一条命令，不等待对端。该节点依次运行 tp2（前 4 卡）与 tp4（8 卡）各 3 个真实模型 torchrun：确定性模式参考（`--deterministic-mode` + `NCCL_ALGO=Ring` + `CUBLAS_WORKSPACE_CONFIG=:4096:8`）、确定性模式候选（独立重新加载，与参考逐步逐位比较）、默认模式计时（不设上述参数与环境变量，只记录逐步 GPU 耗时）。共 6 次 59 GB checkpoint 加载，预算 600 秒（两节点模式每节点 3 次加载、300 秒；单节点把两节点的工作串行到一台机器，不放宽任何检查项）。SL3061 示例，换节点只改 `--node`：
+
+```bash
+source /data/ubuntu/lxh/weavetp/env.sh && git -C "$REPO" checkout --detach f414fdc7c834b7935bc78aa51da74c635c37090a && bash "$REPO/code/current/tools/resharding/failstop/quick_check.sh" --step 5 --node SL3061 --single-node
+```
+
+入口内部再次 source env.sh，按 releases.json 检出固定实现 `2fe4a9a0265580a47d0753dfd2b839e4bdb01f05`；结束后无论成功失败都切回 `f7d555998b45756998465924d733fd70e553d6b4`。同一检出目录的各步快验共用一把本地锁；torchrun 使用 `--standalone` 本机 rendezvous，本节点不能同时有其他 `--standalone` torchrun。checkpoint 路径取 env.sh 的 `CHECKPOINT`，缺省 `/data/models/DeepSeek-V2-Lite-megatron-v2`。
+
+单节点版每卡显存需求（max_seq 128，余量 2 GiB；两布局顺序执行，不叠加）：
+
+| 卡 | 承担 | 需求/卡 | 组成 |
+|---|---|---|---|
+| GPU 0–3 | tp2 三次运行 + tp4 三次运行 | **9.94 GiB** | TP2 权重 7.93 + KV 0.02 + 余量 2 |
+| GPU 4–7 | 仅 tp4 三次运行 | **5.98 GiB** | TP4 权重 3.97 + KV 0.01 + 余量 2 |
+
+启动后先打印显存预检表并以 `this launch (tp2, tp4) requires per GPU: GPU 0 9.94 GiB, …, GPU 7 5.98 GiB` 给出逐卡需求；任一卡不足即在任何 torchrun 之前失败并指出卡号。16 卡 fail-stop 场景行（存活卡 21.85 GiB 等）同时记录在 `memory_preflight.json`，单节点快验不以其为拒绝条件。完成时日志必须包含：
+
+```text
+QUICK CHECK step=5 result=PASS (memory preflight, deterministic reference/candidate ['tp2', 'tp4'], step_time_ratio={'tp2': <比值>, 'tp4': <比值>}) shared_gpu_mode=true single_node=true fail_stop_integration=pending
+```
+
+receipt.result 为 PASS、exit_code 为 0，quick_mode=true、correctness_only=true、shared_gpu_mode=true、timing_valid=false、accepted=false、single_node=true、budget_s=600，两个布局都有正有限的 `deterministic_step_time_ratio`。失败标准与第 1b 节相同（manifest 非确定性模式、参数校验和或历史不一致、任一步 logits 位差异、timing 非默认模式、超时、打包或恢复提交失败）。结果目录为 `$ROOT/s5q_..._single/<NODE>`，查看命令与回传文件同第 1b 节（只有本节点一份 tar 与 receipt）。
+
+## 1b. 两节点快速正确性测试（真实模型 fail-stop 接入后的形式）
 
 两节点各一条命令，60 秒内先后启动（谁先都可以），脚本自动协调同一 suite。每节点依次运行 3 个真实模型 torchrun：确定性模式参考（`--deterministic-mode` + `NCCL_ALGO=Ring` + `CUBLAS_WORKSPACE_CONFIG=:4096:8`）、确定性模式候选（独立重新加载，与参考逐步逐位比较）、默认模式计时（不设上述参数与环境变量，只记录逐步 GPU 耗时）。快验布局分配：SL3060 跑 tp4（8 卡），SL3061 跑 tp2（前 4 卡）；两布局合计覆盖，每节点 3 次 59 GB checkpoint 加载。总预算 300 秒；路由确定性检查两次加载实测 123 秒，本入口是否在预算内尚未实测，超时即 FAIL。
 

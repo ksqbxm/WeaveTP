@@ -60,6 +60,23 @@ python -B -X utf8 -m unittest discover -s code/current/tools/resharding/correctn
 python -B -X utf8 -m pytest --noconftest code/current/tests/unit_tests/resharding/test_nccl_packing.py code/current/tests/unit_tests/resharding/test_source_search.py -q
 ```
 
+## 单节点快验（2026-10-18）
+
+用户回传：两节点快验 suite `s5q_20261017T162447_15950af2` 在 SL3060 被显存预检拦下（`tp4 run GPU 7 free 2.72 GiB < required 5.98 GiB`，SL3060 被其他用户占用），预检按设计在任何 torchrun 之前拒绝。当前批次的检查（确定性参考/候选逐位比较、单步耗时比）只需一个节点的 8 张卡，用户要求支持单节点运行。实现 `48d138b1346d37399fdee93dcc30f92c8cf2053f`：
+
+- `quick_check.sh --step 5 --node <NODE> --single-node`：只对 step 5 接受该开关；`quick_driver.py --single-node` 不做两节点握手，本地生成 suite `s5q_<UTC时间>_<8位随机>_single`，向 `run_model.py` 传 `--layouts tp2,tp4`，在本节点依次完成 tp2 与 tp4 的 reference/candidate/timing 六次真实模型加载；receipt 与结论行带 `single_node=true`，不交换对端终态。两节点形式保留不变（`single_node=false`），真实模型 fail-stop 接入后恢复两节点要求。
+- 预算：两节点模式每节点 3 次加载，预算 300 秒；单节点 6 次加载按路由确定性检查实测的加载速度估计约 330 秒，因此单节点预算为 600 秒（receipt 记录 `budget_s`）。这是对总计划 §10 五分钟要求的偏差，原因是把两个节点的工作放到一个节点串行执行，不是放宽任何检查项；实际时长待回传。
+- 预检新增 `run_required_free_bytes_per_gpu` 并打印"this launch requires per GPU"：布局顺序执行，每卡取所跑布局中的最大需求。
+
+单节点版每卡显存需求（max_seq 128，余量 2 GiB，布局顺序执行不叠加）：
+
+| 卡 | 承担 | 需求/卡 |
+|---|---|---|
+| GPU 0–3 | tp2（4 卡）三次运行 + tp4（8 卡）三次运行 | 9.94 GiB（tp2：7.93 权重 + 0.02 KV + 2 余量） |
+| GPU 4–7 | 仅 tp4 三次运行 | 5.98 GiB（3.97 权重 + 0.01 KV + 2 余量） |
+
+16 卡 fail-stop 场景表（存活卡 21.85 GiB 等）仍在 `memory_preflight.json` 中记录，单节点快验不以其为拒绝条件。138 项 failstop 单测通过（新增单节点驱动路径、`--single-node` 仅限 step 5、预检逐卡需求 3 项断言），见 [cpu_tests_single_node.log](step5_cpu_evidence/cpu_tests_single_node.log)。
+
 ## 边界与未完成项
 
 - 本批的 candidate 是独立的新加载进程（`candidate_kind=fresh_checkpoint_load`），用于在真实模型上验证跨进程参考/候选比较合同（manifest、参数校验和、历史 hash、逐位）；它不是迁移后的被测模型。A6 各检查点的被测对象要等 Step 3/4 GPU 通过后接入真实模型的 fail→shrink→rejoin→expand。

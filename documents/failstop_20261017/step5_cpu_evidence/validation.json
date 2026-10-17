@@ -5,7 +5,21 @@
   "branch": "codex/failstop",
   "branch_base": "b6f1e6a (router determinism registration)",
   "first_code_commit": "9405ed65c00d573938032e8c94a0d795258427fb",
-  "code_commit": "2fe4a9a0265580a47d0753dfd2b839e4bdb01f05",
+  "reviewed_code_commit": "2fe4a9a0265580a47d0753dfd2b839e4bdb01f05",
+  "code_commit": "48d138b1346d37399fdee93dcc30f92c8cf2053f",
+  "single_node_2026-10-18": {
+    "trigger": "two-node quick suite s5q_20261017T162447_15950af2 blocked by the SL3060 memory preflight: tp4 run GPU 7 free 2.72 GiB < required 5.98 GiB (GPU occupied by another user)",
+    "change": "quick_check.sh --step 5 --single-node: no peer rendezvous, both layouts on one node (six checkpoint loads), 600 s budget, receipt and final line carry single_node=true; preflight prints per-GPU requirement of this launch",
+    "per_gpu_requirement_bytes": {"gpu_0_to_3": 10677771264, "gpu_4_to_7": 6416161792},
+    "tests": {"count": 138, "log": "cpu_tests_single_node.log"},
+    "source_sha256": {
+      "code/current/tools/resharding/failstop/model_memory.py": "21b6c7d377befd1a950d8dc25a4210992f3090385aa32ac30b2160054da1f8cc",
+      "code/current/tools/resharding/failstop/quick_check.sh": "d52e50ba30e3fb43c180ab0c2b43ab1cdd1feac05c124568051267089b1cb319",
+      "code/current/tools/resharding/failstop/quick_driver.py": "5382a2025047aa532fdb4602413cf1f8919093992ae1c597d86563bacd727f2a",
+      "code/current/tools/resharding/failstop/test_model.py": "572e39ae0f72e484433c93d11aacf7091b8ffac74bf20971b737a93f32bbff27",
+      "code/current/tools/resharding/failstop/test_quick.py": "7aaadc318e5ebcdd7ddf6b2dc3e626d007838606b163177ab2d0b4ad0439ab0b"
+    }
+  },
   "quick_manifest_commit": "see Step5_服务器命令.md (releases.json step5 pin commit)",
   "read_before_code": [
     "CODEX.md",
