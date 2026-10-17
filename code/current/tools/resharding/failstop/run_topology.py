@@ -1,4 +1,4 @@
-"""Explicit Step 2 suite. Does not run unless invoked; default mode is emulate."""
+"""Explicit Step 2/3 suites. Nothing runs unless invoked; default mode is emulate."""
 
 import argparse
 import json
@@ -10,7 +10,7 @@ import sys
 import time
 from pathlib import Path
 
-from common import DEFAULTS, NODES, SHARED_GPU_NOTE, require, write_json
+from common import DEFAULTS, NODES, SHARED_GPU_NOTE, TOPOLOGY_PROBES, require, write_json
 from run_probe import repository_commit, run_case
 from safety import check_data_space, pidfd_implementations
 
@@ -48,7 +48,12 @@ def summarize(selected, results, *, quick, correctness_only):
             'results': results, **modes}
 
 
-def main(argv=None, *, step=2, profile_only=False):
+def stop(signum, frame):
+    raise KeyboardInterrupt(f'signal {signum}')
+
+
+def main(argv=None, *, step=2):
+    signal.signal(signal.SIGTERM, stop)
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--node', choices=NODES, required=True)
     parser.add_argument('--suite-id', required=True)
@@ -66,7 +71,10 @@ def main(argv=None, *, step=2, profile_only=False):
     parser.add_argument('--dry-run', action='store_true')
     if step == 3:
         parser.add_argument('--host-library-mode', choices=('full', 'on-demand'), default='on-demand')
+        parser.add_argument('--profile-only', action='store_true',
+                            help='collect the world16 profile only: no fault, no migration, accepted=false')
     args = parser.parse_args(argv)
+    profile_only = step == 3 and args.profile_only
     correctness_only = args.correctness_only or args.quick
     mode_flags = {'quick_mode': args.quick, 'correctness_only': correctness_only,
                   'shared_gpu_mode': correctness_only, 'timing_valid': not correctness_only}
@@ -78,9 +86,8 @@ def main(argv=None, *, step=2, profile_only=False):
     require(str(args.output).replace('\\', '/').startswith('/data/') and '..' not in args.output.parts,
             'output must be under /data')
     if args.dry_run:
-        print(json.dumps({'cases': selected, **mode_flags,
-                          'output': str(args.output), 'node': args.node, 'step': step,
-                          'profile_only': profile_only,
+        print(json.dumps({'cases': selected, **mode_flags, 'output': str(args.output), 'node': args.node,
+                          'step': step, 'profile_only': profile_only,
                           **({'host_library_mode': args.host_library_mode} if step == 3 else {})}, indent=2))
         return 0
     require(sys.platform == 'linux' and Path('/data').is_mount(), 'requires Linux and mounted /data')
@@ -108,7 +115,7 @@ def main(argv=None, *, step=2, profile_only=False):
             write_json(root / 'progress.json', results)
             continue
         config = {**{k: v for k, v in DEFAULTS.items() if k != 'repeats'}, **case,
-                  'probe': 'step03_sources_and_transport' if step == 3 else 'step02_topology_rebind', 'kind': case['mode'],
+                  'probe': TOPOLOGY_PROBES[step], 'kind': case['mode'], 'profile_only': profile_only,
                   'node': args.node, 'output': str(root / case['launch']), 'master': args.master,
                   'port': args.port_base + index, 'commit': commit, 'mps_pipe': None,
                   **mode_flags,
@@ -118,28 +125,24 @@ def main(argv=None, *, step=2, profile_only=False):
                   'reclaim_timeout_s': min(120 if correctness_only else 60, remaining - 20),
                   'launch_timeout_s': remaining}
         if step == 3:
-            config.update(host_library_mode=args.host_library_mode, source_width=4096 if args.quick else 262144,
-                          profile_only=profile_only)
+            config.update(host_library_mode=args.host_library_mode, source_width=4096 if args.quick else 262144)
         print(f"Starting {case['launch']} mode={case['mode']} rounds={case['rounds']}", flush=True)
         result = run_case(config)
         results.append({**case, **result})
         write_json(root / 'progress.json', results)
-    summary = {**summarize(selected, results, quick=args.quick, correctness_only=correctness_only), 'commit': commit}
-    pauses = [r['metrics']['edp1_rejoin_pause_s'] for r in results if r['mode'] == 'real' and 'metrics' in r and
-              r['metrics'].get('edp1_rejoin_pause_s') is not None]
-    summary['edp1_rejoin_pause_s'] = max(pauses) if pauses else None
-    summary['profile_only'] = profile_only
+    summary = {**summarize(selected, results, quick=args.quick, correctness_only=correctness_only),
+               'commit': commit, 'profile_only': profile_only,
+               'edp1_rejoin_pause_s': None if profile_only else max(
+                   (r['metrics']['edp1_rejoin_pause_s'] for r in results
+                    if r['mode'] == 'real' and r['status'] == 'passed'), default=None)}
     if profile_only:
         summary['accepted'] = False
     passed = summary['all_cases_passed']
     write_json(root / 'summary.json', summary)
-    print(f"STEP {step} result={'PASS' if passed else 'FAIL'} edp1_rejoin_pause_s={summary['edp1_rejoin_pause_s']} correctness_only={correctness_only} logs={root}", flush=True)
+    print(f"STEP {step} result={'PASS' if passed else 'FAIL'} edp1_rejoin_pause_s={summary['edp1_rejoin_pause_s']} "
+          f"correctness_only={correctness_only} logs={root}", flush=True)
     return 0 if passed else 1
 
 
 if __name__ == '__main__':
-    def stop(signum, frame):
-        raise KeyboardInterrupt(f'signal {signum}')
-
-    signal.signal(signal.SIGTERM, stop)
     sys.exit(main())

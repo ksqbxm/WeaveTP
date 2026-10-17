@@ -9,6 +9,7 @@ from datetime import timedelta
 from pathlib import Path
 
 NODES = ("SL3060", "SL3061")
+TOPOLOGY_PROBES = {2: "step02_topology_rebind", 3: "step03_sources_and_transport"}
 SHARED_GPU_NOTE = "与其他任务共享 GPU，仅用于正确性和可行性判断，各阶段耗时不作为正式数据"
 FAIL_COORDS = {(0, 0), (0, 1), (1, 0), (1, 1)}  # (ep, etp)
 DEFAULTS = {
@@ -57,6 +58,11 @@ def topology(inventory):
                          "ep": slot // 4, "etp": slot % 4})
     require(len({r["gpu_uuid"] for r in rows}) == 16, "GPU UUIDs must be unique")
     return rows
+
+
+def host_backing(config):
+    """The one shared host-library file a launch creates on this node."""
+    return Path("/dev/shm") / f"weavetp_{config['launch']}_{config['node']}"
 
 
 def failed_slots(rows):

@@ -7,7 +7,7 @@ import sys
 import time
 from pathlib import Path
 
-from common import append_json, connect, write_json
+from common import append_json, connect, host_backing, write_json
 from safety import parent_death_signal
 from source_fixture import create_checkpoint, demand
 
@@ -25,12 +25,12 @@ def main():
     _, bus = connect(config)
     manifest = create_checkpoint(root / 'checkpoint', config['node'], config['source_width'])
     selected = demand(json.loads(manifest.read_text())['entries'])
-    backing = Path('/dev/shm') / f"weavetp_{config['launch']}_{config['node']}"
+    backing = host_backing(config)
+    # Every local worker proves file-backed registration before any weight is read.
     bus.wait([f"host_registration/0/{r['slot']}" for r in config['topology'] if r['node'] == config['node']],
              timeout=config['startup_timeout_s'])
     owner = HostOwner(manifest, backing, config['host_library_mode'], selected,
                       record_created=lambda r: write_json(root / 'host_backing_identity.json', r))
-    owner.report['manifest_path'] = str(manifest)
     write_json(root / 'host_library.json', owner.report)
     bus.put(f"host_ready/{config['node']}", owner.report)
     try:
@@ -46,7 +46,6 @@ def main():
         owner.close()
         append_json(root / 'host_lifecycle.jsonl', {'action': 'owner_unlink', 'backing': str(backing),
                     'owner_pid': owner.report['owner_pid'], 't_local': time.monotonic()})
-    bus.put(f"host_stopped/{config['node']}", True)
 
 
 if __name__ == '__main__':

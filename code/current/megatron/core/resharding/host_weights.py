@@ -11,8 +11,9 @@ import json
 import mmap
 import os
 import shutil
-import time
 from pathlib import Path
+
+import torch
 
 
 def budget(manifest, mode, selected, *, ram_free, shm_free, memlock):
@@ -25,25 +26,16 @@ def budget(manifest, mode, selected, *, ram_free, shm_free, memlock):
     chosen = entries if mode == 'full' else [e for e in entries if e['id'] in selected]
     if not chosen:
         raise ValueError('empty host coverage')
-    full = sum(e['nbytes'] for e in entries)
     size = sum(e['nbytes'] for e in chosen)
-    metadata = len(json.dumps(manifest).encode()) * 4
-    # readinto writes straight into backing; the hashing view adds no payload copy.
-    required = size + metadata
-    # Checkpoint filesystem cache can coexist with the new shared backing.
-    ram_required = required + size
-    report = {'mode': mode, 'full_backing_bytes': full, 'on_demand_backing_bytes':
-              sum(e['nbytes'] for e in entries if e['id'] in selected),
-              'backing_bytes': size, 'metadata_budget_bytes': metadata,
-              'temporary_payload_bytes': 0, 'checkpoint_page_cache_budget_bytes': size,
-              'expected_peak_bytes': ram_required, 'expected_shm_peak_bytes': required,
-              'worker_registration_bytes': size, 'ram_available_bytes': ram_free,
-              'shm_available_bytes': shm_free, 'memlock_bytes': memlock,
-              'coverage': [e['id'] for e in chosen]}
-    if ram_free < ram_required or shm_free < required:
-        raise MemoryError(f'host library pre-read budget rejected: {report}')
-    if memlock != -1 and memlock < size:
-        raise MemoryError(f'host registration memlock budget rejected: {report}')
+    report = {'mode': mode, 'full_backing_bytes': sum(e['nbytes'] for e in entries),
+              'backing_bytes': size, 'worker_registration_bytes': size,
+              'ram_available_bytes': ram_free, 'shm_available_bytes': shm_free,
+              'memlock_bytes': memlock, 'coverage': [e['id'] for e in chosen]}
+    # readinto fills the tmpfs backing directly, so the shared file is the whole
+    # peak. cudaHostRegister pins through the driver, not RLIMIT_MEMLOCK: the
+    # limit is recorded, and registration is proven by probe_registration.
+    if ram_free < size or shm_free < size:
+        raise MemoryError(f'host library budget rejected before reading weights: {report}')
     return chosen, report
 
 
@@ -56,39 +48,40 @@ def linux_capacity(directory):
             'memlock': resource.getrlimit(resource.RLIMIT_MEMLOCK)[0]}
 
 
-def probe_registration():
-    """Prove CUDA registration works before the owner reads checkpoint weights."""
-    import torch
-
-    mapping = mmap.mmap(-1, mmap.PAGESIZE)
-    view = torch.frombuffer(mapping, dtype=torch.uint8)
-    pointer = view.data_ptr()
-    try:
-        result = torch.cuda.cudart().cudaHostRegister(pointer, mmap.PAGESIZE, 0)
-        if result != 0:
-            raise RuntimeError(f'host registration preflight failed: {result}')
-        result = torch.cuda.cudart().cudaHostUnregister(pointer)
-        if result != 0:
-            raise RuntimeError(f'host unregister preflight failed: {result}')
-    finally:
-        del view
-        mapping.close()
-    return {'registered_bytes': mmap.PAGESIZE, 'unregistered': True}
+def probe_registration(path):
+    """Register one page of a shared file beside the backing: the mapping kind workers pin."""
+    path = Path(path)
+    with path.open('x+b') as file:
+        try:
+            file.truncate(mmap.PAGESIZE)
+            mapping = mmap.mmap(file.fileno(), 0, access=mmap.ACCESS_WRITE)
+            try:
+                pointer = torch.frombuffer(mapping, dtype=torch.uint8).data_ptr()
+                result = torch.cuda.cudart().cudaHostRegister(pointer, mmap.PAGESIZE, 0)
+                if result != 0:
+                    raise RuntimeError(f'file-backed host registration preflight failed: {result}')
+                result = torch.cuda.cudart().cudaHostUnregister(pointer)
+                if result != 0:
+                    raise RuntimeError(f'host unregister preflight failed: {result}')
+            finally:
+                mapping.close()
+        finally:
+            path.unlink()
+    return {'registered_bytes': mmap.PAGESIZE, 'probe_path': str(path), 'backing_kind': 'shared_file'}
 
 
 class HostOwner:
     def __init__(self, manifest_path, backing, mode, selected, *, capacity=None, record_created=lambda _: None):
         self.path = Path(backing)
         self.file = self.mapping = None
-        raw = Path(manifest_path).read_bytes()
+        manifest_path = Path(manifest_path)
+        raw = manifest_path.read_bytes()
         manifest = json.loads(raw)
-        chosen, self.report = budget(manifest, mode, selected,
-                                    **(capacity or linux_capacity(self.path.parent)))
-        self.report.update(owner_pid=os.getpid(), backing=str(self.path),
-                           checkpoint_hash=hashlib.sha256(raw).hexdigest(), entries=[],
-                           structure=manifest['entries'],
-                           readonly_contract='source_only_views_with_owner_hash_verification',
-                           node=manifest['node'], created_local=time.monotonic())
+        chosen, self.report = budget(manifest, mode, selected, **(capacity or linux_capacity(self.path.parent)))
+        self.report.update(owner_pid=os.getpid(), node=manifest['node'], backing=str(self.path),
+                           manifest_path=str(manifest_path), checkpoint_hash=hashlib.sha256(raw).hexdigest(),
+                           structure=manifest['entries'], entries=[],
+                           readonly_contract='source_only_views_with_owner_hash_verification')
         # Exclusive creation prevents accidental reuse/unlink of another launch.
         self.file = self.path.open('x+b')
         try:
@@ -99,18 +92,13 @@ class HostOwner:
             offset = 0
             for entry in chosen:
                 nbytes = entry['nbytes']
-                if nbytes <= 0:
-                    raise ValueError('invalid checkpoint shard size')
-                path = (Path(manifest_path).parent / entry['file']).resolve()
-                if not path.is_relative_to(Path(manifest_path).parent.resolve()):
-                    raise ValueError('checkpoint shard path escapes manifest directory')
-                with path.open('rb', buffering=0) as source:
+                with (manifest_path.parent / entry['file']).open('rb', buffering=0) as source:
                     if os.fstat(source.fileno()).st_size != nbytes:
                         raise ValueError('checkpoint shard size mismatch')
                     with memoryview(self.mapping)[offset:offset + nbytes] as target:
                         cursor = 0
                         while cursor < nbytes:
-                            with target[cursor:min(nbytes, cursor + (1 << 20))] as chunk:
+                            with target[cursor:cursor + (1 << 20)] as chunk:
                                 count = source.readinto(chunk)
                             if not count:
                                 raise EOFError('short checkpoint read')
@@ -120,9 +108,8 @@ class HostOwner:
                 self.report['entries'].append({**entry, 'offset': offset})
                 offset += nbytes
             self.mapping.flush()
-            self.report.update(actual_backing_bytes=self.path.stat().st_size,
-                               backing_inode=self.path.stat().st_ino,
-                               loaded_local=time.monotonic())
+            stat = os.fstat(self.file.fileno())
+            self.report.update(actual_backing_bytes=stat.st_size, backing_inode=stat.st_ino)
             if Path('/proc/self/status').exists():
                 self.report['owner_memory'] = [line for line in Path('/proc/self/status').read_text().splitlines()
                                                if line.startswith(('VmRSS:', 'VmHWM:', 'RssShmem:'))]
@@ -155,8 +142,6 @@ class HostAttachment:
     """
 
     def __init__(self, report, *, register=True, record=lambda **_: None):
-        import torch
-
         self.report, self.record = report, record
         self.file = Path(report['backing']).open('r+b')
         stat = os.fstat(self.file.fileno())
@@ -166,18 +151,14 @@ class HostAttachment:
         self.mapping = mmap.mmap(self.file.fileno(), 0, access=mmap.ACCESS_WRITE)
         self.tensors = {}
         self.registered = False
-        self.pointer = None
         self.record(action='attach', pid=os.getpid(), owner_pid=report['owner_pid'],
                     backing=report['backing'], backing_inode=stat.st_ino)
         try:
             for entry in report['entries']:
-                tensor = torch.frombuffer(self.mapping, dtype=getattr(torch, entry['dtype']),
-                                          count=entry['nbytes'] // entry['element_size'], offset=entry['offset'])
-                self.tensors[entry['id']] = tensor.view(entry['local_shape'])
-            del tensor
-            byte_view = torch.frombuffer(self.mapping, dtype=torch.uint8)
-            self.pointer = byte_view.data_ptr()
-            del byte_view
+                self.tensors[entry['id']] = torch.frombuffer(
+                    self.mapping, dtype=getattr(torch, entry['dtype']), offset=entry['offset'],
+                    count=entry['nbytes'] // entry['element_size']).view(entry['local_shape'])
+            self.pointer = torch.frombuffer(self.mapping, dtype=torch.uint8).data_ptr()
             if register:
                 result = torch.cuda.cudart().cudaHostRegister(self.pointer, stat.st_size, 0)
                 if result != 0:
@@ -192,8 +173,6 @@ class HostAttachment:
             raise
 
     def close(self):
-        import torch
-
         if self.registered:
             torch.cuda.synchronize()  # Last H2D use must finish before unregister.
             result = torch.cuda.cudart().cudaHostUnregister(self.pointer)

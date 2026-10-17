@@ -16,8 +16,10 @@ from common import (
     DEFAULTS,
     NODES,
     SHARED_GPU_NOTE,
+    TOPOLOGY_PROBES,
     Journal,
     connect,
+    host_backing,
     prefix,
     require,
     summarize,
@@ -119,11 +121,10 @@ def run_case(config):
             remaining = cleanup_registered(root, journal, [p.pid for p, _ in service.children])
             require(not remaining or result["status"] != "passed", f"passing launch left live registered PIDs: {remaining}")
             identity = root / 'host_backing_identity.json'
-            if config.get('probe') == 'step03_sources_and_transport' and identity.exists():
+            if config.get('probe') == TOPOLOGY_PROBES[3] and identity.exists():
                 record = json.loads(identity.read_text())
                 backing = Path(record['backing'])
-                expected = Path('/dev/shm') / f"weavetp_{config['launch']}_{config['node']}"
-                require(backing == expected, 'host cleanup path identity mismatch')
+                require(backing == host_backing(config), 'host cleanup path identity mismatch')
                 if backing.exists():
                     require(backing.stat().st_ino == record['backing_inode'], 'host cleanup inode mismatch')
                     backing.unlink()  # All registered descendants confirmed dead above.

@@ -12,6 +12,7 @@ from datetime import timedelta
 from pathlib import Path
 
 from common import (
+    TOPOLOGY_PROBES,
     Journal,
     Reclaim,
     append_json,
@@ -94,7 +95,7 @@ class Supervisor:
                    "TORCH_NCCL_TRACE_BUFFER_SIZE": "10000"}
             child, record = self.children.spawn(
                 [sys.executable, str(HERE / ("topology_worker.py" if self.config.get("probe") in
-                                            ("step02_topology_rebind", "step03_sources_and_transport") else "worker.py")),
+                                            TOPOLOGY_PROBES.values() else "worker.py")),
                  "--config", str(self.root / "worker_config.json"),
                  "--slot", str(slot), "--epoch", str(epoch)],
                 "worker", row["gpu_uuid"], env,
@@ -200,7 +201,7 @@ class Supervisor:
                                           "pid": os.getpid(), "config": self.config})
         self.config["topology"] = self.wait(["topology"])[0]
         write_json(self.root / "worker_config.json", self.config)
-        if self.config.get('probe') == 'step03_sources_and_transport':
+        if self.config.get('probe') == TOPOLOGY_PROBES[3]:
             self.host_owner = self.children.spawn(
                 [sys.executable, str(HERE / 'host_owner.py'), '--config', str(self.root / 'worker_config.json')],
                 'host_owner')
@@ -274,7 +275,7 @@ def main():
         journal.event("process_exit")
         return
     _, bus = connect(config)
-    if config.get("probe") in ("step02_topology_rebind", "step03_sources_and_transport") and config["mode"] == "emulate":
+    if config.get("probe") in TOPOLOGY_PROBES.values() and config["mode"] == "emulate":
         from topology_probe import EmulateSupervisor
 
         supervisor = EmulateSupervisor(config, bus, journal)

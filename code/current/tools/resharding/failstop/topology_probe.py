@@ -6,7 +6,7 @@ import time
 from dataclasses import asdict
 from pathlib import Path
 
-from common import NODES, failed_slots, require, topology, write_json
+from common import NODES, TOPOLOGY_PROBES, failed_slots, require, topology, write_json
 from supervisor import Supervisor
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
@@ -54,12 +54,13 @@ def control(config, bus, journal, check):
             end = time.monotonic()
             samples.append({'offset': (sent + end) / 2 - remote, 'error': (end - sent) / 2})
         publish(f'clock/{node}', min(samples, key=lambda x: x['error']))
+    step3 = config['probe'] == TOPOLOGY_PROBES[3]
     preflight = wait([f'preflight/{n}' for n in NODES])
     for node, report in zip(NODES, preflight):
         require(report['host'].split('.')[0].upper() == node, 'wrong physical host')
         for key in ('commit', 'launch', 'mode', 'rounds', 'port', 'shared_gpu_mode', 'quick_mode', 'correctness_only',
-                    'probe', 'host_library_mode', 'source_width', 'profile_only'):
-            require(report['config'].get(key) == config.get(key), f'node config mismatch: {key}')
+                    'probe', 'profile_only') + (('host_library_mode', 'source_width') if step3 else ()):
+            require(report['config'][key] == config[key], f'node config mismatch: {key}')
     rows = topology(dict(zip(NODES, [r['gpus'] for r in preflight])))
     victims = failed_slots(rows)
     publish('topology', rows)
@@ -75,9 +76,10 @@ def control(config, bus, journal, check):
         members = session.current_world()['membership']
         session.adopt_group_order([{'replica': replica, 'field': field, 'actual': sorted(ranks)}
                                    for replica, field, ranks in replica_group_specs(session.replicas())])
-        timeout = config['launch_timeout_s'] - 30 if phase == 0 and config.get('probe') == 'step03_sources_and_transport' else None
-        values = wait([f'phase/{round_id}/{phase}/{s}' for s in members], timeout)
-        if config.get('probe') == 'step03_sources_and_transport':
+        # Phase 0 of Step 3 includes profile collection, which outlives one stage timeout.
+        values = wait([f'phase/{round_id}/{phase}/{s}' for s in members],
+                      config['launch_timeout_s'] - 30 if phase == 0 and step3 else None)
+        if step3:
             require(len({r['sources']['profile_sha256'] for r in values}) == 1, 'workers used different profiles')
         mapping = sorted((r for r in session.rank_map() if r['active']), key=lambda r: r['new_rank'])
         expected_ids = [[r['slot'], initial[r['slot']]['pid']] for r in mapping]
@@ -85,7 +87,7 @@ def control(config, bus, journal, check):
             require(report['slot'] == s and report['identities'] == expected_ids, 'actual membership/PID mismatch')
             require(report['rank_map'] == session.rank_map(), 'actual group mapping mismatch')
             require(report['checks_passed'], 'worker correctness check failed')
-            if config.get('probe') == 'step03_sources_and_transport':
+            if step3:
                 source = report['sources']
                 require(source is not None, 'missing Step 3 transport evidence')
                 if phase:
@@ -97,7 +99,7 @@ def control(config, bus, journal, check):
                             'host owner/backing changed across fault')
             if config['mode'] == 'real' and phase == 2 and s in victims:
                 require(report['empty_receiver'] and not report['used_as_source'], 'replacement was not an empty receiver')
-                if config.get('probe') == 'step03_sources_and_transport':
+                if step3:
                     require(report['sources']['initial_h2d_bytes'] == report['sources']['sent_bytes'] == 0,
                             'replacement preloaded weights or acted as a source')
         reports[f'{round_id}/{phase}'] = values
@@ -107,7 +109,7 @@ def control(config, bus, journal, check):
 
     for round_id in range(config['rounds']):
         validate(round_id, 0)
-        if config.get('profile_only'):
+        if config['profile_only']:
             break
         if round_id == 0:
             publish('kill')

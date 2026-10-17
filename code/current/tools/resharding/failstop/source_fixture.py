@@ -8,6 +8,15 @@ from pathlib import Path
 NAMES = ('gpu_only', 'host_only', 'mixed')
 
 
+def identity(row):
+    return f"{row['node']}/{row['gpu_uuid']}"
+
+
+def host_resident(name, part):
+    """Fixture placement: host_only lives only in the library; mixed alternates by part."""
+    return name == 'host_only' or (name == 'mixed' and part % 2 == 0)
+
+
 def create_checkpoint(root, node, width):
     root = Path(root)
     root.mkdir()
@@ -38,8 +47,7 @@ def create_checkpoint(root, node, width):
 
 
 def demand(entries):
-    return [e['id'] for e in entries if e['name'] == 'host_only' or
-            (e['name'] == 'mixed' and e['part'] % 2 == 0)]
+    return [e['id'] for e in entries if host_resident(e['name'], e['part'])]
 
 
 def read_oracle(manifest_path, name, expert, start, stop):

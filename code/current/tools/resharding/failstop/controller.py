@@ -10,6 +10,7 @@ from pathlib import Path
 
 from common import (
     NODES,
+    TOPOLOGY_PROBES,
     Journal,
     connect,
     failed_slots,
@@ -194,7 +195,7 @@ def run(config):
                 for child, record in children.children:
                     require(child.poll() in (None, 0), f"{record['role']} exited {child.returncode}")
 
-            if config.get("probe") in ("step02_topology_rebind", "step03_sources_and_transport"):
+            if config.get("probe") in TOPOLOGY_PROBES.values():
                 from topology_probe import control as topology_control
 
                 result = topology_control(config, bus, journal, check)
@@ -204,7 +205,7 @@ def run(config):
         else:
             require(supervisor.wait(timeout=config["launch_timeout_s"] - 30) == 0, "SL3061 supervisor failed")
             result["status"] = "passed"
-            if config.get('probe') in ('step02_topology_rebind', 'step03_sources_and_transport'):
+            if config.get('probe') in TOPOLOGY_PROBES.values():
                 result['metrics'] = bus.wait(['topology_metrics'])[0]
     except BaseException:
         result.update(status="failed", traceback=traceback.format_exc())

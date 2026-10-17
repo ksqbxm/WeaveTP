@@ -9,12 +9,13 @@ import traceback
 from datetime import timedelta
 from pathlib import Path
 
-from common import Journal, connect, require, write_json
+from common import TOPOLOGY_PROBES, Journal, connect, require, write_json
 from safety import parent_death_signal, verify_worker_context
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 import torch
 import torch.distributed as dist
+from source_runtime import SourceRuntime
 from topology_fixture import toy_local_orders
 from torch.distributed import distributed_c10d as c10d
 
@@ -64,11 +65,8 @@ def run(config, slot, initial_epoch):
     require(str(torch.cuda.get_device_properties(0).uuid).removeprefix('GPU-') == row['gpu_uuid'].removeprefix('GPU-'), 'GPU UUID mismatch')
     context_tensor = torch.empty(1, device='cuda')
     context = verify_worker_context(row['gpu_uuid'], root / f'context_{slot}_epoch{initial_epoch}.jsonl')
-    source_runtime = None
-    if config.get('probe') == 'step03_sources_and_transport':
-        from source_runtime import SourceRuntime
-
-        source_runtime = SourceRuntime(config, slot, initial_epoch, bus, journal)
+    source_runtime = (SourceRuntime(config, slot, initial_epoch, bus, journal)
+                      if config['probe'] == TOPOLOGY_PROBES[3] else None)
     torch.cuda.synchronize()
     bus.put(f'cuda/{initial_epoch}/{slot}', journal.event('cuda_ready', slot=slot, gpu_uuid=row['gpu_uuid'],
             epoch=initial_epoch, empty_receiver=initial_epoch == 2, context_verification=context))
@@ -137,7 +135,7 @@ def run(config, slot, initial_epoch):
 
     def service_until(key, round_id, report=False):
         nonlocal last_service
-        steps = 0
+        steps, prepared = 0, False
         deadline = time.monotonic() + config['stage_timeout_s']
         while True:
             serving_model(torch.empty(0 if row['ep'] == 0 else 1, device='cuda'))
@@ -145,8 +143,12 @@ def run(config, slot, initial_epoch):
             last_service = journal.event('replica_service', step=steps, until=key, slot=slot)
             if report:
                 bus.put(f'serving/{round_id}/{slot}', last_service)
-                if bus.has('cuda_verified/2' if round_id == 0 else f'emulate_rejoin/{round_id}'):
+                if prepared:
+                    # A whole service step completed after the rejoin preparation signal
+                    # was observed, so it is strictly later than any step the controller
+                    # sampled before publishing that signal.
                     bus.put(f'prepared_service/{round_id}/{slot}', last_service)
+                prepared = prepared or bus.has('cuda_verified/2' if round_id == 0 else f'emulate_rejoin/{round_id}')
             elif bus.has('kill' if round_id == 0 else f'emulate_release/{round_id}'):
                 bus.put(f'healthy_progress/{round_id}/{slot}', last_service)
             stop = torch.tensor([int(bus.has(key))], device='cuda', dtype=torch.int64)
@@ -267,7 +269,7 @@ def run(config, slot, initial_epoch):
     else:
         for round_id in range(config['rounds']):
             validate(0, round_id, build(session) if real else prebuilt[0])
-            if config.get('profile_only'):
+            if config['profile_only']:
                 break
             if row['replica'] == 'EDP1':
                 service_until(f'transition/{round_id}/1', round_id)

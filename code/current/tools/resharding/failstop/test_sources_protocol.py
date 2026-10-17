@@ -15,6 +15,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 import source_runtime
 import torch
+from common import TOPOLOGY_PROBES
 from source_fixture import create_checkpoint, demand
 from test_sources import CAPACITY, profile
 from test_topology_protocol import Simulation
@@ -34,7 +35,8 @@ class SourceProtocolTests(unittest.TestCase):
     def run_case(self, mode, rounds, library_mode):
         with tempfile.TemporaryDirectory() as directory, contextlib.ExitStack() as stack:
             root = Path(directory)
-            sim = Simulation(mode, root, rounds, {'probe': 'step03_sources_and_transport', 'source_width': 64})
+            sim = Simulation(mode, root, rounds, {'probe': TOPOLOGY_PROBES[3], 'source_width': 64,
+                                                  'host_library_mode': library_mode})
             sim.cuda_stream = Stream()
             owners = []
             for node in ('SL3060', 'SL3061'):
@@ -44,7 +46,6 @@ class SourceProtocolTests(unittest.TestCase):
                 owner = HostOwner(manifest, node_root / 'backing', library_mode,
                                   demand(json.loads(manifest.read_text())['entries']), capacity=CAPACITY)
                 stack.callback(owner.close)
-                owner.report['manifest_path'] = str(manifest)
                 sim.put(f'host_ready/{node}', owner.report)
                 owners.append(owner)
             measured = profile([source_runtime.identity(row) for row in sim.rows])

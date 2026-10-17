@@ -11,12 +11,15 @@ while (($#)); do
     *) echo "Unknown argument: $1" >&2; exit 2 ;;
   esac
 done
-[[ ( "$STEP" == 2 || "$STEP" == 3 ) && ( "$NODE" == SL3060 || "$NODE" == SL3061 ) ]]
+case "$STEP" in
+  2) NAME=step02_topology_rebind ;;
+  3) NAME=step03_sources_and_transport ;;
+  *) echo "Unknown step: $STEP" >&2; exit 2 ;;
+esac
+[[ "$NODE" == SL3060 || "$NODE" == SL3061 ]]
 HERE="$REPO/code/current/tools/resharding/failstop"
 SHA=$("$PYTHON" -c 'import json,sys; print(json.load(open(sys.argv[1]))["step"+sys.argv[2]])' "$HERE/releases.json" "$STEP")
 [[ "$SHA" =~ ^[0-9a-f]{40}$ ]]
-NAME=step02_topology_rebind
-[[ "$STEP" != 3 ]] || NAME=step03_sources_and_transport
 mkdir -p "/data/ubuntu/lxh/weavetp/acceptance/$NAME/kickoff"
 LOGDIR=$(mktemp -d "/data/ubuntu/lxh/weavetp/acceptance/$NAME/kickoff/${NODE}_$(date -u +%Y%m%dT%H%M%SZ)_XXXXXX")
 nohup "$PYTHON" -B "$HERE/quick_driver.py" --step "$STEP" --node "$NODE" --sha "$SHA" --repo "$REPO" --log-dir "$LOGDIR" > "$LOGDIR/nohup.log" 2>&1 < /dev/null &

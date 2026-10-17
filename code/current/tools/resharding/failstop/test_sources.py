@@ -121,13 +121,15 @@ class SourcesTests(unittest.TestCase):
             ids = demand(manifest['entries'])
             chosen, report = budget(manifest, 'on-demand', ids, **CAPACITY)
             self.assertLess(report['backing_bytes'], report['full_backing_bytes'])
-            self.assertEqual(report['temporary_payload_bytes'], 0)
+            self.assertEqual(report['worker_registration_bytes'], report['backing_bytes'])
             self.assertEqual({e['id'] for e in chosen}, set(ids))
             with self.assertRaises(MemoryError):
                 HostOwner(path, root / 'backing', 'on-demand', ids, capacity={**CAPACITY, 'shm_free': 1})
             self.assertFalse((root / 'backing').exists())
             with self.assertRaises(MemoryError):
-                budget(manifest, 'full', ids, **{**CAPACITY, 'memlock': 1})
+                budget(manifest, 'full', ids, **{**CAPACITY, 'ram_free': 1})
+            # RLIMIT_MEMLOCK does not bound cudaHostRegister; it is evidence, not a gate.
+            self.assertEqual(budget(manifest, 'full', ids, **{**CAPACITY, 'memlock': 1})[1]['memlock_bytes'], 1)
             with self.assertRaisesRegex(ValueError, 'coverage'):
                 budget(manifest, 'on-demand', ['missing'], **CAPACITY)
 

@@ -68,10 +68,7 @@ class Task:
 
 
 def seconds(entry, size):
-    bw, latency = entry['bytes_per_s'], entry['latency_s']
-    if not math.isfinite(bw) or bw <= 0 or not math.isfinite(latency) or latency < 0:
-        raise ValueError('invalid measured bandwidth/latency')
-    return size / bw + latency
+    return size / entry['bytes_per_s'] + entry['latency_s']
 
 
 def increments(source, target, size, profile):

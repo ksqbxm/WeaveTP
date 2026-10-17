@@ -6,6 +6,7 @@ import time
 
 import torch
 import torch.distributed as dist
+from source_fixture import identity
 
 from megatron.core.resharding.mixed_sources import digest
 
@@ -27,7 +28,6 @@ def fit(samples):
 
 
 def collect(config, rows, slot, group, host, journal):
-    device = lambda r: f"{r['node']}/{r['gpu_uuid']}"
     sizes = [config['source_width'] // 2, config['source_width'], config['source_width'] * 2]
     repeats = 2 if config['quick_mode'] else 5
     warmup = 1 if config['quick_mode'] else 2
@@ -39,7 +39,7 @@ def collect(config, rows, slot, group, host, journal):
         raise ValueError('profile payload exceeds host shard capacity')
     stream = torch.cuda.Stream()
     profile = {'version': 'failstop-sources-v1', 'h2d': {}, 'host_capacity': {}, 'h2d_concurrency': {},
-               'p2p': {device(r): {} for r in rows}, 'warmup': warmup, 'repeats': repeats,
+               'p2p': {identity(r): {} for r in rows}, 'warmup': warmup, 'repeats': repeats,
                'sizes_bytes': sizes, 'commit': config['commit'], 'torch': str(torch.__version__),
                'cuda': torch.version.cuda, 'nccl': torch.cuda.nccl.version(), 'ranks': rows,
                'shared_gpu_mode': config['shared_gpu_mode'], 'timing_valid': not config['shared_gpu_mode'],
@@ -71,7 +71,7 @@ def collect(config, rows, slot, group, host, journal):
             target[:size].copy_(cpu[:size], non_blocking=True)
 
     for row in rows:
-        profile['h2d'][device(row)] = measure([row['slot']], h2d)
+        profile['h2d'][identity(row)] = measure([row['slot']], h2d)
         if slot == row['slot'] and not torch.equal(target.cpu(), cpu[:max(sizes)]):
             raise RuntimeError('single GPU H2D profile bitwise mismatch')
     for node in sorted({r['node'] for r in rows}):
@@ -101,13 +101,12 @@ def collect(config, rows, slot, group, host, journal):
                 for work in dist.batch_isend_irecv([operation]):
                     work.wait()
 
-            profile['p2p'][device(src)][device(dst)] = measure([src['slot'], dst['slot']], p2p)
+            profile['p2p'][identity(src)][identity(dst)] = measure([src['slot'], dst['slot']], p2p)
             if slot == dst['slot'] and not bool((target == src['slot'] * 16 + dst['slot']).all()):
                 raise RuntimeError('P2P profile bitwise mismatch')
     # Existing consumers can use the decimal Gbps matrix; local diagonal is not measured.
-    profile['unit'] = 'Gbps'
     profile['diagonal'] = {'gbps': 1000.0, 'measured': False, 'used_for_local_cost': False}
-    profile['matrix_gbps'] = [[1000.0 if a == b else profile['p2p'][device(a)][device(b)]['bytes_per_s'] * 8 / 1e9
+    profile['matrix_gbps'] = [[1000.0 if a == b else profile['p2p'][identity(a)][identity(b)]['bytes_per_s'] * 8 / 1e9
                               for b in rows] for a in rows]
-    journal.event('profile_complete', profile_sha256=digest(profile), directed_pairs=240)
+    journal.event('profile_complete', profile_sha256=digest(profile), directed_pairs=len(rows) * (len(rows) - 1))
     return profile
