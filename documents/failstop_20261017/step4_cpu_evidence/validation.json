@@ -3,8 +3,8 @@
   "label": "step04_async_driver_and_memory",
   "branch": "codex/failstop-step4",
   "branch_base": "69927c7effe6e2ff87133c80c4daaedad30aac89",
-  "code_commit": "05d942e682e3d96b85c7c7db164ba09a8dd13841",
-  "quick_manifest_commit": "1f5400d0fac899f5003db2663a555d214cf481cf",
+  "code_commit": "b621125876e8ea8ab07c1f3ba210ddd370a0ae60",
+  "quick_manifest_commit": "e09d7bce466fb3f7bbd4afc309860898873c3c2a",
   "read_before_code": [
     "CODEX.md",
     "documents/failstop_20261017/00_总计划.md",
@@ -100,15 +100,16 @@
   "logs_sha256": {
     "cpu_tests.log": "fc03f90e24486a6829314d0e295c19ebaea419eb940f6b4d8764a671c12b234b",
     "packing.log": "57a916fa70cd75be895a151e77362a9412efc1a265e9a8ab73ab9bdc6c654631",
-    "cpu_tests_fix1.log": "3db6724f4cecd33481411452a8923259f8d23df7f371b66866b32a7bed10a4bd"
+    "cpu_tests_fix1.log": "3db6724f4cecd33481411452a8923259f8d23df7f371b66866b32a7bed10a4bd",
+    "cpu_tests_review.log": "ef0ac4cba48f56d91062b06eaa65698c56a91e21a2371ec5da6ca6e867cef39b"
   },
   "bundle": {
-    "path": "C:\\Users\\ksqbx\\.codex\\worktrees\\failstop-step4\\step4_1f5400d.bundle",
-    "bytes": 872222,
-    "sha256": "8ee7e272f1b5c5e7a1c04723b8796a5a30c9ad271cde142cda4ea3b7caf1cc48",
+    "path": "C:\\Users\\ksqbx\\.codex\\worktrees\\failstop-step4\\step4_e09d7bc.bundle",
+    "bytes": 873581,
+    "sha256": "b75f0215620c193aa2e6416dfc72c427fa55a0eb3c8c8d8ee7941fadd4040232",
     "base": "f7d555998b45756998465924d733fd70e553d6b4",
-    "ref": "refs/heads/codex/step4-1f5400d",
-    "head": "1f5400d0fac899f5003db2663a555d214cf481cf",
+    "ref": "refs/heads/codex/step4-e09d7bc",
+    "head": "e09d7bce466fb3f7bbd4afc309860898873c3c2a",
     "verified": true
   },
   "remote_before_commit": "origin/codex/failstop = 69927c7effe6e2ff87133c80c4daaedad30aac89; origin has no codex/failstop-step4",
@@ -142,6 +143,39 @@
       "ruff_F": "passed",
       "compile": "passed",
       "bash_n": "passed",
+      "git_diff_check": "passed"
+    },
+    "code_commit": "05d942e682e3d96b85c7c7db164ba09a8dd13841",
+    "quick_manifest_commit": "1f5400d0fac899f5003db2663a555d214cf481cf",
+    "bundle": {
+      "path": "C:\\Users\\ksqbx\\.codex\\worktrees\\failstop-step4\\step4_1f5400d.bundle",
+      "bytes": 872222,
+      "sha256": "8ee7e272f1b5c5e7a1c04723b8796a5a30c9ad271cde142cda4ea3b7caf1cc48",
+      "base": "f7d555998b45756998465924d733fd70e553d6b4",
+      "ref": "refs/heads/codex/step4-1f5400d",
+      "head": "1f5400d0fac899f5003db2663a555d214cf481cf",
+      "verified": true
+    }
+  },
+  "review": {
+    "findings": [
+      "P1 real replacement worker aborted a nonexistent process group",
+      "P1 EDP1 rebuild pause end recorded at end of serving period",
+      "P2 fake wait()-is-False transport contract",
+      "P2 shrink source needlessly rebound",
+      "P3 meaningless recovery_queue call, duplicate delta validation, JSON round-trip comparisons",
+      "P3 duplicated cases/summarize, inline imports, redundant variables",
+      "P3 default weight size too small for a reliable overlap assertion"
+    ],
+    "unittest": {
+      "count": 104,
+      "status": "passed",
+      "log": "cpu_tests_review.log"
+    },
+    "old_worker_regression": "test_real_replacements fails with \"abort without a process group\" on the previous async_worker.py",
+    "static_checks": {
+      "isort": "passed",
+      "ruff_F": "passed",
       "git_diff_check": "passed"
     }
   }

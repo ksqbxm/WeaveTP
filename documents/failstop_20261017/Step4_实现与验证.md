@@ -1,6 +1,6 @@
 # Step 4 实现与验证
 
-当前实现提交：`05d942e682e3d96b85c7c7db164ba09a8dd13841`。当前快速入口固定版本清单提交：`1f5400d0fac899f5003db2663a555d214cf481cf`（见下方“修正 1”）。首版实现提交：`7b33df6591815bb5db8d98d97a6898bc9ab1c0af`，首版清单：`dce3d902edb258d3b028ee8bc333d1448853929f`。分支 `codex/failstop-step4`，从 `codex/failstop` 的 Step 2 交付提交 `69927c7effe6e2ff87133c80c4daaedad30aac89` 建立独立工作树，与 Step 3 并行实现；本分支不包含、不读取 Step 3 提交，合入 `codex/failstop` 由后续单独处理。服务器命令见 [Step 4 服务器命令](Step4_服务器命令.md)。
+当前实现提交：`b621125876e8ea8ab07c1f3ba210ddd370a0ae60`。当前快速入口固定版本清单提交：`e09d7bce466fb3f7bbd4afc309860898873c3c2a`（见[审阅与修正](Step4_审阅与修正.md)）。修正 1 实现：`05d942e682e3d96b85c7c7db164ba09a8dd13841`，清单：`1f5400d0fac899f5003db2663a555d214cf481cf`。首版实现提交：`7b33df6591815bb5db8d98d97a6898bc9ab1c0af`，首版清单：`dce3d902edb258d3b028ee8bc333d1448853929f`。分支 `codex/failstop-step4`，从 `codex/failstop` 的 Step 2 交付提交 `69927c7effe6e2ff87133c80c4daaedad30aac89` 建立独立工作树，与 Step 3 并行实现；本分支不包含、不读取 Step 3 提交，合入 `codex/failstop` 由后续单独处理。服务器命令见 [Step 4 服务器命令](Step4_服务器命令.md)。
 
 本轮已阅读 CODEX.md、总计划、Step 4 文档、Step 2 服务器命令和 code/current/AGENTS.md。用户 2026-10-17 明确指示开始实现 Step 4；**standby fix2 的 GPU 复验证据仍未登记**，runner 输出固定 `prerequisites_verified=false`，不把释放已验证写成事实。本轮没有登录服务器、运行 GPU 或改动其他用户任务。
 
@@ -55,4 +55,4 @@ python -B -X utf8 -m pytest --noconftest code/current/tests/unit_tests/reshardin
 - `quick_driver.py` 将 runner 输出同时镜像到 nohup.log 和 kickoff 目录的 `runner.log`，失败时取子进程自己的异常行写入 `runner_error` 与最终 error （例如 `RuntimeError: insufficient /data space: {...}`）；progress.json 不存在时明确写“no case started; the runner failed during preflight”。
 - 新增测试：预检失败输出必须出现在 receipt 的 runner_error/error 中，`--min-free-disk-gb` 必须透传到 runner argv，runner.log 内容与子进程输出一致；无输出时报 “runner produced no output”。两个 step 的既有异常路径（suite、restore、package、dirty、timeout、对端失败）全部重跑。
 
-验证：failstop unittest 103/103（[日志](step4_cpu_evidence/cpu_tests_fix1.log)）、isort、Ruff F、编译、bash -n、git diff --check 通过。修正实现 `05d942e682e3d96b85c7c7db164ba09a8dd13841`，清单 `1f5400d0fac899f5003db2663a555d214cf481cf`。增量包：`C:/Users/ksqbx/.codex/worktrees/failstop-step4/step4_1f5400d.bundle`，872222 字节，基线 `f7d555998b45756998465924d733fd70e553d6b4`，SHA256 `8ee7e272f1b5c5e7a1c04723b8796a5a30c9ad271cde142cda4ea3b7caf1cc48`。服务器 GPU 仍未运行。
+验证：failstop unittest 103/103（[日志](step4_cpu_evidence/cpu_tests_fix1.log)）、isort、Ruff F、编译、bash -n、git diff --check 通过。修正实现 `05d942e682e3d96b85c7c7db164ba09a8dd13841`，清单 `1f5400d0fac899f5003db2663a555d214cf481cf`。增量包：`C:/Users/ksqbx/.codex/worktrees/failstop-step4/step4_1f5400d.bundle`，872222 字节，基线 `f7d555998b45756998465924d733fd70e553d6b4`，SHA256 `8ee7e272f1b5c5e7a1c04723b8796a5a30c9ad271cde142cda4ea3b7caf1cc48`；已被审阅修正版取代。服务器 GPU 仍未运行。

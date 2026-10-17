@@ -2,8 +2,8 @@
   "bash_blocks": 8,
   "bash_syntax": "passed",
   "literal_commits_resolve": [
-    "05d942e682e3d96b85c7c7db164ba09a8dd13841",
-    "1f5400d0fac899f5003db2663a555d214cf481cf",
+    "b621125876e8ea8ab07c1f3ba210ddd370a0ae60",
+    "e09d7bce466fb3f7bbd4afc309860898873c3c2a",
     "f7d555998b45756998465924d733fd70e553d6b4"
   ],
   "manifest_matches_runtime": true,
