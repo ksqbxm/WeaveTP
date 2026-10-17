@@ -1,5 +1,7 @@
 # Step 3 服务器命令
 
+审阅修正后的交付。实现 `7e61596114b003bf3ecefdd8045a6b10aeeda65b`，快验清单 `50b4a781451277cbd472e94ae1253b1331a4dfba`；问题与修正见[审阅与修正](Step3_审阅与修正.md)。此前的 `bcc61ae`/`1c5dea2` 命令与 `step3_1c5dea2.bundle` 作废，不再使用。
+
 ## 1. 快速正确性测试（先完成第 2 节离线导入）
 
 每台一条，先后在 60 秒内启动；也支持先 SL3061。自动协调同一个新 suite，默认共享 GPU，仅用于正确性。两种模式各做一次缩容/扩容，同时保留全部 profile 类别、三类来源、非连续/专家切片、逐位比较、身份、清理和主机库检查。总预算 300 秒，超时 FAIL；本次尚未在服务器实测该预算。
@@ -7,16 +9,16 @@
 SL3060：
 
 ```bash
-source /data/ubuntu/lxh/weavetp/env.sh && git -C "$REPO" checkout --detach 1c5dea241e4b001434c0615ffe98ee909951efc9 && bash "$REPO/code/current/tools/resharding/failstop/quick_check.sh" --step 3 --node SL3060
+source /data/ubuntu/lxh/weavetp/env.sh && git -C "$REPO" checkout --detach 50b4a781451277cbd472e94ae1253b1331a4dfba && bash "$REPO/code/current/tools/resharding/failstop/quick_check.sh" --step 3 --node SL3060
 ```
 
 SL3061：
 
 ```bash
-source /data/ubuntu/lxh/weavetp/env.sh && git -C "$REPO" checkout --detach 1c5dea241e4b001434c0615ffe98ee909951efc9 && bash "$REPO/code/current/tools/resharding/failstop/quick_check.sh" --step 3 --node SL3061
+source /data/ubuntu/lxh/weavetp/env.sh && git -C "$REPO" checkout --detach 50b4a781451277cbd472e94ae1253b1331a4dfba && bash "$REPO/code/current/tools/resharding/failstop/quick_check.sh" --step 3 --node SL3061
 ```
 
-入口会内部 source env.sh，并按 releases.json 检出实现 `bcc61aeb86ddc1bcce403785493ac38ad59486db`。清单与实现分开，避免 SHA 自引用。后台使用 nohup；启动命令返回只表示启动，不表示测试完成。结束后（包括失败）恢复 `f7d555998b45756998465924d733fd70e553d6b4`。
+入口会内部 source env.sh，并按 releases.json 检出实现 `7e61596114b003bf3ecefdd8045a6b10aeeda65b`。清单与实现分开，避免 SHA 自引用。后台使用 nohup；启动命令返回只表示启动，不表示测试完成。结束后（包括失败）恢复 `f7d555998b45756998465924d733fd70e553d6b4`。同一检出目录的 Step 2/3 快验共用一把本地锁，不能同时启动。
 
 预期最终单行格式：
 
@@ -37,16 +39,16 @@ test ! -f "$LATEST/exit_code" || cat "$LATEST/exit_code"
 test ! -f "$LATEST/final.json" || cat "$LATEST/final.json"
 ```
 
-日志会打印实际 tar.gz 和 receipt 路径，形如 `$ROOT/s3q_..._SL3060.tar.gz` 与同前缀 `.receipt.json`；另一机后缀 SL3061。**回传两台各自的 tar 和 receipt**，失败时另带 kickoff/nohup.log、final.json。包内 quick_status.result=PENDING_FINALIZATION 是设计如此，最终以包外 receipt、对端终态和 exit_code 为准。profile.json、profile.sha256、source_plan、links、host_library/host_integrity/host_worker、进程生命周期、CUDA/MPS 原文及逐位结果均在各 launch 子目录。
+日志会打印实际 tar.gz 和 receipt 路径，形如 `$ROOT/s3q_..._SL3060.tar.gz` 与同前缀 `.receipt.json`；另一机后缀 SL3061。**回传两台各自的 tar 和 receipt**，失败时另带 kickoff/nohup.log、final.json。包内 quick_status.result=PENDING_FINALIZATION 是设计如此，最终以包外 receipt、对端终态和 exit_code 为准。profile.json、profile.sha256、source_plan、links、host_library/host_integrity/host_worker、进程生命周期、CUDA/MPS 原文及逐位结果均在各 launch 子目录。worker 的 `host_registration_preflight` 事件记录共享文件页注册探针；`host_library.json` 的 `memlock_bytes` 只是证据，不构成拒绝条件。
 
 ## 2. Windows 离线 bundle 与两节点导入
 
-已生成并验证：`C:/Users/ksqbx/.codex/worktrees/failstop/step3_1c5dea2.bundle`，855668 字节。基线为正式提交 `f7d555998b45756998465924d733fd70e553d6b4`，目标为固定清单提交 `1c5dea241e4b001434c0615ffe98ee909951efc9`，包含其全部所需运行时代码。SHA256：`69a2666528aeaec7f72a83957c5823b9b85f156a0b96a8239d37dd85cf37543a`。
+已生成并验证：`C:/Users/ksqbx/.codex/worktrees/failstop/step3_50b4a78.bundle`，873696 字节。基线为正式提交 `f7d555998b45756998465924d733fd70e553d6b4`，目标为固定清单提交 `50b4a781451277cbd472e94ae1253b1331a4dfba`，包含其全部所需运行时代码。SHA256：`78106b6699bc3f5be41f6fd4a8aba0cd9f060f64446f0b290dabf69dce58a6d0`。
 
 直接上传已有包（本轮只生成本地包，尚未替用户上传或运行服务器任务）：
 
 ```powershell
-$TaskBundle = 'C:/Users/ksqbx/.codex/worktrees/failstop/step3_1c5dea2.bundle'
+$TaskBundle = 'C:/Users/ksqbx/.codex/worktrees/failstop/step3_50b4a78.bundle'
 Get-FileHash -LiteralPath $TaskBundle -Algorithm SHA256
 scp $TaskBundle "$TaskBundle.sha256" 5090-SL3061:/data/ubuntu/lxh/weavetp/
 ```
@@ -55,10 +57,10 @@ scp $TaskBundle "$TaskBundle.sha256" 5090-SL3061:/data/ubuntu/lxh/weavetp/
 
 ```powershell
 $TaskRepo = 'C:/Users/ksqbx/.codex/worktrees/failstop/WeaveTP_代码与实验资料_20260920'
-$TaskBundle = 'C:/Users/ksqbx/.codex/worktrees/failstop/step3_1c5dea2_rebuilt.bundle'
+$TaskBundle = 'C:/Users/ksqbx/.codex/worktrees/failstop/step3_50b4a78_rebuilt.bundle'
 if (Test-Path -LiteralPath $TaskBundle) { throw '文件已存在，不覆盖' }
-git -C $TaskRepo update-ref refs/heads/codex/step3-1c5dea2 1c5dea241e4b001434c0615ffe98ee909951efc9
-git -C $TaskRepo bundle create $TaskBundle refs/heads/codex/step3-1c5dea2 '^f7d555998b45756998465924d733fd70e553d6b4'
+git -C $TaskRepo update-ref refs/heads/codex/step3-50b4a78 50b4a781451277cbd472e94ae1253b1331a4dfba
+git -C $TaskRepo bundle create $TaskBundle refs/heads/codex/step3-50b4a78 '^f7d555998b45756998465924d733fd70e553d6b4'
 if ($LASTEXITCODE) { throw 'bundle create failed' }
 git -C $TaskRepo bundle verify $TaskBundle
 if ($LASTEXITCODE) { throw 'bundle verify failed' }
@@ -76,13 +78,13 @@ cd /data
 mountpoint -q /data
 source /data/ubuntu/lxh/weavetp/env.sh
 cd /data/ubuntu/lxh/weavetp
-sha256sum -c step3_1c5dea2.bundle.sha256
+sha256sum -c step3_50b4a78.bundle.sha256
 test -z "$(git -C "$REPO" status --porcelain --untracked-files=no)"
-git -C "$REPO" bundle verify "$PWD/step3_1c5dea2.bundle"
-git -C "$REPO" fetch "$PWD/step3_1c5dea2.bundle" refs/heads/codex/step3-1c5dea2
-test "$(git -C "$REPO" rev-parse FETCH_HEAD)" = 1c5dea241e4b001434c0615ffe98ee909951efc9
-git -C "$REPO" checkout --detach 1c5dea241e4b001434c0615ffe98ee909951efc9
-scp step3_1c5dea2.bundle step3_1c5dea2.bundle.sha256 ubuntu@10.60.14.1:/data/ubuntu/lxh/weavetp/
+git -C "$REPO" bundle verify "$PWD/step3_50b4a78.bundle"
+git -C "$REPO" fetch "$PWD/step3_50b4a78.bundle" refs/heads/codex/step3-50b4a78
+test "$(git -C "$REPO" rev-parse FETCH_HEAD)" = 50b4a781451277cbd472e94ae1253b1331a4dfba
+git -C "$REPO" checkout --detach 50b4a781451277cbd472e94ae1253b1331a4dfba
+scp step3_50b4a78.bundle step3_50b4a78.bundle.sha256 ubuntu@10.60.14.1:/data/ubuntu/lxh/weavetp/
 ```
 
 SL3060 校验、导入，不依赖 GitHub：
@@ -93,21 +95,21 @@ cd /data
 mountpoint -q /data
 source /data/ubuntu/lxh/weavetp/env.sh
 cd /data/ubuntu/lxh/weavetp
-sha256sum -c step3_1c5dea2.bundle.sha256
+sha256sum -c step3_50b4a78.bundle.sha256
 test -z "$(git -C "$REPO" status --porcelain --untracked-files=no)"
-git -C "$REPO" bundle verify "$PWD/step3_1c5dea2.bundle"
-git -C "$REPO" fetch "$PWD/step3_1c5dea2.bundle" refs/heads/codex/step3-1c5dea2
-test "$(git -C "$REPO" rev-parse FETCH_HEAD)" = 1c5dea241e4b001434c0615ffe98ee909951efc9
-git -C "$REPO" checkout --detach 1c5dea241e4b001434c0615ffe98ee909951efc9
+git -C "$REPO" bundle verify "$PWD/step3_50b4a78.bundle"
+git -C "$REPO" fetch "$PWD/step3_50b4a78.bundle" refs/heads/codex/step3-50b4a78
+test "$(git -C "$REPO" rev-parse FETCH_HEAD)" = 50b4a781451277cbd472e94ae1253b1331a4dfba
+git -C "$REPO" checkout --detach 50b4a781451277cbd472e94ae1253b1331a4dfba
 ```
 
 SL3061 也可从个人远端补取对象：`git -C "$REPO" fetch origin codex/failstop`，随后仍检出上述固定 SHA；SL3060 继续使用 bundle。不要使用浮动分支代替交付 SHA。
 
 ## 3. 正式 Step 3 验收
 
-先完成快验，按 Step 2 real 的 GPU 回传关口安排 real 验收。以下命令默认独占，emulate 一个 launch 连续 5 轮、real 一个独立 launch；端口 29840/29841，不与快验同时启动。入口自动启动 TCPStore、控制器、两节点各自的监管器和 CPU host owner，并执行 /data、MPS、worker 身份、RAM、/dev/shm、memlock 与注册能力预检。默认 allocator；不会停止常驻 MPS 或其他任务。
+先完成快验，按 Step 2 real 的 GPU 回传关口安排 real 验收。以下命令默认独占，emulate 一个 launch 连续 5 轮、real 一个独立 launch；端口 29840/29841，不与快验同时启动。入口自动启动 TCPStore、控制器、两节点各自的监管器和 CPU host owner，并执行 /data、MPS、worker 身份、RAM、/dev/shm 预算与共享文件页注册探针预检。默认 allocator；不会停止常驻 MPS 或其他任务。
 
-默认 `--host-library-mode on-demand`；完整库检查时两机都改成 `--host-library-mode full`，并使用新的共同 SUITE。这里的库是 Step 3 小型切片 checkpoint，不代表 native DeepSeek 整模型内存已验收。需要共享多轮正确性测试时两机都加 `--correctness-only`，此时 accepted=false、timing_valid=false，不能作正式性能数据。
+默认 `--host-library-mode on-demand`；完整库检查时两机都改成 `--host-library-mode full`，并使用新的共同 SUITE。这里的库是 Step 3 小型切片 checkpoint，不代表 native DeepSeek 整模型内存已验收。需要共享多轮正确性测试时两机都加 `--correctness-only`（Step 2/3 唯一的测试专用共享 GPU 开关），此时 accepted=false、timing_valid=false，不能作正式性能数据。
 
 SL3060：
 
@@ -117,8 +119,8 @@ cd /data
 mountpoint -q /data
 source /data/ubuntu/lxh/weavetp/env.sh
 test -z "$(git -C "$REPO" status --porcelain --untracked-files=no)"
-git -C "$REPO" checkout --detach bcc61aeb86ddc1bcce403785493ac38ad59486db
-export NODE=SL3060 SUITE=s3_formal_1c5dea2_r1
+git -C "$REPO" checkout --detach 7e61596114b003bf3ecefdd8045a6b10aeeda65b
+export NODE=SL3060 SUITE=s3_formal_50b4a78_r1
 export RUN="/data/ubuntu/lxh/weavetp/acceptance/step03_sources_and_transport/$SUITE"
 export ENTRY="$REPO/code/current/tools/resharding/failstop/run_sources.py"
 export REPO PYTHON
@@ -136,8 +138,8 @@ cd /data
 mountpoint -q /data
 source /data/ubuntu/lxh/weavetp/env.sh
 test -z "$(git -C "$REPO" status --porcelain --untracked-files=no)"
-git -C "$REPO" checkout --detach bcc61aeb86ddc1bcce403785493ac38ad59486db
-export NODE=SL3061 SUITE=s3_formal_1c5dea2_r1
+git -C "$REPO" checkout --detach 7e61596114b003bf3ecefdd8045a6b10aeeda65b
+export NODE=SL3061 SUITE=s3_formal_50b4a78_r1
 export RUN="/data/ubuntu/lxh/weavetp/acceptance/step03_sources_and_transport/$SUITE"
 export ENTRY="$REPO/code/current/tools/resharding/failstop/run_sources.py"
 export REPO PYTHON
@@ -162,20 +164,20 @@ printf '%s\n' "${RUN}_${NODE}.tar.gz"
 
 ## 4. 独立 profile 采集
 
-在上方两节点正式命令中，同步使用 `SUITE=s3_profile_1c5dea2_r1`，将 ENTRY 改为 `run_source_profile.py` 的绝对路径，将 Python 参数改成下面对应一行，保留相同 nohup、打包和恢复 wrapper：
+在上方两节点正式命令中，同步使用 `SUITE=s3_profile_50b4a78_r1`，ENTRY 不变，只把 Python 参数改成下面对应一行，保留相同 nohup、打包和恢复 wrapper：
 
 SL3060 的 runner 参数：
 
 ```bash
-"$PYTHON" -B "$REPO/code/current/tools/resharding/failstop/run_source_profile.py" --node SL3060 --suite-id s3_profile_1c5dea2_r1 --output /data/ubuntu/lxh/weavetp/acceptance/step03_sources_and_transport/s3_profile_1c5dea2_r1 --mode emulate --rounds 1 --port-base 29860 --host-library-mode on-demand
+"$PYTHON" -B "$ENTRY" --node SL3060 --suite-id s3_profile_50b4a78_r1 --output /data/ubuntu/lxh/weavetp/acceptance/step03_sources_and_transport/s3_profile_50b4a78_r1 --mode emulate --profile-only --port-base 29860 --host-library-mode on-demand
 ```
 
 SL3061 的 runner 参数：
 
 ```bash
-"$PYTHON" -B "$REPO/code/current/tools/resharding/failstop/run_source_profile.py" --node SL3061 --suite-id s3_profile_1c5dea2_r1 --output /data/ubuntu/lxh/weavetp/acceptance/step03_sources_and_transport/s3_profile_1c5dea2_r1 --mode emulate --rounds 1 --port-base 29860 --host-library-mode on-demand
+"$PYTHON" -B "$ENTRY" --node SL3061 --suite-id s3_profile_50b4a78_r1 --output /data/ubuntu/lxh/weavetp/acceptance/step03_sources_and_transport/s3_profile_50b4a78_r1 --mode emulate --profile-only --port-base 29860 --host-library-mode on-demand
 ```
 
-该入口只采集初始 world16 profile，不 kill、不缩扩容，accepted=false、profile_only=true、edp1_rejoin_pause_s=null。在 profile.json 所在目录执行 `sha256sum -c profile.sha256`；两机对应 launch 的 hash 必须相同。GPU 共享采样须加 `--correctness-only`，不能作为独占性能 profile。
+`--profile-only` 只采集初始 world16 profile，不 kill、不缩扩容，轮数固定为 1，accepted=false、profile_only=true、edp1_rejoin_pause_s=null。在 profile.json 所在目录执行 `sha256sum -c profile.sha256`；两机对应 launch 的 hash 必须相同。GPU 共享采样须加 `--correctness-only`，不能作为独占性能 profile。
 
-实现与 CPU 证据见 [Step3_实现与验证.md](Step3_实现与验证.md)。本次没有替用户执行服务器命令；Step 4 仍等待 fix2 GPU 回传确认。
+实现与 CPU 证据见 [Step3_实现与验证.md](Step3_实现与验证.md) 和 [审阅与修正](Step3_审阅与修正.md)。本次没有替用户执行服务器命令；Step 4 仍等待 fix2 GPU 回传确认。
