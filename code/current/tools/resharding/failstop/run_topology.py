@@ -48,6 +48,14 @@ def summarize(selected, results, *, quick, correctness_only):
             'results': results, **modes}
 
 
+def edp1_rejoin_pause(node, results):
+    """The controller node computes the real-mode EDP1 pause; the peer's results carry no metrics."""
+    if node != NODES[0]:
+        return None
+    return max((r['metrics']['edp1_rejoin_pause_s'] for r in results
+                if r['mode'] == 'real' and r['status'] == 'passed'), default=None)
+
+
 def stop(signum, frame):
     raise KeyboardInterrupt(f'signal {signum}')
 
@@ -148,9 +156,7 @@ def main(argv=None, *, step=2):
         write_json(root / 'progress.json', results)
     summary = {**summarize(selected, results, quick=args.quick, correctness_only=correctness_only),
                'commit': commit, 'profile_only': profile_only,
-               'edp1_rejoin_pause_s': None if profile_only else max(
-                   (r['metrics']['edp1_rejoin_pause_s'] for r in results
-                    if r['mode'] == 'real' and r['status'] == 'passed'), default=None)}
+               'edp1_rejoin_pause_s': None if profile_only else edp1_rejoin_pause(args.node, results)}
     if profile_only:
         summary['accepted'] = False
     if step == 4:

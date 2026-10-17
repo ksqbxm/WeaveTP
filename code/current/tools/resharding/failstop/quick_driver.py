@@ -170,10 +170,11 @@ def main():
         else:
             if not (summary['all_cases_passed'] and flags and summary['emulate'] == summary['real'] == 'passed'):
                 raise RuntimeError('incomplete emulate/real correctness matrix')
-            pause = summary.get('edp1_rejoin_pause_s')
-            if not isinstance(pause, (int, float)) or not math.isfinite(pause) or pause < 0:
-                raise RuntimeError('missing or invalid edp1_rejoin_pause_s')
-            status['edp1_rejoin_pause_s'] = pause
+            if args.node == 'SL3060':  # The controller node owns the real-mode EDP1 pause metric.
+                pause = summary['edp1_rejoin_pause_s']
+                if not isinstance(pause, (int, float)) or not math.isfinite(pause) or pause < 0:
+                    raise RuntimeError('missing or invalid edp1_rejoin_pause_s')
+                status['edp1_rejoin_pause_s'] = pause
         status['result'] = 'PASS'
     except BaseException:
         status.update(result='FAIL', error=traceback.format_exc())

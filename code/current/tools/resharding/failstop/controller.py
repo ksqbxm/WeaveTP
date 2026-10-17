@@ -209,9 +209,7 @@ def run(config):
             require(supervisor.wait(timeout=30) == 0, "SL3060 supervisor exit failed")
         else:
             require(supervisor.wait(timeout=config["launch_timeout_s"] - 30) == 0, "SL3061 supervisor failed")
-            result["status"] = "passed"
-            if config.get('probe') in TOPOLOGY_PROBES.values():
-                result['metrics'] = bus.wait(['topology_metrics'])[0]
+            result["status"] = "passed"  # Metrics exist only in the controller node's result.
     except BaseException:
         result.update(status="failed", traceback=traceback.format_exc())
         if bus is not None:

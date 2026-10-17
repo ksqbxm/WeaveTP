@@ -226,6 +226,7 @@ class Simulation:
                     thread.join(timeout=9)
             assert not self.errors, '\n'.join(self.errors)
             assert result['status'] == 'passed'
+            return result
 
 
 class ProtocolTests(unittest.TestCase):

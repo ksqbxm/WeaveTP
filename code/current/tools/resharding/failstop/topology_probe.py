@@ -187,7 +187,6 @@ def control(config, bus, journal, check):
     wait([f'done/{s}' for s in range(16)])
     wait([f'clean/{n}' for n in NODES], config['reclaim_timeout_s'] + config['stage_timeout_s'])
     metrics = {'edp1_rejoin_pause_s': max((r['edp1_rejoin_pause_s'] for r in rejoin_timings), default=None)}
-    publish('topology_metrics', metrics)
     return {'status': 'passed', 'mode': config['mode'], 'rounds': config['rounds'],
             'metrics': metrics, 'rejoin_timings': rejoin_timings,
             'epochs': reports, 'rank_maps': maps, 'shared_gpu_mode': config['shared_gpu_mode'],

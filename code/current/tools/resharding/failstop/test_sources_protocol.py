@@ -73,7 +73,7 @@ class SourceProtocolTests(unittest.TestCase):
             stack.enter_context(patch.object(torch.cuda, 'Stream', Stream))
             stack.enter_context(patch.object(torch.cuda, 'stream', lambda _: contextlib.nullcontext()))
             try:
-                sim.run()
+                result = sim.run()
             finally:
                 # A real killed process releases its mmap in the kernel; the CPU
                 # actor replacement must release that attachment explicitly.
@@ -95,8 +95,7 @@ class SourceProtocolTests(unittest.TestCase):
             self.assertTrue(all(r['completed_local'] >= r['submitted_local'] and
                                 r['completion_granularity'] == 'batch' for r in payloads))
             self.assertEqual(sum(r['payload_bytes'] for r in payloads), rounds * 2 * 3 * 2 * 2 * 64 * 8)
-            metrics = sim.get('topology_metrics')
-            self.assertGreaterEqual(metrics['edp1_rejoin_pause_s'], 0)
+            self.assertGreaterEqual(result['metrics']['edp1_rejoin_pause_s'], 0)
             plans = {p.name: json.loads(p.read_text()) for p in (root / 'SL3060').glob('source_plan_*.json')}
             self.assertEqual(set(plans), {f'source_plan_{r}_{p}' + '.json' for r in range(rounds) for p in (1, 2)})
             for plan in plans.values():

@@ -16,20 +16,20 @@ import run_topology
 
 
 class QuickTests(unittest.TestCase):
-    def run_driver(self, *, failure=None, peer='PASS', step=2, child_output=b'', min_free=None):
+    def run_driver(self, *, failure=None, peer='PASS', step=2, child_output=b'', min_free=None, node='SL3060'):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             logs = root / 'kickoff' / 'local'
             logs.mkdir(parents=True)
             run = root / 's2q_cpu'
-            (run / 'SL3060').mkdir(parents=True)
+            (run / node).mkdir(parents=True)
             flags = {'quick_mode': True, 'correctness_only': True, 'shared_gpu_mode': True, 'timing_valid': False, 'accepted': False}
             summary = ({**flags, 'all_checks_passed': True, 'layouts_requested': ['tp2'],
                         'deterministic_step_time_ratio': {} if failure == 'metric' else {'tp2': {'median_ratio': 1.25}}}
                        if step == 5 else
                        {**flags, 'all_cases_passed': True, 'emulate': 'passed', 'real': 'passed',
                         'edp1_rejoin_pause_s': None if failure == 'metric' else 0.5})
-            (run / 'SL3060' / 'summary.json').write_text(json.dumps(summary))
+            (run / node / 'summary.json').write_text(json.dumps(summary))
             state, calls = {'head': 'a' * 40}, []
             def git(argv, **kwargs):
                 args = argv[3:]
@@ -53,7 +53,7 @@ class QuickTests(unittest.TestCase):
             conn, stream = Mock(), Mock()
             with contextlib.ExitStack() as stack:
                 stack.enter_context(patch.dict(sys.modules, fcntl=SimpleNamespace(LOCK_EX=1, LOCK_NB=2, flock=Mock())))
-                stack.enter_context(patch.object(sys, 'argv', ['quick_driver', '--node', 'SL3060', '--sha', 'a' * 40,
+                stack.enter_context(patch.object(sys, 'argv', ['quick_driver', '--node', node, '--sha', 'a' * 40,
                                                               '--repo', str(root), '--log-dir', str(logs), '--step', str(step)] +
                                                  ([] if min_free is None else ['--min-free-disk-gb', str(min_free)])))
                 stack.enter_context(patch.object(subprocess, 'check_output', side_effect=git))
@@ -97,6 +97,23 @@ class QuickTests(unittest.TestCase):
         self.assertEqual(result['result'], 'PASS')
         self.assertEqual(result['step'], 3)
         self.assertEqual(result['edp1_rejoin_pause_s'], 0.5)
+
+    def test_peer_node_passes_without_the_controller_metric(self):
+        # SL3061's suite summary has no metric; only SL3060 computes and validates it.
+        for step in (2, 3, 4):
+            result = self.run_driver(step=step, node='SL3061', failure='metric')
+            self.assertEqual(result['result'], 'PASS')
+            self.assertNotIn('edp1_rejoin_pause_s', result)
+        self.assertEqual(self.run_driver(step=4, node='SL3060', failure='metric')['result'], 'FAIL')
+
+    def test_rejoin_pause_summary_uses_only_the_controller_node_results(self):
+        peer = [{'mode': 'emulate', 'status': 'passed'}, {'mode': 'real', 'status': 'passed'}]
+        self.assertIsNone(run_topology.edp1_rejoin_pause('SL3061', peer))
+        controller = [{'mode': 'emulate', 'status': 'passed', 'metrics': {'edp1_rejoin_pause_s': None}},
+                      {'mode': 'real', 'status': 'passed', 'metrics': {'edp1_rejoin_pause_s': 6.09}}]
+        self.assertEqual(run_topology.edp1_rejoin_pause('SL3060', controller), 6.09)
+        with self.assertRaises(KeyError):
+            run_topology.edp1_rejoin_pause('SL3060', peer)
 
     def test_step4_success_and_all_finalization_failures(self):
         result = self.run_driver(step=4)
