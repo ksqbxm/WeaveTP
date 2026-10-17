@@ -1,6 +1,6 @@
 # Step 5 服务器命令（第一批）
 
-实现 `9405ed65c00d573938032e8c94a0d795258427fb`，快验清单 `98c498b938b587af989802f6a61c2bb879df506b`（`releases.json["step5"]`），见[实现与验证](Step5_实现与验证.md)。本批交付 §2.1 确定性模式合同、显存预检、真实模型的参考/候选/默认模式计时三类 torchrun 与跨模式迁移计划比较工具；**真实模型的 fail→shrink→rejoin→expand、A6/A7、smoke 与多轮尚未实现**，本批 summary 固定 `accepted=false`、`timing_valid=false`、`candidate_kind=fresh_checkpoint_load`、`fail_stop_integration=pending`。上机顺序：先完成 Step 3、Step 4 的快验，再运行本步；本步快验需要两节点各 8 张卡按下方预检表留出显存。本轮没有服务器 GPU 结论。
+审阅修正后的交付。实现 `2fe4a9a0265580a47d0753dfd2b839e4bdb01f05`，快验清单 `f414fdc7c834b7935bc78aa51da74c635c37090a`（`releases.json["step5"]`），见[实现与验证](Step5_实现与验证.md)与[审阅与修正](Step5_审阅与修正.md)。此前的 `9405ed6`/`98c498b` 命令与 `step5_98c498b.bundle` 作废，不再使用。本批交付 §2.1 确定性模式合同、显存预检、真实模型的参考/候选/默认模式计时三类 torchrun 与跨模式迁移计划比较工具；**真实模型的 fail→shrink→rejoin→expand、A6/A7、smoke 与多轮尚未实现**，本批 summary 固定 `accepted=false`、`timing_valid=false`、`candidate_kind=fresh_checkpoint_load`、`fail_stop_integration=pending`。上机顺序：先完成 Step 3、Step 4 的快验，再运行本步；本步快验需要两节点各 8 张卡按下方预检表留出显存。本轮没有服务器 GPU 结论。
 
 ## 1. 快速正确性测试（先完成第 2 节离线导入）
 
@@ -9,16 +9,16 @@
 SL3060：
 
 ```bash
-source /data/ubuntu/lxh/weavetp/env.sh && git -C "$REPO" checkout --detach 98c498b938b587af989802f6a61c2bb879df506b && bash "$REPO/code/current/tools/resharding/failstop/quick_check.sh" --step 5 --node SL3060
+source /data/ubuntu/lxh/weavetp/env.sh && git -C "$REPO" checkout --detach f414fdc7c834b7935bc78aa51da74c635c37090a && bash "$REPO/code/current/tools/resharding/failstop/quick_check.sh" --step 5 --node SL3060
 ```
 
 SL3061：
 
 ```bash
-source /data/ubuntu/lxh/weavetp/env.sh && git -C "$REPO" checkout --detach 98c498b938b587af989802f6a61c2bb879df506b && bash "$REPO/code/current/tools/resharding/failstop/quick_check.sh" --step 5 --node SL3061
+source /data/ubuntu/lxh/weavetp/env.sh && git -C "$REPO" checkout --detach f414fdc7c834b7935bc78aa51da74c635c37090a && bash "$REPO/code/current/tools/resharding/failstop/quick_check.sh" --step 5 --node SL3061
 ```
 
-入口内部再次 source env.sh，按 releases.json 检出固定实现 `9405ed65c00d573938032e8c94a0d795258427fb`；结束后无论成功失败都切回 `f7d555998b45756998465924d733fd70e553d6b4`。握手端口 29839 与 Step 2–4 共用，同一检出目录的各步快验共用一把本地锁，不能同时启动；torchrun 使用 `--standalone` 本机 rendezvous，本节点不能同时有其他 `--standalone` torchrun。checkpoint 路径取 env.sh 的 `CHECKPOINT`，缺省 `/data/models/DeepSeek-V2-Lite-megatron-v2`。快验磁盘门槛仍为 1 GB（`--min-free-disk-gb N` 可调）。
+入口内部再次 source env.sh，按 releases.json 检出固定实现 `2fe4a9a0265580a47d0753dfd2b839e4bdb01f05`；结束后无论成功失败都切回 `f7d555998b45756998465924d733fd70e553d6b4`。握手端口 29839 与 Step 2–4 共用，同一检出目录的各步快验共用一把本地锁，不能同时启动；torchrun 使用 `--standalone` 本机 rendezvous，本节点不能同时有其他 `--standalone` torchrun。checkpoint 路径取 env.sh 的 `CHECKPOINT`，缺省 `/data/models/DeepSeek-V2-Lite-megatron-v2`。快验磁盘门槛仍为 1 GB（`--min-free-disk-gb N` 可调）。
 
 启动后先打印显存预检全表（16 卡角色、约束窗口、需求、本机空闲、是否足够），本次运行所用卡显存不足即在任何 torchrun 之前失败并指出卡号与需求。完成时日志必须包含：
 
@@ -43,12 +43,12 @@ test ! -f "$LATEST/final.json" || cat "$LATEST/final.json"
 
 ## 2. Windows 离线 bundle 生成与上传
 
-本轮已生成并验证：`C:/Users/ksqbx/.codex/worktrees/failstop/step5_98c498b.bundle`，1013765 字节，SHA256 `cca0e78ceb3217b8c5ec14021c240bb522f317eb5d776bf706f8c64f99edb3a4`，配套 `.sha256` 在同目录。基线严格为 `f7d555998b45756998465924d733fd70e553d6b4`，目标为快验清单提交 `98c498b938b587af989802f6a61c2bb879df506b`，包含 Step 1–5 与路由确定性检查的全部提交。
+本轮已生成并验证：`C:/Users/ksqbx/.codex/worktrees/failstop/step5_f414fdc.bundle`，1027179 字节，SHA256 `811e14d5a96162190c1db6f63915cb48f2c6964a754ffd93c8de9462b16c9e5c`，配套 `.sha256` 在同目录。基线严格为 `f7d555998b45756998465924d733fd70e553d6b4`，目标为快验清单提交 `f414fdc7c834b7935bc78aa51da74c635c37090a`，包含 Step 1–5 与路由确定性检查的全部提交。
 
 上传：
 
 ```powershell
-$Bundle = 'C:/Users/ksqbx/.codex/worktrees/failstop/step5_98c498b.bundle'
+$Bundle = 'C:/Users/ksqbx/.codex/worktrees/failstop/step5_f414fdc.bundle'
 Get-FileHash -LiteralPath $Bundle -Algorithm SHA256
 scp $Bundle "$Bundle.sha256" 5090-SL3061:/data/ubuntu/lxh/weavetp/
 ```
@@ -63,10 +63,10 @@ scp -P 43061 $Bundle "$Bundle.sha256" ubuntu@hdssh01.casdao.com:/data/ubuntu/lxh
 
 ```powershell
 $Repo = 'C:/Users/ksqbx/.codex/worktrees/failstop/WeaveTP_代码与实验资料_20260920'
-$Bundle = 'C:/Users/ksqbx/.codex/worktrees/failstop/step5_98c498b_rebuilt.bundle'
+$Bundle = 'C:/Users/ksqbx/.codex/worktrees/failstop/step5_f414fdc_rebuilt.bundle'
 if (Test-Path -LiteralPath $Bundle) { throw '文件已存在，请先核对，不覆盖' }
-git -C $Repo update-ref refs/heads/codex/step5-98c498b 98c498b938b587af989802f6a61c2bb879df506b
-git -C $Repo bundle create $Bundle refs/heads/codex/step5-98c498b '^f7d555998b45756998465924d733fd70e553d6b4'
+git -C $Repo update-ref refs/heads/codex/step5-f414fdc f414fdc7c834b7935bc78aa51da74c635c37090a
+git -C $Repo bundle create $Bundle refs/heads/codex/step5-f414fdc '^f7d555998b45756998465924d733fd70e553d6b4'
 if ($LASTEXITCODE) { throw 'bundle create failed' }
 git -C $Repo bundle verify $Bundle
 if ($LASTEXITCODE) { throw 'bundle verify failed' }
@@ -84,13 +84,13 @@ cd /data
 mountpoint -q /data
 source /data/ubuntu/lxh/weavetp/env.sh
 cd /data/ubuntu/lxh/weavetp
-sha256sum -c step5_98c498b.bundle.sha256
+sha256sum -c step5_f414fdc.bundle.sha256
 test -z "$(git -C "$REPO" status --porcelain --untracked-files=no)"
-git -C "$REPO" bundle verify "$PWD/step5_98c498b.bundle"
-git -C "$REPO" fetch "$PWD/step5_98c498b.bundle" refs/heads/codex/step5-98c498b
-test "$(git -C "$REPO" rev-parse FETCH_HEAD)" = 98c498b938b587af989802f6a61c2bb879df506b
-git -C "$REPO" checkout --detach 98c498b938b587af989802f6a61c2bb879df506b
-scp step5_98c498b.bundle step5_98c498b.bundle.sha256 ubuntu@10.60.14.1:/data/ubuntu/lxh/weavetp/
+git -C "$REPO" bundle verify "$PWD/step5_f414fdc.bundle"
+git -C "$REPO" fetch "$PWD/step5_f414fdc.bundle" refs/heads/codex/step5-f414fdc
+test "$(git -C "$REPO" rev-parse FETCH_HEAD)" = f414fdc7c834b7935bc78aa51da74c635c37090a
+git -C "$REPO" checkout --detach f414fdc7c834b7935bc78aa51da74c635c37090a
+scp step5_f414fdc.bundle step5_f414fdc.bundle.sha256 ubuntu@10.60.14.1:/data/ubuntu/lxh/weavetp/
 ```
 
 ### SL3060：校验、导入
@@ -101,12 +101,12 @@ cd /data
 mountpoint -q /data
 source /data/ubuntu/lxh/weavetp/env.sh
 cd /data/ubuntu/lxh/weavetp
-sha256sum -c step5_98c498b.bundle.sha256
+sha256sum -c step5_f414fdc.bundle.sha256
 test -z "$(git -C "$REPO" status --porcelain --untracked-files=no)"
-git -C "$REPO" bundle verify "$PWD/step5_98c498b.bundle"
-git -C "$REPO" fetch "$PWD/step5_98c498b.bundle" refs/heads/codex/step5-98c498b
-test "$(git -C "$REPO" rev-parse FETCH_HEAD)" = 98c498b938b587af989802f6a61c2bb879df506b
-git -C "$REPO" checkout --detach 98c498b938b587af989802f6a61c2bb879df506b
+git -C "$REPO" bundle verify "$PWD/step5_f414fdc.bundle"
+git -C "$REPO" fetch "$PWD/step5_f414fdc.bundle" refs/heads/codex/step5-f414fdc
+test "$(git -C "$REPO" rev-parse FETCH_HEAD)" = f414fdc7c834b7935bc78aa51da74c635c37090a
+git -C "$REPO" checkout --detach f414fdc7c834b7935bc78aa51da74c635c37090a
 ```
 
 然后运行第 1 节命令。SL3060 全流程无需访问 GitHub。
@@ -136,8 +136,8 @@ cd /data
 mountpoint -q /data
 source /data/ubuntu/lxh/weavetp/env.sh
 test -z "$(git -C "$REPO" status --porcelain --untracked-files=no)"
-git -C "$REPO" checkout --detach 9405ed65c00d573938032e8c94a0d795258427fb
-export NODE=SL3060 SUITE=s5_formal_98c498b_r1
+git -C "$REPO" checkout --detach 2fe4a9a0265580a47d0753dfd2b839e4bdb01f05
+export NODE=SL3060 SUITE=s5_formal_f414fdc_r1
 export RUN="/data/ubuntu/lxh/weavetp/acceptance/step05_model_correctness/$SUITE"
 export ENTRY="$REPO/code/current/tools/resharding/failstop/run_model.py"
 export REPO PYTHON
@@ -155,8 +155,8 @@ cd /data
 mountpoint -q /data
 source /data/ubuntu/lxh/weavetp/env.sh
 test -z "$(git -C "$REPO" status --porcelain --untracked-files=no)"
-git -C "$REPO" checkout --detach 9405ed65c00d573938032e8c94a0d795258427fb
-export NODE=SL3061 SUITE=s5_formal_98c498b_r1
+git -C "$REPO" checkout --detach 2fe4a9a0265580a47d0753dfd2b839e4bdb01f05
+export NODE=SL3061 SUITE=s5_formal_f414fdc_r1
 export RUN="/data/ubuntu/lxh/weavetp/acceptance/step05_model_correctness/$SUITE"
 export ENTRY="$REPO/code/current/tools/resharding/failstop/run_model.py"
 export REPO PYTHON
