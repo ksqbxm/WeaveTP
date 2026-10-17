@@ -27,7 +27,10 @@ from determinism import (
     require_default,
     require_deterministic,
 )
+from model_runtime import HEADS, MegatronRuntime, parameter_hashes
+from model_shards import map_kv_heads
 
+from megatron.core.resharding.mixed_sources import digest
 from tools.resharding.correctness.router_determinism import INT_VIEW
 
 
@@ -38,11 +41,50 @@ def add_args(parser):
     parser = add_live_args(parser)
     group = parser.add_argument_group(title='step 5 model reference')
     group.add_argument('--mr-output', type=Path, required=True)
-    group.add_argument('--mr-role', choices=('reference', 'candidate', 'timing'), required=True)
+    group.add_argument('--mr-role', choices=('reference', 'candidate', 'timing', 'replay'), required=True)
     group.add_argument('--mr-reference', type=Path, help='reference output directory a candidate compares against')
+    group.add_argument('--mr-spec', type=Path, help='replay: specs written by model_checks.write_specs from a fail-stop launch')
     group.add_argument('--mr-decode-steps', type=int, default=4)
     group.add_argument('--mr-request-id', default='step05-a6-r0')
     return parser
+
+
+def replay(runtime, model, args, manifest, hashes, rank):
+    """Independent reference for every fail-stop checkpoint of this layout and coordinate.
+
+    A spec is prefilled from its recorded history, or receives the head mapping of the
+    launch's saved TP2 KV snapshots, and then decodes the recorded tokens; the records
+    use the same identities the launch wrote, so compare_records can judge them.
+    """
+    tp = args.tensor_model_parallel_size
+    coord, ep = rank % tp, rank // tp
+    specs = [s for s in json.loads(args.mr_spec.read_text(encoding='utf-8'))[f'tp{tp}']
+             if s['layout']['coord'] == coord and s['layout']['ep'] == ep]
+    for spec in specs:
+        context = runtime.context()
+        records = []
+        layout = {'tp': tp, 'coord': coord, 'ep': ep}
+
+        def record(logits, step):
+            records.append(bitwise_record(logits, step=step, manifest=manifest, layout=layout,
+                                          history=history(spec['request_id'], spec['prefill_tokens'] + spec['decode_tokens'][:step]),
+                                          parameter_checksum=digest(hashes)))
+        if spec['kv_snapshot'] is None:
+            record(runtime.prefill(model, context, spec['prefill_tokens']), 0)
+        else:
+            snapshot = {}
+            for path in sorted(Path(spec['kv_snapshot']).glob('coord_*.pt')):
+                saved = torch.load(path, weights_only=False)
+                snapshot[saved['coord']] = saved['kv']
+            require(set(snapshot) == {0, 1}, f"{spec['id']}: KV snapshots of both TP2 coordinates are required")
+            runtime.install_kv(context, map_kv_heads(snapshot, source_tp=2, target_tp=tp, target_coord=coord, heads=HEADS),
+                               len(spec['prefill_tokens']))
+        for step, token in enumerate(spec['decode_tokens'], start=1):
+            record(runtime.decode(model, context, token), step)
+        directory = args.mr_output / spec['id']
+        directory.mkdir(parents=True, exist_ok=True)
+        torch.save({'records': records, 'spec': spec, 'manifest': manifest}, directory / f'rank_{rank}.pt')
+    return [s['id'] for s in specs]
 
 
 def parameter_checksum(model):
@@ -121,6 +163,23 @@ def main():
     model.eval()
     iteration, _ = load_checkpoint([model], None, None)
     checksum = parameter_checksum(model)
+    if args.mr_role == 'replay':
+        require(args.mr_spec is not None, 'replay needs --mr-spec')
+        runtime = MegatronRuntime(args, live)
+        replayed = replay(runtime, model, args, manifest, parameter_hashes(model), rank)
+        control = dist.new_group(backend='gloo')
+        counts = [None] * dist.get_world_size()
+        dist.all_gather_object(counts, replayed, group=control)
+        if rank == 0:
+            result = {'role': 'replay', 'layout': layout, 'manifest': manifest, 'replayed': dict(enumerate(counts))}
+            (args.mr_output / 'result.json').write_text(json.dumps(result, indent=2) + '\n')
+            print(json.dumps(result, indent=2), flush=True)
+        dist.barrier(group=control)
+        dist.destroy_process_group()
+        return
+    if args.mr_role == 'reference':
+        # Per-parameter hashes: the fail-stop launch audits every migrated target against this standalone load.
+        (args.mr_output / f'parameters_rank_{rank}.json').write_text(json.dumps(parameter_hashes(model)) + '\n')
     prompt = live._make_tokens(args, args.live_prompt_tokens)[0].tolist()
     # One discarded sequence absorbs lazy CUDA/cuBLAS/NCCL initialisation so the measured
     # per-step times (and the deterministic/default ratio built from them) are steady-state.

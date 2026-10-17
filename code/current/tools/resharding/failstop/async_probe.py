@@ -7,17 +7,23 @@ from dataclasses import asdict
 from pathlib import Path
 
 from async_state import audit_sequence
-from common import NODES, failed_slots, require, topology, write_json
+from common import MODEL_PROBE, NODES, failed_slots, require, topology, write_json
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 from async_topology import AsyncSession as FaultSession
+from model_shards import model_local_orders
 from topology_fixture import toy_local_orders
 
 from megatron.core.failstop import FaultBackend, replica_group_specs
 
+# Step 4 runs the toy mechanism fixture; Step 5 runs the real model on the same gates.
+PROBE_KEYS = {MODEL_PROBE: ('profile_file', 'reference_root', 'deterministic_mode', 'kv_heads', 'expand_delta_steps',
+                            'phase0_steps', 'memory_margin_bytes', 'memory_limit_bytes')}
+
 
 def control(config, bus, journal, check):
     root = Path(config['output'])
+    model = config['probe'] == MODEL_PROBE
 
     def wait(keys, timeout=None):
         return bus.wait(keys, timeout, check)
@@ -39,7 +45,7 @@ def control(config, bus, journal, check):
     for node, report in zip(NODES, preflight):
         require(report['host'].split('.')[0].upper() == node, 'wrong physical host')
         for key in ('commit', 'launch', 'mode', 'rounds', 'port', 'shared_gpu_mode', 'quick_mode', 'correctness_only',
-                    'probe', 'weight_elements', 'memory_budget_bytes'):
+                    'probe') + PROBE_KEYS.get(config['probe'], ('weight_elements', 'memory_budget_bytes')):
             require(report['config'][key] == config[key], f'node config mismatch: {key}')
     rows = topology(dict(zip(NODES, [r['gpus'] for r in preflight])))
     victims = failed_slots(rows)
@@ -49,7 +55,8 @@ def control(config, bus, journal, check):
     initial = dict(zip(range(16), wait([f'cuda/0/{s}' for s in range(16)])))
     publish('cuda_verified/0')
     backend = FaultBackend(config['mode'], fail=lambda *_: None, rejoin=lambda *_: None)
-    session = FaultSession(rows, config['launch'], backend, local_orders=toy_local_orders(rows))
+    session = FaultSession(rows, config['launch'], backend,
+                           local_orders=(model_local_orders if model else toy_local_orders)(rows))
     reports, maps, pauses = {}, {}, []
 
     def validate(round_id, phase):
@@ -134,8 +141,9 @@ def control(config, bus, journal, check):
         if round_id + 1 < config['rounds']:
             session.next_round()
             publish(f'next/{round_id}')
-    publish('baseline')
-    wait([f'baseline_done/{s}' for s in range(16)], config['launch_timeout_s'])
+    if not model:  # The toy mechanism replays its samples for an uncontended baseline.
+        publish('baseline')
+        wait([f'baseline_done/{s}' for s in range(16)], config['launch_timeout_s'])
     publish('finish')
     wait([f'done/{s}' for s in range(16)])
     wait([f'clean/{n}' for n in NODES], config['reclaim_timeout_s'] + config['stage_timeout_s'])

@@ -12,7 +12,7 @@ NODES = ("SL3060", "SL3061")
 TOPOLOGY_PROBES = {2: "step02_topology_rebind", 3: "step03_sources_and_transport"}
 ASYNC_PROBE = "step04_async_driver_and_memory"
 MODEL_PROBE = "step05_model_correctness"
-STEP_PROBES = {**TOPOLOGY_PROBES, 4: ASYNC_PROBE}
+STEP_PROBES = {**TOPOLOGY_PROBES, 4: ASYNC_PROBE, 5: MODEL_PROBE}
 # Step 5 §2.1: every bitwise check runs both sides under --deterministic-mode with this environment.
 DETERMINISTIC_ENVIRONMENT = {"NCCL_ALGO": "Ring", "CUBLAS_WORKSPACE_CONFIG": ":4096:8"}
 SHARED_GPU_NOTE = "与其他任务共享 GPU，仅用于正确性和可行性判断，各阶段耗时不作为正式数据"

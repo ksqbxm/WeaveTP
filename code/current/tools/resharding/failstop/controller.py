@@ -10,6 +10,7 @@ from pathlib import Path
 
 from common import (
     ASYNC_PROBE,
+    MODEL_PROBE,
     NODES,
     TOPOLOGY_PROBES,
     Journal,
@@ -196,7 +197,7 @@ def run(config):
                 for child, record in children.children:
                     require(child.poll() in (None, 0), f"{record['role']} exited {child.returncode}")
 
-            if config.get("probe") == ASYNC_PROBE:
+            if config.get("probe") in (ASYNC_PROBE, MODEL_PROBE):
                 from async_probe import control as async_control
 
                 result = async_control(config, bus, journal, check)
