@@ -98,13 +98,20 @@ def main():
     parser.add_argument('--sha', required=True)
     parser.add_argument('--repo', type=Path, required=True)
     parser.add_argument('--log-dir', type=Path, required=True)
+    parser.add_argument('--single-node', action='store_true',
+                        help='Step 5 only: run both layouts on this node without a peer (six checkpoint loads, 600 s budget)')
     args = parser.parse_args()
-    started, deadline = time.monotonic(), time.monotonic() + 300
+    if args.single_node and args.step != 5:
+        parser.error('--single-node applies to Step 5 only')
+    # Two nodes split the Step 5 layouts within 300 s; one node runs both layouts and needs twice the budget.
+    budget = 600 if args.single_node else 300
+    started, deadline = time.monotonic(), time.monotonic() + budget
     run = args.log_dir
     conn = stream = child = None
     restore = False
     status = {'step': args.step, 'node': args.node, 'quick_mode': True, 'correctness_only': True,
-              'shared_gpu_mode': True, 'timing_valid': False, 'accepted': False, 'result': 'FAIL'}
+              'shared_gpu_mode': True, 'timing_valid': False, 'accepted': False, 'result': 'FAIL',
+              'single_node': args.single_node, 'budget_s': budget}
     # Steps share a checkout, so all quick steps must hold the same local lock.
     lock = (args.repo / '.failstop_quick.lock').open('w')
 
@@ -122,18 +129,23 @@ def main():
         git('checkout', '--detach', args.sha)
         if git('rev-parse', 'HEAD') != args.sha:
             raise RuntimeError('checkout identity mismatch')
-        print('Waiting for peer: timeout=60s; total quick budget=300s', flush=True)
-        status['peer_wait_start'] = time.monotonic()
-        conn, stream, suite = rendezvous(args.node, args.sha, step=args.step)
-        status['peer_wait_s'] = time.monotonic() - status['peer_wait_start']
+        if args.single_node:
+            suite = 's5q_' + datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S') + '_' + uuid.uuid4().hex[:8] + '_single'
+        else:
+            print(f'Waiting for peer: timeout=60s; total quick budget={budget}s', flush=True)
+            status['peer_wait_start'] = time.monotonic()
+            conn, stream, suite = rendezvous(args.node, args.sha, step=args.step)
+            status['peer_wait_s'] = time.monotonic() - status['peer_wait_start']
         run = args.log_dir.parent.parent / suite
         status['suite'], status['run'] = suite, str(run)
         (args.log_dir / 'run_path.txt').write_text(str(run) + '\n')
         entry = args.repo / 'code/current/tools/resharding/failstop' / {
             2: 'run_topology.py', 3: 'run_sources.py', 4: 'run_async.py', 5: 'run_model.py'}[args.step]
-        # Step 5 runs its node's layouts under the deterministic contract; the fault matrix is Steps 2-4.
-        argv = [sys.executable, '-B', str(entry), '--node', args.node, '--suite-id', suite, '--output', str(run),
-                *([] if args.step == 5 else ['--mode', 'both', '--rounds', '1', '--real-launches', '1']),
+        # Step 5 runs layouts under the deterministic contract (split across the two nodes, or both on one
+        # node); the fault matrix is Steps 2-4.
+        extra = {5: ['--layouts', 'tp2,tp4'] if args.single_node else []}.get(
+            args.step, ['--mode', 'both', '--rounds', '1', '--real-launches', '1'])
+        argv = [sys.executable, '-B', str(entry), '--node', args.node, '--suite-id', suite, '--output', str(run), *extra,
                 '--quick', '--correctness-only', '--budget-seconds', str(max(1, deadline - time.monotonic() - 45)),
                 '--min-free-disk-gb', str(args.min_free_disk_gb)]
         runner_log = args.log_dir / 'runner.log'
@@ -198,8 +210,8 @@ def main():
         status['elapsed_s'] = time.monotonic() - started
         if 'peer_wait_start' in status and 'peer_wait_s' not in status:
             status['peer_wait_s'] = time.monotonic() - status['peer_wait_start']
-        if status['elapsed_s'] > 300:
-            status.update(result='FAIL', budget_error='quick launch exceeded 300 seconds')
+        if status['elapsed_s'] > budget:
+            status.update(result='FAIL', budget_error=f'quick launch exceeded {budget} seconds')
         try:
             record = run / args.node if (run / args.node).exists() else args.log_dir
             (record / 'quick_status.json').write_text(json.dumps({**status, 'checks_result': status['result'],
@@ -222,7 +234,7 @@ def main():
             stream.close()
             conn.close()
         if time.monotonic() > deadline:
-            status.update(result='FAIL', budget_error='quick finalization exceeded 300 seconds')
+            status.update(result='FAIL', budget_error=f'quick finalization exceeded {budget} seconds')
         receipt = run.parent / f'{run.name}_{args.node}.receipt.json'
         status['receipt'] = str(receipt)
         receipt.write_text(json.dumps(status, indent=2) + '\n')
@@ -233,7 +245,8 @@ def main():
         if args.step == 5:
             print(f"QUICK CHECK step=5 result={status['result']} (memory preflight, deterministic reference/candidate "
                   f"{status.get('layouts')}, step_time_ratio={status.get('deterministic_step_time_ratio')}) "
-                  f"shared_gpu_mode=true fail_stop_integration=pending logs={run}", flush=True)
+                  f"shared_gpu_mode=true single_node={str(args.single_node).lower()} fail_stop_integration=pending "
+                  f"logs={run}", flush=True)
         else:
             print(f"QUICK CHECK step={args.step} result={status['result']} (emulate shrink/expand, real shrink/expand) shared_gpu_mode=true edp1_rejoin_pause_s={status.get('edp1_rejoin_pause_s')} logs={run}", flush=True)
         lock.close()

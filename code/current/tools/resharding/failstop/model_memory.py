@@ -94,6 +94,9 @@ def preflight(node, seq_length, gpus, run_layouts, query=query_gpus):
                           f"{r['free_bytes'] / GIB:.2f} GiB < required {r['required_free_bytes'] / GIB:.2f} GiB"
                           for r in table if r['sufficient'] is False]
     reference = reference_requirements(seq_length)
+    # The layouts run one after another, so each GPU needs the largest single-layout requirement.
+    run_required = {g['index']: max((reference[l]['required_free_bytes_per_gpu'] for l in run_layouts
+                                     if i < reference[l]['gpus']), default=0) for i, g in enumerate(inventory)}
     run_shortages = []
     for layout in run_layouts:
         need = reference[layout]['required_free_bytes_per_gpu']
@@ -102,6 +105,7 @@ def preflight(node, seq_length, gpus, run_layouts, query=query_gpus):
     return {'node': node, 'seq_length': seq_length, 'inventory': inventory, 'scenario': table,
             'scenario_shortages': scenario_shortages, 'scenario_sufficient_on_this_node': not scenario_shortages,
             'reference_runs': reference, 'run_layouts': list(run_layouts), 'run_shortages': run_shortages,
+            'run_required_free_bytes_per_gpu': run_required,
             'roles': {name: requirement(name, seq_length) for name in (SURVIVOR, REJOIN, HEALTHY)},
             'not_estimated_measured_after_run': UNESTIMATED_ALLOCATIONS,
             'formula': 'router_determinism_driver.estimate_rank_parameter_bytes/estimate_kv_cache_bytes; '
@@ -119,5 +123,7 @@ def format_table(report):
     for layout, row in report['reference_runs'].items():
         lines.append(f"reference run {layout}: {row['gpus']} GPUs x {row['required_free_bytes_per_gpu'] / GIB:.2f} GiB "
                      f"(sequential; not added to the scenario peak)")
+    lines.append(f"this launch ({', '.join(report['run_layouts'])}) requires per GPU: " + ', '.join(
+        f"GPU {index} {need / GIB:.2f} GiB" for index, need in report['run_required_free_bytes_per_gpu'].items() if need))
     lines.append('not estimated, measured after the run: ' + ', '.join(report['not_estimated_measured_after_run']))
     return '\n'.join(lines)

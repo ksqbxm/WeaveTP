@@ -192,11 +192,17 @@ class MemoryTests(unittest.TestCase):
         self.assertFalse(report['scenario_sufficient_on_this_node'])
         self.assertEqual(len(report['run_shortages']), 1)
         self.assertIn('tp2 run: GPU 2', report['run_shortages'][0])
+        self.assertEqual(set(report['run_required_free_bytes_per_gpu'].values()), {W2 + 17694720 + 2 * GIB, 0})
         text = model_memory.format_table(report)
         self.assertIn('NO', text)
         self.assertIn('reference run tp4: 8 GPUs', text)
+        self.assertIn('this launch (tp2) requires per GPU: GPU 0 9.94 GiB', text)
         clean = model_memory.preflight('SL3060', 128, range(8), ['tp4'], query=lambda _: inventory())
         self.assertTrue(clean['scenario_sufficient_on_this_node'] and not clean['run_shortages'])
+        # One node running both layouts: the first four GPUs need the TP2 run, the rest only the TP4 run.
+        single = model_memory.preflight('SL3061', 128, range(8), ['tp2', 'tp4'], query=lambda _: inventory())
+        self.assertEqual([single['run_required_free_bytes_per_gpu'][i] for i in (0, 3, 4, 7)],
+                         [W2 + 17694720 + 2 * GIB] * 2 + [W4 + 8847360 + 2 * GIB] * 2)
         with self.assertRaisesRegex(RuntimeError, 'eight GPUs'):
             model_memory.preflight('SL3060', 128, range(4), ['tp2'], query=lambda _: inventory()[:4])
 
@@ -297,6 +303,8 @@ class DriverTests(unittest.TestCase):
     def test_shell_entry_maps_step5(self):
         script = Path(__file__).with_name('quick_check.sh').read_text(encoding='utf-8')
         self.assertIn('5) NAME=step05_model_correctness', script)
+        self.assertIn('--single-node) SINGLE_NODE=--single-node', script)
+        self.assertIn('[[ -z "$SINGLE_NODE" || "$STEP" == 5 ]]', script)
 
 
 if __name__ == '__main__':

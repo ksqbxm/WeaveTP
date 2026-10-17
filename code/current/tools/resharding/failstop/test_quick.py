@@ -16,21 +16,31 @@ import run_topology
 
 
 class QuickTests(unittest.TestCase):
-    def run_driver(self, *, failure=None, peer='PASS', step=2, child_output=b'', min_free=None, node='SL3060'):
+    def run_driver(self, *, failure=None, peer='PASS', step=2, child_output=b'', min_free=None, node='SL3060',
+                   single_node=False):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             logs = root / 'kickoff' / 'local'
             logs.mkdir(parents=True)
-            run = root / 's2q_cpu'
-            (run / node).mkdir(parents=True)
+            layouts = ['tp2', 'tp4'] if single_node else ['tp2']
             flags = {'quick_mode': True, 'correctness_only': True, 'shared_gpu_mode': True, 'timing_valid': False, 'accepted': False}
-            summary = ({**flags, 'all_checks_passed': True, 'layouts_requested': ['tp2'],
-                        'deterministic_step_time_ratio': {} if failure == 'metric' else {'tp2': {'median_ratio': 1.25}}}
+            summary = ({**flags, 'all_checks_passed': True, 'layouts_requested': layouts,
+                        'deterministic_step_time_ratio': {} if failure == 'metric' else {l: {'median_ratio': 1.25} for l in layouts}}
                        if step == 5 else
                        {**flags, 'all_cases_passed': True, 'emulate': 'passed', 'real': 'passed',
                         'edp1_rejoin_pause_s': None if failure == 'metric' else 0.5})
-            (run / node / 'summary.json').write_text(json.dumps(summary))
             state, calls = {'head': 'a' * 40}, []
+
+            def rendezvous(*_, **__):
+                self.assertFalse(single_node, 'a single-node launch must not wait for a peer')
+                return conn, stream, 's2q_cpu'
+
+            def popen(argv, **kwargs):
+                # Only the runner's argv names the suite of a single-node launch (no rendezvous assigns it).
+                run = root / argv[argv.index('--suite-id') + 1]
+                (run / node).mkdir(parents=True)
+                (run / node / 'summary.json').write_text(json.dumps(summary))
+                return child
             def git(argv, **kwargs):
                 args = argv[3:]
                 calls.append(args)
@@ -55,10 +65,11 @@ class QuickTests(unittest.TestCase):
                 stack.enter_context(patch.dict(sys.modules, fcntl=SimpleNamespace(LOCK_EX=1, LOCK_NB=2, flock=Mock())))
                 stack.enter_context(patch.object(sys, 'argv', ['quick_driver', '--node', node, '--sha', 'a' * 40,
                                                               '--repo', str(root), '--log-dir', str(logs), '--step', str(step)] +
-                                                 ([] if min_free is None else ['--min-free-disk-gb', str(min_free)])))
+                                                 ([] if min_free is None else ['--min-free-disk-gb', str(min_free)]) +
+                                                 (['--single-node'] if single_node else [])))
                 stack.enter_context(patch.object(subprocess, 'check_output', side_effect=git))
-                popen = stack.enter_context(patch.object(subprocess, 'Popen', return_value=child))
-                stack.enter_context(patch.object(quick_driver, 'rendezvous', return_value=(conn, stream, 's2q_cpu')))
+                popen = stack.enter_context(patch.object(subprocess, 'Popen', side_effect=popen))
+                stack.enter_context(patch.object(quick_driver, 'rendezvous', side_effect=rendezvous))
                 stack.enter_context(patch.object(quick_driver, 'send'))
                 stack.enter_context(patch.object(quick_driver, 'receive', return_value={'result': peer}))
                 if failure == 'package':
@@ -75,9 +86,11 @@ class QuickTests(unittest.TestCase):
                 self.assertEqual(float(argv[argv.index('--min-free-disk-gb') + 1]), 1.0 if min_free is None else min_free)
                 self.assertEqual(('--mode' in argv, argv[2].endswith({5: 'run_model.py', 4: 'run_async.py', 3: 'run_sources.py',
                                                                       2: 'run_topology.py'}[step])), (step != 5, True))
+                self.assertEqual('--layouts' in argv and argv[argv.index('--layouts') + 1] == 'tp2,tp4', single_node)
                 self.assertEqual((logs / 'runner.log').read_bytes(), child_output)
             else:
                 self.assertFalse(any(c[0] == 'checkout' for c in calls))
+            result['output'] = output.getvalue()
             return result
 
     def test_pass_requires_restoration_packaging_and_both_modes(self):
@@ -131,6 +144,22 @@ class QuickTests(unittest.TestCase):
             self.assertEqual(self.run_driver(step=5, failure=failure)['result'], 'FAIL')
         self.assertIn('deterministic-contract', self.run_driver(step=5, failure='metric')['error'])
         self.assertIn('error.txt', self.run_driver(step=5, failure='suite')['error'])
+        self.assertIn('single_node=false', result['output'])
+
+    def test_step5_single_node_runs_both_layouts_without_a_peer(self):
+        result = self.run_driver(step=5, single_node=True)
+        self.assertEqual((result['result'], result['single_node'], result['budget_s'], result['layouts']), ('PASS', True, 600, ['tp2', 'tp4']))
+        self.assertTrue(result['suite'].startswith('s5q_') and result['suite'].endswith('_single'))
+        self.assertNotIn('peer_wait_s', result)
+        self.assertIn('single_node=true', result['output'])
+        self.assertEqual(self.run_driver(step=5, single_node=True, failure='metric')['result'], 'FAIL')
+        self.assertEqual(self.run_driver(step=5)['budget_s'], 300)
+        with patch.object(sys, 'argv', ['quick_driver', '--node', 'SL3060', '--sha', 'a' * 40, '--repo', 'r', '--log-dir', 'l',
+                                        '--step', '4', '--single-node']), \
+                patch.dict(sys.modules, fcntl=SimpleNamespace(LOCK_EX=1, LOCK_NB=2, flock=Mock())), \
+                contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaises(SystemExit):
+                quick_driver.main()
         self.assertEqual(self.run_driver(step=5, peer='FAIL')['result'], 'FAIL')
 
     def test_preflight_failure_reports_runner_error_and_disk_threshold(self):
