@@ -107,6 +107,6 @@ def select_implementation(preference, *, triton_kernel=None, probe=None, rtol=1e
             return {'decode': 'torch_splitkv', 'reason': f'triton_self_check_failed:{error:.3e}'}
     except Exception as failure:  # compile or launch failure
         if preference == 'triton':
-            raise
+            raise RuntimeError(f'Triton requested but the kernel failed: {type(failure).__name__}: {failure}') from failure
         return {'decode': 'torch_splitkv', 'reason': f'triton_failed:{type(failure).__name__}:{failure}'}
     return {'decode': 'triton', 'reason': 'self_check_passed', 'max_relative_error': error}

@@ -227,16 +227,12 @@ def layer_b3(args, root, deadline):
                           'attention': 'torch', 'growth': {'shrink': 0, 'expand': 2}, 'geometry': GEOMETRY, 'capacity_tokens': None}}
     print(f"Starting {case['launch']} mode={case['mode']} (serving worker, {args.b3_requests} toy requests)", flush=True)
     outcome = run_case(config)
-    record = {'launch': case['launch'], 'mode': case['mode'], 'status': outcome['status'], 'passed': outcome['status'] == 'passed',
-              'output': config['output']}
-    controller_result = Path(config['output']) / 'controller_result.json'
-    if controller_result.exists():
-        result = json.loads(controller_result.read_text(encoding='utf-8'))
-        record['metrics'] = result.get('metrics')
-        record['files'] = {name: str(Path(config['output']) / name) for name in ('result.json', 'check.json', 'events_actual.json')
-                           if (Path(config['output']) / name).exists()}
-        if args.node == NODES[0]:
-            record['passed'] = record['passed'] and bool(result.get('metrics')) and result['metrics']['check_passed'] and result['metrics']['kv_check_passed']
+    # The gate (SL3060) owns the metrics and the result files; SL3061's controller result carries the status only.
+    result = json.loads((Path(config['output']) / 'controller_result.json').read_text(encoding='utf-8'))
+    metrics = result['metrics'] if args.node == NODES[0] else None
+    record = {'launch': case['launch'], 'mode': case['mode'], 'status': outcome['status'], 'output': config['output'], 'metrics': metrics,
+              'files': {name: str(Path(config['output']) / name) for name in ('result.json', 'check.json', 'events_actual.json')} if metrics else None,
+              'passed': outcome['status'] == 'passed' and (metrics is None or (metrics['check_passed'] and metrics['kv_check_passed']))}
     return record
 
 

@@ -94,7 +94,7 @@ def perform_switch(switch, *, control, events, switcher, validation, step, now, 
     compact = switcher.compact(direction)
     mark('compact_done', **compact)
     outcome.base = switcher.base_wave(direction, decode_fn)
-    outcome.overlap_steps = outcome.base.get('overlap_steps', 0)
+    outcome.overlap_steps = outcome.base['overlap_steps']
     mark('base_wave_end', **{k: v for k, v in outcome.base.items() if k != 'records'})
     outcome.audit = switcher.audit(direction)
     mark('base_done', **outcome.audit)

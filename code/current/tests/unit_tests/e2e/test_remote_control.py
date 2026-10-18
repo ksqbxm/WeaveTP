@@ -10,13 +10,7 @@ from tools.resharding.e2e import controller as ctl
 from tools.resharding.e2e import failstop_adapter, remote_control, requests_io
 from tools.resharding.e2e.decode_policy import Greedy
 from tools.resharding.e2e.fake_backend import FakeBackend
-from tools.resharding.e2e.live_runtime import (
-    DomainRun,
-    Driver,
-    FakeClock,
-    LocalComm,
-    run_until_done,
-)
+from tools.resharding.e2e.live_runtime import DomainRun, Driver, FakeClock, LocalComm
 from tools.resharding.e2e.plan_executor import BitwiseValidation
 from tools.resharding.e2e.timeline import SwitchEventWriter, TimelineWriter, read_jsonl
 from tools.resharding.e2e.toy_inputs import write_toy_inputs
@@ -50,7 +44,7 @@ def test_failstop_cycle_over_the_remote_control_channel(tmp_path):
             hook = hooks = failstop_adapter.FailstopHooks(control, normal, degraded, edp0_replicas=replicas)
         run = DomainRun(domain, replicas, LocalComm(domain, tuple(normal.replicas[replicas[0]]['ranks'])), backend, Greedy(), None,
                         TimelineWriter(tmp_path / f'timeline_{domain}.jsonl'), SwitchEventWriter(tmp_path / f'events_{domain}.jsonl'),
-                        control, entry.validation_factories(BitwiseValidation(True), lambda r: 400), {'shrink': 2, 'expand': 2},
+                        control, BitwiseValidation(True), {'shrink': 2, 'expand': 2},
                         {'mode': 'evict', 'budget': ctl.SWITCH_BUDGET_BYTES}, clock, layout=4, hooks=hook,
                         domain_replicas=(lambda ledger, ids=replicas: tuple(r for r in ids if r in ledger.replicas)))
         drivers.append(Driver(run))

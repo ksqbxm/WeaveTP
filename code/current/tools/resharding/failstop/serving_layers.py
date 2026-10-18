@@ -36,7 +36,6 @@ from model_runtime import MegatronRuntime, prefill_tokens
 from tools.resharding.e2e import controller as ctl
 from tools.resharding.e2e.block_backend import BlockBackend
 from tools.resharding.e2e.decode_policy import Greedy, TeacherForcing
-from tools.resharding.e2e.factories import RuntimeFactories
 from tools.resharding.e2e.live_runtime import (
     ControlNode,
     DomainRun,
@@ -161,10 +160,9 @@ def serve(forward, args, requests, *, tp, replica, group, policy, b_max, capacit
                                attention=args.sl_attention)
     reference = {i: requests[seq]['output'] for i, seq in enumerate(chosen)}
     chosen_policy = Greedy() if policy == 'greedy' else TeacherForcing(reference)
-    factories = RuntimeFactories(None, None, None, None, None, None, ToleranceValidation(False), lambda r: capacity, names={'backend': 'block'})
     run = DomainRun('all', tuple(sorted(rank_map.replicas)), LockstepComm('all', tuple(range(world)), group), backend, chosen_policy, None,
                     TimelineWriter(out / f'timeline_{tag}_rank{dist.get_rank()}.jsonl'), SwitchEventWriter(out / f'events_{tag}_rank{dist.get_rank()}.jsonl'),
-                    control, factories, {}, None, clock, layout=tp, local_replicas=(replica,))
+                    control, ToleranceValidation(False), {}, None, clock, layout=tp, local_replicas=(replica,))
     run_until_idle([Driver(run)], 10_000)
     require(controller.idle() and len(controller.done) == len(instances), f'{tag}: requests left unfinished')
     return backend, run, {i: seq for i, seq in enumerate(chosen)}
@@ -207,8 +205,7 @@ def layer_b1(model, runtime, args, requests, group, live):
     batched, run, batched_map = serve(forward, args, requests, tp=tp, replica=replica, group=group, policy='teacher_forcing', b_max=len(requests),
                                       capacity=10 ** 9, out=out, tag='batched')
     report = {'rank': rank, 'replica': replica, 'attention_impl': batched.attention_impl, 'static_steps': len(static)}
-    served = [i for i, seq in alone_map.items() if seq == 0 and any(0 in e['seqs'] for e in alone.trace)]
-    if served:  # this replica served the probe
+    if alone.trace:  # this rank's replica served the probe
         report['alone'] = compare_logits(probe_logits(alone, alone_map, 0), static)
         report['batched'] = compare_logits(probe_logits(batched, batched_map, 0), static)
     decode_alone = [e['seconds'] for e in alone.trace if e['mode'] == 'decode']

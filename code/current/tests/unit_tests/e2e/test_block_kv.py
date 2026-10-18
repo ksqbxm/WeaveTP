@@ -158,18 +158,17 @@ def test_paged_reference_splitkv_and_selection():
     assert torch.allclose(fallback, reference, atol=1e-5, rtol=1e-5)
     assert attention_paged.select_implementation('torch') == {'decode': 'torch_splitkv', 'reason': 'requested'}
     auto = attention_paged.select_implementation('auto', triton_kernel=None)
-    assert auto['decode'] == 'torch_splitkv' and auto['reason'].startswith('triton_')
-    if attention_paged.HAVE_TRITON:
+    assert auto == {'decode': 'torch_splitkv', 'reason': 'triton_kernel_unavailable' if attention_paged.HAVE_TRITON else 'triton_not_importable'}
+    with pytest.raises(RuntimeError):  # requested but absent: no kernel (servers) or no Triton (here)
+        attention_paged.select_implementation('triton', triton_kernel=None)
+    if attention_paged.HAVE_TRITON:  # the self-check path, exercised with stand-in kernels
         probe = lambda: (q, pool, 1, step['block_tables'], step['lengths'], scale)
         bad = attention_paged.select_implementation('auto', triton_kernel=lambda *a: reference + 1.0, probe=probe)
         assert bad['decode'] == 'torch_splitkv' and bad['reason'].startswith('triton_self_check_failed')
         good = attention_paged.select_implementation('auto', triton_kernel=lambda *a: reference, probe=probe)
         assert good['decode'] == 'triton'
-        with pytest.raises(RuntimeError):
+        with pytest.raises(RuntimeError, match='kernel failed'):
             attention_paged.select_implementation('triton', triton_kernel=lambda *a: 1 / 0, probe=probe)
-    else:
-        with pytest.raises(RuntimeError, match='not importable'):
-            attention_paged.select_implementation('triton')
 
 
 def test_compaction_scratch_block_stays_outside_the_destination_range():

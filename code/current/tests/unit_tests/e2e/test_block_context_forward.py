@@ -1,6 +1,7 @@
 """The three Megatron hooks as BlockKVContext methods: block-diagonal prefill, paged decode and dummy forwards
 reproduce dense attention over each request's own history, on CPU with a toy attention layer."""
 
+import pytest
 import torch
 
 from tools.resharding.e2e import attention_paged, block_kv, paged_decode_triton
@@ -83,11 +84,17 @@ def test_prefill_decode_and_dummy_match_dense_attention():
     assert all(torch.equal(a, s[0]) for a, s in zip(before, [s for s in context.pool.segments if s is not None]))
 
 
-def test_triton_kernel_is_absent_here_and_the_selection_falls_back():
-    assert not paged_decode_triton.HAVE_TRITON and paged_decode_triton.KERNEL is None
+def test_the_stub_kernel_is_never_selected_and_the_reason_is_recorded():
+    """This round ships no kernel: `auto` lands on torch split-KV whether Triton is importable (servers) or not (here)."""
+    assert paged_decode_triton.KERNEL is None
     pool = block_kv.BlockPool(**POOL)
     record = attention_paged.select_implementation('auto', triton_kernel=paged_decode_triton.KERNEL,
                                                    probe=lambda: (torch.zeros(1, NP, DK), pool, 0, torch.zeros(1, 1, dtype=torch.int64),
                                                                   torch.ones(1, dtype=torch.int64), SCALE))
-    assert record == {'decode': 'torch_splitkv', 'reason': 'triton_not_importable'}
+    expected = 'triton_kernel_unavailable' if attention_paged.HAVE_TRITON else 'triton_not_importable'
+    assert record == {'decode': 'torch_splitkv', 'reason': expected}
+    with pytest.raises(RuntimeError):
+        attention_paged.select_implementation('triton', triton_kernel=paged_decode_triton.KERNEL)
+    with pytest.raises(NotImplementedError):
+        paged_decode_triton.paged_decode_triton(None, pool, 0, None, None, SCALE)
     assert attention_paged.select_implementation('torch') == {'decode': 'torch_splitkv', 'reason': 'requested'}

@@ -214,7 +214,7 @@ def main():
             elif args.layer == 'b2':
                 status['b2'] = {k: layer[k] for k in ('in_process_bitwise', 'cross_process_tp2_bitwise', 'forwards', 'crossed_block_boundary')}
             else:
-                status['b3'] = {'mode': layer['mode'], 'metrics': layer.get('metrics'), 'files': layer.get('files')}
+                status['b3'] = {'mode': layer['mode'], 'metrics': layer['metrics'], 'files': layer['files']}
         else:
             if not (summary['all_cases_passed'] and flags and summary['emulate'] == summary['real'] == 'passed'):
                 raise RuntimeError('incomplete emulate/real correctness matrix')

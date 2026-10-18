@@ -35,7 +35,6 @@ from tools.resharding.e2e import controller as ctl
 from tools.resharding.e2e import failstop_adapter, remote_control, requests_io
 from tools.resharding.e2e.block_backend import BlockBackend
 from tools.resharding.e2e.decode_policy import POLICIES
-from tools.resharding.e2e.factories import RuntimeFactories
 from tools.resharding.e2e.failstop_adapter import REPLICA_IDS
 from tools.resharding.e2e.live_runtime import DomainRun, Driver, GlooComm, WallClock
 from tools.resharding.e2e.plan_executor import BitwiseValidation
@@ -170,11 +169,9 @@ class ServingWorker(ModelWorker):
         policy = POLICIES[self.serving['decode_policy']]
         policy = policy() if self.serving['decode_policy'] == 'greedy' else policy({i.seq: self.requests[i.id]['output_token_ids'] for i in self.instances})
         validation = BitwiseValidation(self.config['deterministic_mode'])
-        factories = RuntimeFactories(None, None, None, None, None, None, validation, lambda replica: 0,
-                                     names={'backend': 'block', 'control': 'remote', 'transport': 'mixed_transport.execute'})
         run = DomainRun(self.domain, self.replicas, comm, backend, policy, None,
                         TimelineWriter(self.root / f'timeline_{self.domain}_{self.slot}.jsonl'),
-                        SwitchEventWriter(self.root / f'switch_events_{self.domain}_{self.slot}.jsonl'), control, factories,
+                        SwitchEventWriter(self.root / f'switch_events_{self.domain}_{self.slot}.jsonl'), control, validation,
                         dict(self.serving['growth']), {'mode': 'evict', 'budget': ctl.SWITCH_BUDGET_BYTES}, WallClock(), step=step,
                         layout=tp, hooks=hooks, local_replicas=(self.replica_id,), domain_replicas=lambda ledger, ids=self.replicas: ids)
         self.driver = Driver(run)
@@ -290,8 +287,9 @@ class ServingWorker(ModelWorker):
         tokens = sum(meta['lengths'].values())
         budget = self.admission(4, tokens + self.serving['max_delta_steps'])
         target = self.runtime.build(4, self.pack['target'], load=False)
-        backend = self.backend if self.backend is not None else self.make_backend(4)  # a real victim has no backend yet
-        target_context = backend.new_context(4)
+        # Survivors keep serving on their TP2 context and receive into a new one; a victim's backend is already
+        # bound to an empty TP4 context, which is its target.
+        target_context = self.backend.new_context(4) if source_context is not None else self.backend.context
         self.clone_tables(target_context, meta)
         moves = self.kv_moves(meta, 'A')
         kv_sources, kv_targets = self.kv_shards(moves, None if source_context is None else source_context.pool, target_context.pool)
@@ -394,6 +392,7 @@ class ServingWorker(ModelWorker):
         return target, target_context, handoff
 
     def join_as_victim(self):
+        self.make_backend(4)  # an empty TP4 context: the expand target
         target, context, handoff = self.join_expand()
         self.start_serving(target, 4, context=context, step=handoff['step'], rows=handoff['rows'], histories=handoff['histories'],
                            last=handoff['last'])
@@ -412,11 +411,11 @@ class ServingWorker(ModelWorker):
             self.bus.put(f'summary/{self.domain}/{self.replica_id}', {
                 'request_log': {str(k): v for k, v in run.request_log.items()},
                 'switches': [{'index': s.index, 'direction': s.direction, 'trigger': s.trigger, 'overlap_steps': s.overlap_steps,
-                              'evictions': s.evictions, 'bytes': {**s.base.get('bytes', {}), **s.delta.get('bytes', {})},
+                              'evictions': s.evictions, 'bytes': {**s.base['bytes'], **s.delta['bytes']},
                               'validation': s.validation, 'audit': s.audit, 'milestones': {k: v['t'] for k, v in s.milestones.items()}}
                              for s in run.switches],
                 'timeline': read_jsonl(run.timeline.path), 'failstop_events': run.failstop_events, 'generated': run.generated,
-                'completed': run.completed, 'steps': run.step, 'attention_impl': self.backend.attention_impl,
+                'completed': run.completed, 'steps': run.step, 'attention_impl': self.backend.attention_impl, 'kv_checks': self.kv_checks,
                 'layout': run.layout, 'replayed_tokens': run.hooks.replayed_tokens if run.hooks is not None else 0})
 
     def run_worker(self):

@@ -83,7 +83,7 @@ def control(config, bus, journal, check):
     # ---- the control node --------------------------------------------------------------------------------------
     controller = ctl.AdmissionController(ctl.Ledger(rank_map_from_rows(session.rank_map())), instances,
                                          capacity=lambda replica: 0, b_max=serving['b_max'], barrier=workload['arrival'] == 'phased')
-    fixed = serving.get('capacity_tokens')
+    fixed = serving['capacity_tokens']
 
     def base_capacity(replica):
         return fixed if fixed else ctl.effective_capacity(controller.ledger.replicas[replica].tp)
@@ -242,10 +242,10 @@ def write_outputs(root, config, instances, workload, summaries, times, trigger, 
     edp0 = leaders['EDP0']
     duration = sum(phases.values())
     events_s = {**edp0['failstop_events'], **{k: v - times['serving_start'] for k, v in times.items() if isinstance(v, float)}}
-    kv_checks = [s['validation'] for s in edp0['switches'] if s['direction'] == 'expand']
+    kv_checks = [c for s in summaries.values() for c in s['kv_checks']]  # every EDP0 rank that received KV
     failstop = {'events_s': events_s, 'replay_prefill_tokens': edp0['replayed_tokens'],
                 'peak_eviction': [e for s in switches for e in s['evictions']],
-                'expand_kv_check_passed': all(v.get('passed') for v in kv_checks) and bool(kv_checks),
+                'expand_kv_check_passed': bool(kv_checks) and all(c['passed'] for c in kv_checks),
                 'tfs_breakdown': {'fault_to_transition_s': times['transition/0/1'] - times['fail'],
                                   'world_rebuild_s': times['build/0/1'] - times['transition/0/1'],
                                   'weights_and_cutover_s': times['shrink_done'] - times['build/0/1'],

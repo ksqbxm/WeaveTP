@@ -170,7 +170,7 @@ class DomainRun:
     timeline: TimelineWriter
     events: object
     control: ControlNode
-    factories: object
+    validation: object  # cutover validation policy (.enabled / .validate)
     growth: dict
     peak: dict | None
     clock: object
@@ -321,7 +321,7 @@ class Driver:
 
         switcher = run.backend.switcher(run, current.direction)
         outcome = plan_executor.perform_switch(current, control=run.control, events=run.events, switcher=switcher,
-                                               validation=run.factories.validate_cutover, step=lambda: run.step, now=run.clock,
+                                               validation=run.validation, step=lambda: run.step, now=run.clock,
                                                peak=run.peak, decode_fn=decode_fn, growth=run.growth.get(current.direction, 0))
         run.switches.append(outcome)
         if run.executor is not None:
@@ -380,15 +380,3 @@ def run_until_idle(drivers, max_steps):
             return True
     raise RuntimeError(f'run did not finish within {max_steps} steps')
 
-
-def run_until_done(drivers, max_steps):
-    """Remote control: every domain steps until its decision says done."""
-    pending = list(drivers)
-    for _ in range(max_steps):
-        for driver in list(pending):
-            if driver.step().phase == 'done':
-                driver.run.timeline.close()
-                pending.remove(driver)
-        if not pending:
-            return True
-    raise RuntimeError(f'run did not finish within {max_steps} steps')

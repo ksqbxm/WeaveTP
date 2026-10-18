@@ -89,7 +89,7 @@ def fake_run(args):
         backend = FakeBackend(rank_map, {i.seq: requests[i.id]['prompt_token_ids'] for i in instances})
         run = DomainRun('all', tuple(sorted(rank_map.replicas)), LocalComm('all', tuple(range(args.e2e_world_size))), backend,
                         policy, executor, TimelineWriter(out / 'timeline.jsonl'), SwitchEventWriter(out / 'switch_events.jsonl'),
-                        control, validation_factories(validation, capacity), ctl.GROWTH_STEPS,
+                        control, validation, ctl.GROWTH_STEPS,
                         {'mode': 'drain', 'budget': ctl.SWITCH_BUDGET_BYTES}, clock, layout=args.e2e_tp)
         drivers = [Driver(run)]
         hooks = None
@@ -111,17 +111,12 @@ def fake_run(args):
         for domain, replicas, exe, hook in (('EDP0', (0, 1), executor, hooks), ('EDP1', (2, 3), None, None)):
             run = DomainRun(domain, replicas, LocalComm(domain, tuple(normal.replicas[replicas[0]]['ranks'])), backend, policy, exe,
                             TimelineWriter(out / f'timeline_{domain}.jsonl'), SwitchEventWriter(out / f'switch_events_{domain}.jsonl'),
-                            control, validation_factories(validation, capacity), {'shrink': 2, 'expand': 2},
+                            control, validation, {'shrink': 2, 'expand': 2},
                             {'mode': 'evict', 'budget': ctl.SWITCH_BUDGET_BYTES}, clock, layout=4, hooks=hook,
                             domain_replicas=(lambda ledger, ids=replicas: tuple(r for r in ids if r in ledger.replicas)))
             drivers.append(Driver(run))
     run_until_idle(drivers, args.e2e_max_steps)
     return write_outputs(out, args, drivers, instances, requests, hooks)
-
-
-def validation_factories(validation, capacity):
-    from tools.resharding.e2e.factories import RuntimeFactories
-    return RuntimeFactories(None, None, None, None, None, None, validation, capacity, names={'backend': 'fake'})
 
 
 def failstop_rows(degraded):
@@ -155,7 +150,7 @@ def write_outputs(out, args, drivers, instances, requests, hooks):
         key = row['phase'] if row['kind'] == 'step' else 'switching'
         phases[key] = phases.get(key, 0.0) + (row['step_time'] if row['kind'] == 'step' else row['seconds'])
     switches = [{'index': s.index, 'direction': s.direction, 'trigger': s.trigger, 'overlap_steps': s.overlap_steps,
-                 'evictions': s.evictions, 'bytes': {**s.base.get('bytes', {}), **s.delta.get('bytes', {})},
+                 'evictions': s.evictions, 'bytes': {**s.base['bytes'], **s.delta['bytes']},
                  'validation': s.validation, 'audit': s.audit, 'milestones': {k: v['t'] for k, v in s.milestones.items()}}
                 for d in drivers for s in d.run.switches]
     failstop = None
@@ -169,7 +164,7 @@ def write_outputs(out, args, drivers, instances, requests, hooks):
     result = build_result(method=args.e2e_method, workload_id='fake', segments_run=[i.segment for i in instances[:1]] if instances else [],
                           request_rows=rows, switches=switches, phase_durations_s=phases, attention_impl={'decode': 'fake', 'reason': 'fake backend'},
                           config={'run_mode': args.e2e_run_mode, 'experiment': args.e2e_experiment, 'decode_policy': args.e2e_decode_policy,
-                                  'backend': 'fake', 'validate_cutover': drivers[0].run.factories.validate_cutover.enabled,
+                                  'backend': 'fake', 'validate_cutover': drivers[0].run.validation.enabled,
                                   'timing_valid': False}, duration_s=duration, logical_steps=steps, failstop=failstop)
     write_result(out / 'result.json', result)
     report = check(result, timeline_rows)

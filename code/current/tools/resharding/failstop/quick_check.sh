@@ -1,13 +1,34 @@
 #!/usr/bin/env bash
+# Five-minute quick correctness entry for one step (see documents/failstop_20261017/StepN_服务器命令.md).
 set -euo pipefail
-cd /data
-mountpoint -q /data
-source /data/ubuntu/lxh/weavetp/env.sh
-# The env.sh interpreter leads PATH (SL3060 otherwise resolves the base environment's python/torchrun).
-export PATH="$(dirname "$PYTHON"):$PATH"
+
+usage() {
+  cat <<'USAGE'
+usage: quick_check.sh --step N --node SL3060|SL3061 [--single-node] [--layer a|b1|b2|b3] [--mode emulate|real]
+                      [--profile-file PATH] [--reference-root DIR] [--min-free-disk-gb N]
+
+  --step N            2 (topology), 3 (sources/transport), 4 (async driver), 5 (model correctness), 6 (serving)
+  --node              this node; two-node steps are started on both nodes within 60 seconds
+  --single-node       run on this node alone: Step 5 (both layouts), Step 6 layers a, b1, b2 (required there)
+  --layer             Step 6 only: a = fake backend + CPU tests (default), b1/b2 = real model on this node,
+                      b3 = two-node fail-stop end to end (never with --single-node)
+  --mode              Step 6 b3 fault mode (default emulate)
+  --profile-file      Step 6 b3: frozen Step 3 profile.json, same path on both nodes
+  --reference-root    Step 6 b3: run_model.py output root with tp2/ and tp4/ reference hashes (read on SL3061)
+  --min-free-disk-gb  /data free-space threshold for the quick run (default 1)
+USAGE
+}
+
+fail() {
+  echo "quick_check.sh: $1" >&2
+  usage >&2
+  exit 2
+}
+
 STEP= NODE= MIN_FREE_DISK_GB=1 SINGLE_NODE= LAYER=a MODE=emulate PROFILE_FILE= REFERENCE_ROOT=
 while (($#)); do
   case "$1" in
+    --help|-h) usage; exit 0 ;;
     --step) STEP="$2"; shift 2 ;;
     --node) NODE="$2"; shift 2 ;;
     --min-free-disk-gb) MIN_FREE_DISK_GB="$2"; shift 2 ;;
@@ -16,30 +37,39 @@ while (($#)); do
     --mode) MODE="$2"; shift 2 ;;
     --profile-file) PROFILE_FILE="$2"; shift 2 ;;
     --reference-root) REFERENCE_ROOT="$2"; shift 2 ;;
-    *) echo "Unknown argument: $1" >&2; exit 2 ;;
+    *) fail "unknown argument: $1" ;;
   esac
 done
-# Step 5 (before its fail-stop integration) needs only this node's eight GPUs; Step 6 (A part) is CPU only.
-[[ -z "$SINGLE_NODE" || "$STEP" == 5 || "$STEP" == 6 ]]
-# Step 6 layers a/b1/b2 run on one node; layer b3 is the two-node fail-stop run.
-[[ "$STEP" != 6 || "$LAYER" == b3 || -n "$SINGLE_NODE" ]]
-[[ "$STEP" != 6 || "$LAYER" != b3 || -z "$SINGLE_NODE" ]]
-[[ "$LAYER" =~ ^(a|b1|b2|b3)$ && "$MODE" =~ ^(emulate|real)$ ]]
+
 case "$STEP" in
   2) NAME=step02_topology_rebind ;;
   3) NAME=step03_sources_and_transport ;;
   4) NAME=step04_async_driver_and_memory ;;
   5) NAME=step05_model_correctness ;;
   6) NAME=step06_batched_serving ;;
-  *) echo "Unknown step: $STEP" >&2; exit 2 ;;
+  *) fail "--step must be 2, 3, 4, 5 or 6 (got '${STEP}')" ;;
 esac
-[[ "$NODE" == SL3060 || "$NODE" == SL3061 ]]
+[[ "$NODE" == SL3060 || "$NODE" == SL3061 ]] || fail "--node must be SL3060 or SL3061 (got '${NODE}')"
+[[ "$MIN_FREE_DISK_GB" =~ ^[0-9]+([.][0-9]+)?$ ]] || fail "--min-free-disk-gb must be a number (got '${MIN_FREE_DISK_GB}')"
+[[ "$LAYER" =~ ^(a|b1|b2|b3)$ ]] || fail "--layer must be a, b1, b2 or b3 (got '${LAYER}')"
+[[ "$MODE" =~ ^(emulate|real)$ ]] || fail "--mode must be emulate or real (got '${MODE}')"
+# Step 5 (before its fail-stop integration) needs only this node's eight GPUs; Step 6 layers a/b1/b2 run on one node,
+# layer b3 is the two-node fail-stop run.
+if [[ -n "$SINGLE_NODE" && "$STEP" != 5 && "$STEP" != 6 ]]; then fail "--single-node applies to Step 5 and Step 6 only"; fi
+if [[ "$STEP" == 6 && "$LAYER" != b3 && -z "$SINGLE_NODE" ]]; then fail "Step 6 layer ${LAYER} runs on one node: pass --single-node"; fi
+if [[ "$STEP" == 6 && "$LAYER" == b3 && -n "$SINGLE_NODE" ]]; then fail "Step 6 layer b3 is the two-node run: start both nodes without --single-node"; fi
+if [[ "$STEP" == 6 && "$LAYER" == b3 && ( -z "$PROFILE_FILE" || -z "$REFERENCE_ROOT" ) ]]; then fail "Step 6 layer b3 needs --profile-file and --reference-root"; fi
+
+cd /data
+mountpoint -q /data || fail "/data is not a mount point"
+source /data/ubuntu/lxh/weavetp/env.sh
+# The env.sh interpreter leads PATH (SL3060 otherwise resolves the base environment's python/torchrun).
+export PATH="$(dirname "$PYTHON"):$PATH"
 HERE="$REPO/code/current/tools/resharding/failstop"
 SHA=$("$PYTHON" -c 'import json,sys; print(json.load(open(sys.argv[1]))["step"+sys.argv[2]])' "$HERE/releases.json" "$STEP")
-[[ "$SHA" =~ ^[0-9a-f]{40}$ ]]
-[[ "$MIN_FREE_DISK_GB" =~ ^[0-9]+([.][0-9]+)?$ ]]
+[[ "$SHA" =~ ^[0-9a-f]{40}$ ]] || fail "releases.json has no full SHA for step ${STEP}"
 # Fail here, before any GPU work, when the compiled dataset helpers cannot import (missing pybind11 => JIT build fails).
-(cd "$REPO/code/current" && "$PYTHON" -c "import megatron.core.datasets.helpers_cpp")
+(cd "$REPO/code/current" && "$PYTHON" -c "import megatron.core.datasets.helpers_cpp") || fail "megatron.core.datasets.helpers_cpp does not import in this Python environment"
 mkdir -p "/data/ubuntu/lxh/weavetp/acceptance/$NAME/kickoff"
 LOGDIR=$(mktemp -d "/data/ubuntu/lxh/weavetp/acceptance/$NAME/kickoff/${NODE}_$(date -u +%Y%m%dT%H%M%SZ)_XXXXXX")
 nohup "$PYTHON" -B "$HERE/quick_driver.py" --step "$STEP" --node "$NODE" --sha "$SHA" --repo "$REPO" --log-dir "$LOGDIR" --min-free-disk-gb "$MIN_FREE_DISK_GB" $SINGLE_NODE --layer "$LAYER" --mode "$MODE" ${PROFILE_FILE:+--profile-file "$PROFILE_FILE"} ${REFERENCE_ROOT:+--reference-root "$REFERENCE_ROOT"} > "$LOGDIR/nohup.log" 2>&1 < /dev/null &
