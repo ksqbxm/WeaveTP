@@ -2,7 +2,7 @@
 
 实现 `28ab6dd320f64d9b595e691252fc8ab56ccbbc70`，快验清单 `02e7bce29bf36ef9707853ef863ae20d85accc79`，见[实现与验证](Step4_实现与验证.md)和[审阅与修正](Step4_审阅与修正.md)。2026-10-18 服务器结果（用户回传，清单 `7c9aaf20fbda914eaa2969ad67fecb70ecb2f471`，suite `s4q_20261017T160602_33f20a9d`）：两节点 emulate 与 real_00 的 result.json、controller_result.json 均 passed，SL3060 报 `edp1_rejoin_pause_s=6.09`（共享 GPU，仅参考）；但 SL3061 的套件汇总报 `KeyError: 'metrics'`，两节点 QUICK CHECK=FAIL。原因：metrics 只存在于 SL3060 控制器的结果中，Step 2/3 曾通过 bus 把 `topology_metrics` 交给 SL3061，Step 4 没有这条交接。修正（实现 `28ab6dd320f64d9b595e691252fc8ab56ccbbc70`，清单 `02e7bce29bf36ef9707853ef863ae20d85accc79`）：删除这条交接，所有 step 统一只由 SL3060 计算并校验 `edp1_rejoin_pause_s`，SL3061 的 summary/receipt 不携带该指标；CPU 测试覆盖对端 summary 缺指标（Step 2/3/4 均 PASS）和汇总函数对缺少 metrics 字段的对端结果（SL3061 返回 None，SL3060 缺失即 KeyError）。137 项 failstop 单测通过。 此前的 `7c9aaf20fbda914eaa2969ad67fecb70ecb2f471` 命令与 `step4_merged_7c9aaf2.bundle` 作废。2026-10-17 合并：`codex/failstop-step4` 已合入 `codex/failstop`（合并提交 `28ab6dd320f64d9b595e691252fc8ab56ccbbc70`，快验清单 `02e7bce29bf36ef9707853ef863ae20d85accc79`）。Step 4 接入 Step 3 的 probe 注册表（`common.ASYNC_PROBE/STEP_PROBES`），`run_async.py` 复用 `run_topology.main(step=4)`，快验沿用 Step 3 的单一握手端口 29839、共享本地锁和必填 `edp1_rejoin_pause_s`（Step 4 real 由 EDP1 阶段 2 报告的 abort/rebuild 暂停给出），并保留 1 GB 快验磁盘门槛与 runner 错误透出；删除 async_probe 中与 topology_probe 重复的 EmulateSupervisor。合并后 117 项 failstop CPU 测试通过；此后统一在 `codex/failstop` 开发。此前的 `e09d7bc` 命令与 `step4_e09d7bc.bundle` 作废。本版包含审阅修正（real 替代进程不再对不存在的进程组调用 abort 等）。此前一版修正首次服务器快验的失败原因：SL3060 `/data` 仅剩 4.88 GB，低于 runner 默认 5 GB 门槛，预检拒绝运行。快验门槛改为默认 1 GB（`quick_check.sh --min-free-disk-gb N` 可调），正式验收保持 5 GB；预检失败时 receipt/nohup 直接写出子进程真实错误（如 `insufficient /data space`），并保存完整 runner 输出到 kickoff 目录的 runner.log。先用下方默认共享 GPU 的快验；本轮尚无服务器 GPU 通过结论。fix2 GPU 复验证据仍未登记，runner 结果固定 `prerequisites_verified=false`。
 
-2026-10-18 重钉（用户指示）：快验清单改为 `@@MANIFEST@@`，`releases.json["step4"]` 改指实现 `0f1776a0ff0929114d68318f62e7e2c3d957f508`（含 Step 6 A 部分一并提交的两处顺带修复：Step 4 worker 在 correctness_only 下只记录 CUDA 重叠不断言；`quick_check.sh` 与各 runner 把 env.sh 解释器放到 PATH 最前并预检 `megatron.core.datasets.helpers_cpp`，见 [Step6_实现与验证.md](Step6_实现与验证.md)）。下文全部命令已按新清单与新实现改写，Step 3/4 的检查项、入口与 PASS 标准不变；此前的清单 `02e7bce` 命令与 `step4_metrics_02e7bce.bundle` 作废。Step 3/4 共用一个 bundle `step34_@@MANIFEST7@@.bundle`（Step 6 的 `step6_df7ad5d.bundle` 不含本清单）。Step 5 仍钉在 `241fb75`/`eae09c2`，未改。
+2026-10-18 重钉（用户指示）：快验清单改为 `371daf851f19b21cc044a8e04c4bcc897d068b3d`，`releases.json["step4"]` 改指实现 `0f1776a0ff0929114d68318f62e7e2c3d957f508`（含 Step 6 A 部分一并提交的两处顺带修复：Step 4 worker 在 correctness_only 下只记录 CUDA 重叠不断言；`quick_check.sh` 与各 runner 把 env.sh 解释器放到 PATH 最前并预检 `megatron.core.datasets.helpers_cpp`，见 [Step6_实现与验证.md](Step6_实现与验证.md)）。下文全部命令已按新清单与新实现改写，Step 3/4 的检查项、入口与 PASS 标准不变；此前的清单 `02e7bce` 命令与 `step4_metrics_02e7bce.bundle` 作废。Step 3/4 共用一个 bundle `step34_371daf8.bundle`（Step 6 的 `step6_df7ad5d.bundle` 不含本清单）。Step 5 仍钉在 `241fb75`/`eae09c2`，未改。
 
 ## 1. 快速正确性测试（先完成下方离线导入）
 
@@ -11,13 +11,13 @@ SL3060 执行一行，随后 60 秒内在 SL3061 执行对应一行；也支持�
 SL3060：
 
 ```bash
-source /data/ubuntu/lxh/weavetp/env.sh && git -C "$REPO" checkout --detach @@MANIFEST@@ && bash "$REPO/code/current/tools/resharding/failstop/quick_check.sh" --step 4 --node SL3060
+source /data/ubuntu/lxh/weavetp/env.sh && git -C "$REPO" checkout --detach 371daf851f19b21cc044a8e04c4bcc897d068b3d && bash "$REPO/code/current/tools/resharding/failstop/quick_check.sh" --step 4 --node SL3060
 ```
 
 SL3061：
 
 ```bash
-source /data/ubuntu/lxh/weavetp/env.sh && git -C "$REPO" checkout --detach @@MANIFEST@@ && bash "$REPO/code/current/tools/resharding/failstop/quick_check.sh" --step 4 --node SL3061
+source /data/ubuntu/lxh/weavetp/env.sh && git -C "$REPO" checkout --detach 371daf851f19b21cc044a8e04c4bcc897d068b3d && bash "$REPO/code/current/tools/resharding/failstop/quick_check.sh" --step 4 --node SL3061
 ```
 
 入口内部再次 source env.sh，并按 releases.json 检出固定实现 `0f1776a0ff0929114d68318f62e7e2c3d957f508`；结束后无论成功失败都切回 `f7d555998b45756998465924d733fd70e553d6b4`。握手端口 29839、runner 端口 29840/29841 与 Step 2/3 共用，同一检出目录的各步快验共用一把本地锁，不能同时启动。
@@ -45,12 +45,12 @@ test ! -f "$LATEST/final.json" || cat "$LATEST/final.json"
 
 ## 2. Windows 离线 bundle 生成与上传
 
-@@BUNDLE_LINE@@
+本轮已生成并验证：`C:/Users/ksqbx/.codex/worktrees/failstop/step34_371daf8.bundle`，1220144 字节，SHA256 `6d06fa5a2a5eec59358c1641e816d5d25d2214be5ca7d5311c56a334914a75e2`，配套 `.sha256` 在同目录。基线严格为 `f7d555998b45756998465924d733fd70e553d6b4`，目标为 Step 3/4 共用的快验清单提交 `371daf851f19b21cc044a8e04c4bcc897d068b3d`，包含 Step 1–6 与路由确定性检查的全部提交。
 
 上传：
 
 ```powershell
-$Bundle = 'C:/Users/ksqbx/.codex/worktrees/failstop/step34_@@MANIFEST7@@.bundle'
+$Bundle = 'C:/Users/ksqbx/.codex/worktrees/failstop/step34_371daf8.bundle'
 Get-FileHash -LiteralPath $Bundle -Algorithm SHA256
 scp $Bundle "$Bundle.sha256" 5090-SL3061:/data/ubuntu/lxh/weavetp/
 ```
@@ -65,10 +65,10 @@ scp -P 43061 $Bundle "$Bundle.sha256" ubuntu@hdssh01.casdao.com:/data/ubuntu/lxh
 
 ```powershell
 $Repo = 'C:/Users/ksqbx/.codex/worktrees/failstop/WeaveTP_代码与实验资料_20260920'
-$Bundle = 'C:/Users/ksqbx/.codex/worktrees/failstop/step34_@@MANIFEST7@@_rebuilt.bundle'
+$Bundle = 'C:/Users/ksqbx/.codex/worktrees/failstop/step34_371daf8_rebuilt.bundle'
 if (Test-Path -LiteralPath $Bundle) { throw '文件已存在，请先核对，不覆盖' }
-git -C $Repo update-ref refs/heads/codex/step34-@@MANIFEST7@@ @@MANIFEST@@
-git -C $Repo bundle create $Bundle refs/heads/codex/step34-@@MANIFEST7@@ '^f7d555998b45756998465924d733fd70e553d6b4'
+git -C $Repo update-ref refs/heads/codex/step34-371daf8 371daf851f19b21cc044a8e04c4bcc897d068b3d
+git -C $Repo bundle create $Bundle refs/heads/codex/step34-371daf8 '^f7d555998b45756998465924d733fd70e553d6b4'
 if ($LASTEXITCODE) { throw 'bundle create failed' }
 git -C $Repo bundle verify $Bundle
 if ($LASTEXITCODE) { throw 'bundle verify failed' }
@@ -86,13 +86,13 @@ cd /data
 mountpoint -q /data
 source /data/ubuntu/lxh/weavetp/env.sh
 cd /data/ubuntu/lxh/weavetp
-sha256sum -c step34_@@MANIFEST7@@.bundle.sha256
+sha256sum -c step34_371daf8.bundle.sha256
 test -z "$(git -C "$REPO" status --porcelain --untracked-files=no)"
-git -C "$REPO" bundle verify "$PWD/step34_@@MANIFEST7@@.bundle"
-git -C "$REPO" fetch "$PWD/step34_@@MANIFEST7@@.bundle" refs/heads/codex/step34-@@MANIFEST7@@
-test "$(git -C "$REPO" rev-parse FETCH_HEAD)" = @@MANIFEST@@
-git -C "$REPO" checkout --detach @@MANIFEST@@
-scp step34_@@MANIFEST7@@.bundle step34_@@MANIFEST7@@.bundle.sha256 ubuntu@10.60.14.1:/data/ubuntu/lxh/weavetp/
+git -C "$REPO" bundle verify "$PWD/step34_371daf8.bundle"
+git -C "$REPO" fetch "$PWD/step34_371daf8.bundle" refs/heads/codex/step34-371daf8
+test "$(git -C "$REPO" rev-parse FETCH_HEAD)" = 371daf851f19b21cc044a8e04c4bcc897d068b3d
+git -C "$REPO" checkout --detach 371daf851f19b21cc044a8e04c4bcc897d068b3d
+scp step34_371daf8.bundle step34_371daf8.bundle.sha256 ubuntu@10.60.14.1:/data/ubuntu/lxh/weavetp/
 ```
 
 ### SL3060：校验、导入
@@ -103,12 +103,12 @@ cd /data
 mountpoint -q /data
 source /data/ubuntu/lxh/weavetp/env.sh
 cd /data/ubuntu/lxh/weavetp
-sha256sum -c step34_@@MANIFEST7@@.bundle.sha256
+sha256sum -c step34_371daf8.bundle.sha256
 test -z "$(git -C "$REPO" status --porcelain --untracked-files=no)"
-git -C "$REPO" bundle verify "$PWD/step34_@@MANIFEST7@@.bundle"
-git -C "$REPO" fetch "$PWD/step34_@@MANIFEST7@@.bundle" refs/heads/codex/step34-@@MANIFEST7@@
-test "$(git -C "$REPO" rev-parse FETCH_HEAD)" = @@MANIFEST@@
-git -C "$REPO" checkout --detach @@MANIFEST@@
+git -C "$REPO" bundle verify "$PWD/step34_371daf8.bundle"
+git -C "$REPO" fetch "$PWD/step34_371daf8.bundle" refs/heads/codex/step34-371daf8
+test "$(git -C "$REPO" rev-parse FETCH_HEAD)" = 371daf851f19b21cc044a8e04c4bcc897d068b3d
+git -C "$REPO" checkout --detach 371daf851f19b21cc044a8e04c4bcc897d068b3d
 ```
 
 然后运行第 1 节命令。SL3060 全流程无需访问 GitHub。
@@ -128,7 +128,7 @@ mountpoint -q /data
 source /data/ubuntu/lxh/weavetp/env.sh
 test -z "$(git -C "$REPO" status --porcelain --untracked-files=no)"
 git -C "$REPO" checkout --detach 0f1776a0ff0929114d68318f62e7e2c3d957f508
-export NODE=SL3060 SUITE=s4_formal_@@MANIFEST7@@_r1
+export NODE=SL3060 SUITE=s4_formal_371daf8_r1
 export RUN="/data/ubuntu/lxh/weavetp/acceptance/step04_async_driver_and_memory/$SUITE"
 export ENTRY="$REPO/code/current/tools/resharding/failstop/run_async.py"
 export REPO PYTHON
@@ -147,7 +147,7 @@ mountpoint -q /data
 source /data/ubuntu/lxh/weavetp/env.sh
 test -z "$(git -C "$REPO" status --porcelain --untracked-files=no)"
 git -C "$REPO" checkout --detach 0f1776a0ff0929114d68318f62e7e2c3d957f508
-export NODE=SL3061 SUITE=s4_formal_@@MANIFEST7@@_r1
+export NODE=SL3061 SUITE=s4_formal_371daf8_r1
 export RUN="/data/ubuntu/lxh/weavetp/acceptance/step04_async_driver_and_memory/$SUITE"
 export ENTRY="$REPO/code/current/tools/resharding/failstop/run_async.py"
 export REPO PYTHON
