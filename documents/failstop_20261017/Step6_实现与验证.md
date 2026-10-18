@@ -1,4 +1,4 @@
-# Step 6 实现与验证（A 部分：统一服务驱动的 fake 后端、CPU 测试与快验入口）
+# Step 6 实现与验证（A 部分 fake 后端 + B 部分真实模型接入）
 
 实现提交：`0f1776a0ff0929114d68318f62e7e2c3d957f508`（分支 `codex/failstop`；首个实现提交 `9a8a28da41c2a6de0903cc06b2934dd9dd55e5fe`，随后补两进程 Gloo 控制组测试）。快验清单提交 `df7ad5d33364fbd481c82c8164aad093ce984d54`（`releases.json["step6"]` 指向实现提交），服务器命令见 [Step6_服务器命令.md](Step6_服务器命令.md)。计划稿见 [Step6_服务驱动计划.md](Step6_服务驱动计划.md)（已吸收 2026-10-18 五条审阅意见），W1–W4 设计依据见 [参考](参考_扩缩容实施计划_W1-W4设计依据.md)。
 
@@ -70,3 +70,63 @@ cd code/current && python -B -X utf8 -m pytest -q -o addopts='' --noconftest -p 
 - fake 后端不走注意力 kernel（`--e2e-attention` 被接受但不生效），KV 内容校验用块级逐位相等代替 logits 比较。
 - 正式负载（ShareGPT 子集）、冻结 profile 与 §4 的 10% 峰值余量核对未做，当前只有 `toy_inputs`。
 - 两处顺带修复对 Step 3/4/5 现有清单不生效（见上）。
+
+
+---
+
+# B 部分：真实模型接入（2026-10-18）
+
+实现提交：`ab5a4a90a1088df232eadcce0b5a2dd0ba152dba`（含 A 部分 `0f1776a0ff0929114d68318f62e7e2c3d957f508` 之后的全部改动），快验清单 `@@MANIFEST_B@@`（`releases.json["step6"]`）。用户指示（2026-10-18）：Step 3/4/5 两节点快验已在服务器通过；B 部分一次写完并与 Step 3/4 重钉一起交付；**本轮暂停 Triton paged decode kernel**，decode 固定用 torch split-KV（`--e2e-attention torch`），`auto` 模式与 Triton 接口保留但不实现不调试，B1 去掉 Triton 自检项。
+
+状态：BlockKVContext 的三处 Megatron 钩子、真实模型 BlockBackend、远程控制协议、B3 服务 worker 与控制门、B1/B2 torchrun、`quick_check.sh --step 6 --layer a|b1|b2|b3` 已实现并通过 CPU 测试（含 16 个 CPU actor 的 B3 协议模拟，emulate 与 real 两种模式）；**服务器 GPU 全部未运行**，`accepted=false`。
+
+## 实现
+
+| 文件 | 交付 |
+|---|---|
+| `megatron/core/transformer/attention.py`、`multi_latent_attention.py` | 三处 `is_block_kv` 钩子（计划 §3.3）：`_adjust_key_value_for_inference` 在 `inference_context is None` 判断之后交给 `context.adjust_key_value(layer_number, q, k, v)` 并返回 `no_mask`；MLA 核心注意力分发到 `context.core_attention(layer_number, q, k, v, mask, dense_attention=self.core_attention, softmax_scale=...)`；MLA 的 rotary 切片改为 `rotary_pos_emb[context.rotary_positions]`（逐 token 位置，yarn 的 mscale 与位置无关）。静态 KV 路径（`StaticInferenceContext`）不受影响。 |
+| `tools/resharding/e2e/block_kv.py` | `BlockKVContext` 前向侧：`begin_forward(mode, device)`（prefill / decode / dummy：位置向量、按段分组的写索引、块对角 mask 或块表+长度）、`adjust_key_value`（逐段 index 写入 K/V，dummy 不写）、`core_attention`（decode 走分页实现，prefill 走 Megatron 稠密注意力 + 块对角 mask，dummy 对自身）、`is_decode_only`/`config.materialize_only_last_token_logits=False`（每个 token 的 logits 都要读）。`BlockPool._new_segment` 零填充并优先回填空洞；`compact` 的目标块号恒为 0..n-1（`KVPlanBuilder` 从 0 计数的 token 坐标因此恒成立）。 |
+| `tools/resharding/e2e/paged_decode_triton.py` | 仅接口（`KERNEL = None`、`HAVE_TRITON`），本轮不实现；`select_implementation('auto')` 回退 split-KV 并记录原因，`torch` 为 B 部分固定选择。 |
+| `tools/resharding/e2e/attention_paged.py` | split-KV 回退的累加器放到 query 所在设备。 |
+| `tools/resharding/e2e/block_backend.py` | 真实模型后端 `BlockBackend(forward, replica, tp, prompts, geometry, ...)`：一个 rank 服务一个 dense 副本；prefill 为本步接纳请求的一次块对角前向（输入 `[1, S]`，每请求末位 logits 交给解码策略），decode 为一次分页前向（输入 `[1, T]`，每请求一个 token），dummy 一个 token 不写 KV；histories/last_token 记账，重放请求的历史来自 `history_source`；`bind(tp, context)` 在 cutover 时切换布局；CUDA event 计时。 |
+| `tools/resharding/e2e/remote_control.py` | 跨进程决策协议：`ControlService`（控制节点线程，持有 AdmissionController，按 `ctl/<domain>/<n>` 顺序处理 stepped/phase/requeue/down/ledger/evict，推 `decision/<domain>/<step>`，`trigger()` 把切换方向带进下一个决策，`hold` 让域在切换序列完成前不结束）与 `RemoteControl`（域侧：取决策、镜像账本、每 rank 计数消息只由领导者写入、按 dense 副本发布重放历史、驱逐结果域内广播、镜像 digest 一致性检查）；`MemoryChannel` 为测试替身。 |
+| `tools/resharding/e2e/live_runtime.py`、`controller.py`、`plan_executor.py` | `Decision` 增加 `rows`/`queue_len`/`switch`；`Ledger.admit`；控制面接口 `apply/set_phase/set_down/replace_ledger/evict_for_peak/peak_ok`（ControlNode 与 RemoteControl 同形）；`DomainRun.local_replicas`（本进程跑前向的副本）；`body()` 的 prefill 带解码策略、完成数按本进程副本计；无执行器时切换由决策的 `switch` 触发；每个 rank 都 `push`（远程控制只在领导者写）；`run_until_done`。 |
+| `tools/resharding/failstop/serving_worker.py` | B3 worker（继承 Step 5 `model_worker.Worker` 的世界/组/传输/权重审计）：e2e Driver 在每个 rank 内服务其 dense 副本（block KV，决策来自总线），`ServingSwitcher` 按角色实现 perform_switch 协议——幸存者缩容（TP2 目标，权重来自残余 TP4 + EDP1，不搬 KV，账本 relabel）、幸存者扩容（压实 → TP4 目标 + 按压实表克隆的目标池 → `KVPlanBuilder.as_shards` 的 A 区 KV 与权重同一混合计划 → 前台增长步 → 仍在跑请求的 B 区增量 → 目标 KV 对照幸存者落盘快照的 head 映射逐位检查 → cutover → 向回归卡 handoff 账本/历史/next token/表长度）、EDP1 作为发送方参与各波（扩容期间边轮询边前台步）、emulate 受害者在一次切换内走完释放/等待/加入、real 受害者为 epoch-2 新进程 `join_as_victim`。控制组每个世界 epoch 重建（EDP0 另有仅幸存者的 `EDP0_serving` 组，切换中使用）。 |
+| `tools/resharding/failstop/serving_probe.py` | SL3060 控制门：Step 5 的时钟/预检/拓扑/cuda 门 + `ControlService` 线程；`completed_count` 锚点触发后向两域下达 shrink，等全部 switch_ack → kill/release → transition 1 → build → 阶段 1 报告（shrink_done）→ rejoin 到期（`t_fail + seconds`，且 shrink_done）→ reclaim/spawn → expand → transition 2 → build → 阶段 2 报告 → 排空 → 四个 dense 副本的 summary → `result.json`/`check.json`/`events_actual.json`（06_Step6 §4 字段组）。 |
+| `tools/resharding/failstop/serving_layers.py` | B1/B2 torchrun 入口（单节点单布局无切换）：所有 rank 在逻辑时钟上跑同一接纳控制器（决策一致，Gloo 只做步末共识）。B1：静态 KV 路径（StaticInferenceContext + `_decode`）与 block KV 路径对同一 teacher-forcing 探针请求的逐步 logits nrmse/cosine（单独与批内），M1 单步时间（静态、block 单请求、block 批量），池字节对照 token/段记账。B2：确定性模式、变长批跨块边界、释放补入、末尾一副本空，同进程两遍逐位记录（`determinism.bitwise_record`），记录落盘供 runner 跨进程比较。 |
+| `tools/resharding/failstop/run_serving.py`、`quick_driver.py`、`quick_check.sh` | `--layer a|b1|b2|b3`：a 为原 fake 快验；b1 为 tp4 一次 torchrun（默认模式）；b2 为两个独立 TP2 进程（GPU 0–3 / 4–7，`--rdzv-endpoint` 不同端口）并发后再跑 TP4，runner 跨进程逐位比较；b3 为两节点 launch（`SERVING_PROBE`，`run_probe.run_case`，`--mode emulate|real`，需 `--profile-file` 与 SL3061 上的 `--reference-root`）。预算均 300 s；b3 走两节点握手。 |
+| `tools/resharding/failstop/model_worker.py`、`megatron/core/failstop_rebind.py` | Step 5 缺陷修正：服务中的模型在每个世界 epoch 都重绑定；emulate 复用同一组对象时用 `ModelBinding.refresh()` 跟随 generation（此前 emulate 模式下 EDP1 的第一次前向会被判为 stale world；Step 5 CPU 测试的假 runtime 不走 forward hook 故未暴露）。 |
+| `tools/resharding/failstop/controller.py`、`supervisor.py` | `SERVING_PROBE` 分发：控制门 `serving_probe.control`，worker `serving_worker.py`，emulate 监管器。 |
+
+## 调试中修正的问题（CPU 模拟暴露）
+
+1. 领导者变更后的消息序号：只有领导者计数 `stepped` 时，故障后 EDP0 换领导者（real 模式 rank 重编号）导致 `ctl/<domain>/<n>` 冲突；现在每个 rank 都计数、只有领导者写。
+2. 重放历史按 dense 副本发布：域领导者只持有自己副本的历史，`history/<seq>/<len>` 由每个副本的首个幸存者发布。
+3. 切换中的控制组：世界重建后立即重建域通信组，但扩容切换中只含幸存者（`EDP0_serving`），回归卡在 cutover 后加入。
+4. 工作负载在 rejoin 之前排空：控制节点 `hold` 域直到扩容完成（空步），`result.json.failstop.stats_valid=false` 并写明原因（06_Step6 §6 第 6 条）。
+5. 阶段报告先于 `session.complete()`：控制门在过渡态比较 rank map（`source_eligible`）。
+6. 增量计划只含仍在跑的请求：基波前台步中完成的请求退出计划并释放其目标块。
+7. 两个 EDP0 副本的 KV 快照目录分开；per rank 的 timeline 只记本进程副本的完成数，控制门按 dense 副本汇总四份 timeline。
+
+## 验证
+
+```bash
+cd code/current && python -B -X utf8 -m pytest -q -o addopts='' --noconftest -p no:cacheprovider tests/unit_tests/e2e tools/resharding/failstop tools/resharding/correctness/test_router_determinism.py tests/unit_tests/resharding/test_live_storage_lifecycle.py tests/unit_tests/resharding/test_live_defaults.py
+```
+
+结果见 [step6_cpu_evidence/cpu_tests_b.log](step6_cpu_evidence/cpu_tests_b.log)：227 项通过（含新增的 e2e 块上下文/块后端/远程控制测试、`test_serving_protocol.py` 的 emulate 与 real 两次 16-actor 模拟、`test_quick.py` 的分层用例；此前 A 部分为 217 项）。新增：
+
+- `tests/unit_tests/e2e/test_block_context_forward.py`：三处钩子的 CPU 对照——块对角 prefill、跨块边界的分页 decode 与 dummy 前向，对每个请求等于其自身历史上的稠密注意力；Triton 缺席时的回退记录。
+- `tests/unit_tests/e2e/test_block_backend.py`：玩具两层注意力模型按 Megatron 的方式调用钩子，批量 block KV 服务提交的 token 与逐请求稠密解码一致；dummy 不写 KV；释放回收段；重放从历史源取 prompt + 已提交 token。
+- `tests/unit_tests/e2e/test_remote_control.py`：fake 后端 fail-stop 全循环经远程控制通道（ControlService 线程 + 两个域镜像）完成，镜像 digest 检查通过。
+- `tools/resharding/failstop/test_serving_protocol.py`：16 个 CPU actor + 假 runtime（TP all-reduce 的玩具 logits 依赖全部驻留权重）跑 B3 worker 与控制门，emulate 与 real 各一次：12 个请求全部完成、shrink/expand 校验通过、扩容 KV 逐位检查通过、`result.json`/`check.json`/`events_actual.json` 写出、16 份 `serving_checks_*.json`，decode 实现记录为 `torch_splitkv`。
+- `test_quick.py`：`--step 6 --layer b1|b2` 单节点、`--layer b3` 两节点（无 `--single-node`），结论行与失败路径。
+
+## 边界与未完成项
+
+- 服务器 GPU 未运行；B1/B2/B3 的服务器通过情况、M1 数字、nrmse/cosine、B3 的 TFS 分解均待回传。
+- Triton kernel 按用户指示暂停；`attention_impl` 固定 `torch_splitkv`。
+- B3 传输为同步波次（Step 4 重叠未接）；EDP1 在波次执行期间不服务（stall 行记录），这与 Step 5 一致。
+- B3 的 `totals.duration_s` 是四份副本 timeline 的步时累加（与 `--check` 自洽），墙钟见 `failstop.serving_wall_s`；`timing_valid=false`。
+- 峰值记录型驱逐对真实 worker 走同一条 `evict_for_peak` 路径，但本轮负载不会触发，服务器未验证。
+- B3 快验的负载是 `toy_inputs`（24 条 5–7 token 请求），rejoin 在 fail 后 5 s；正式负载与 45 s 仍按总计划 §7。
