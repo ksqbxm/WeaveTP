@@ -1,0 +1,75 @@
+{
+  "step": 6,
+  "probe": "step06_batched_serving",
+  "node": "SL3061",
+  "suite_id": "s6q_cpu",
+  "backend": "fake",
+  "gpus_used": 0,
+  "single_node": true,
+  "quick_mode": true,
+  "correctness_only": true,
+  "shared_gpu_mode": false,
+  "timing_valid": false,
+  "accepted": false,
+  "runs": {
+    "scaling": {
+      "check_passed": true,
+      "exit_code": 0,
+      "switches": [
+        "2->4",
+        "4->2"
+      ],
+      "validation": [
+        true,
+        true
+      ],
+      "totals": {
+        "duration_s": 16.564843749449334,
+        "input_tokens": 144,
+        "output_tokens": 120,
+        "generated_tokens": 120,
+        "throughput_total_tok_s": 15.937367354206174,
+        "throughput_gen_tok_s": 7.244257888275533,
+        "logical_steps": 44
+      },
+      "output": "C:\\Users\\ksqbx\\AppData\\Local\\Temp\\claude\\E------WeaveTP---------20260920\\fef93247-7f40-4227-938a-6421736a33cf\\scratchpad\\s6q_cpu_150242\\SL3061\\scaling\\out"
+    },
+    "failstop": {
+      "check_passed": true,
+      "exit_code": 0,
+      "switches": [
+        "shrink",
+        "expand"
+      ],
+      "validation": [
+        true,
+        true
+      ],
+      "totals": {
+        "duration_s": 13.857329914606263,
+        "input_tokens": 119,
+        "output_tokens": 101,
+        "generated_tokens": 101,
+        "throughput_total_tok_s": 15.876074348789942,
+        "throughput_gen_tok_s": 7.288561405580837,
+        "logical_steps": 28
+      },
+      "output": "C:\\Users\\ksqbx\\AppData\\Local\\Temp\\claude\\E------WeaveTP---------20260920\\fef93247-7f40-4227-938a-6421736a33cf\\scratchpad\\s6q_cpu_150242\\SL3061\\failstop\\out",
+      "replay_prefill_tokens": 33,
+      "events_s": {
+        "fail": 4.876890277017785,
+        "shrink_done": 4.8969073769733695,
+        "rejoin_start": 6.973670629315446,
+        "expand_done": 8.173681029336429
+      }
+    }
+  },
+  "tests": {
+    "exit_code": 0,
+    "passed": true,
+    "summary_line": "29 passed, 7 warnings in 10.22s",
+    "log": "C:\\Users\\ksqbx\\AppData\\Local\\Temp\\claude\\E------WeaveTP---------20260920\\fef93247-7f40-4227-938a-6421736a33cf\\scratchpad\\s6q_cpu_150242\\SL3061\\pytest.log"
+  },
+  "all_checks_passed": true,
+  "elapsed_s": 12.477255399979185
+}

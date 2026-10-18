@@ -1,0 +1,10 @@
+{
+  "generated_tokens_match": true,
+  "completed_match": true,
+  "phase_sum_s": 13.857329914606261,
+  "duration_s": 13.857329914606263,
+  "phase_sum_matches_duration": true,
+  "timeline_seconds": 13.857329914606261,
+  "timeline_matches_duration": true,
+  "passed": true
+}

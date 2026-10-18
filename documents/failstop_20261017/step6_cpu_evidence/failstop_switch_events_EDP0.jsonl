@@ -1,0 +1,22 @@
+{"event": "switch_trigger", "t": 4.876890277017785, "switch_index": 0, "direction": "shrink"}
+{"event": "peak_wait_start", "t": 4.876890277017785, "switch_index": 0}
+{"event": "peak_wait_end", "t": 4.876890277017785, "switch_index": 0}
+{"event": "compact_done", "t": 4.876890277017785, "switch_index": 0, "moved_blocks": 0, "kv": "none: the fault invalidated EDP0 KV, requests replay"}
+{"event": "base_wave_end", "t": 4.8969073769733695, "switch_index": 0, "overlap_steps": 2, "bytes": {"weights": 1, "kv_prefix": 0}, "moves": 0}
+{"event": "base_done", "t": 4.8969073769733695, "switch_index": 0, "weights_bitwise": true, "checked_parameters": 6}
+{"event": "delta_done", "t": 4.8969073769733695, "switch_index": 0, "bytes": {"kv_delta": 0}}
+{"event": "validation_done", "t": 4.8969073769733695, "switch_index": 0, "mode": "bitwise", "passed": true, "note": "replayed requests are checked after their re-prefill"}
+{"event": "target_ready", "t": 4.8969073769733695, "switch_index": 0}
+{"event": "cutover", "t": 4.8969073769733695, "switch_index": 0}
+{"event": "source_release_done", "t": 4.8969073769733695, "switch_index": 0}
+{"event": "switch_trigger", "t": 6.973670629315446, "switch_index": 1, "direction": "expand"}
+{"event": "peak_wait_start", "t": 6.973670629315446, "switch_index": 1}
+{"event": "peak_wait_end", "t": 6.973670629315446, "switch_index": 1}
+{"event": "compact_done", "t": 6.973670629315446, "switch_index": 1, "moved_blocks": 10}
+{"event": "base_wave_end", "t": 8.173681029336429, "switch_index": 1, "overlap_steps": 2, "bytes": {"weights": 1, "kv_prefix": 12}, "moves": 16, "planned_tokens_a": 48}
+{"event": "base_done", "t": 8.173681029336429, "switch_index": 1, "weights_bitwise": true, "checked_parameters": 6}
+{"event": "delta_done", "t": 8.173681029336429, "switch_index": 1, "bytes": {"kv_delta": 8}}
+{"event": "validation_done", "t": 8.173681029336429, "switch_index": 1, "mode": "bitwise", "passed": true, "mismatches": []}
+{"event": "target_ready", "t": 8.173681029336429, "switch_index": 1}
+{"event": "cutover", "t": 8.173681029336429, "switch_index": 1}
+{"event": "source_release_done", "t": 8.173681029336429, "switch_index": 1}

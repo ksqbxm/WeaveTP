@@ -1,0 +1,441 @@
+{
+  "schema_version": "e2e-serving-v1",
+  "method": "weavetp",
+  "workload_id": "fake",
+  "segments_run": [
+    0
+  ],
+  "totals": {
+    "duration_s": 13.857329914606263,
+    "input_tokens": 119,
+    "output_tokens": 101,
+    "generated_tokens": 101,
+    "throughput_total_tok_s": 15.876074348789942,
+    "throughput_gen_tok_s": 7.288561405580837,
+    "logical_steps": 28
+  },
+  "switches": [
+    {
+      "index": 0,
+      "direction": "shrink",
+      "trigger": {
+        "kind": "completed_count",
+        "step": 3,
+        "overshoot": {
+          "completed_count": 5,
+          "threshold": 5,
+          "overshoot": 0
+        }
+      },
+      "overlap_steps": 2,
+      "evictions": [],
+      "bytes": {
+        "weights": 1,
+        "kv_prefix": 0,
+        "kv_delta": 0
+      },
+      "validation": {
+        "mode": "bitwise",
+        "passed": true,
+        "note": "replayed requests are checked after their re-prefill"
+      },
+      "audit": {
+        "weights_bitwise": true,
+        "checked_parameters": 6
+      },
+      "milestones": {
+        "switch_trigger": 4.876890277017785,
+        "peak_wait_start": 4.876890277017785,
+        "peak_wait_end": 4.876890277017785,
+        "compact_done": 4.876890277017785,
+        "base_wave_end": 4.8969073769733695,
+        "base_done": 4.8969073769733695,
+        "delta_done": 4.8969073769733695,
+        "validation_done": 4.8969073769733695,
+        "target_ready": 4.8969073769733695,
+        "cutover": 4.8969073769733695,
+        "source_release_done": 4.8969073769733695
+      }
+    },
+    {
+      "index": 1,
+      "direction": "expand",
+      "trigger": {
+        "kind": "after_event_seconds",
+        "step": 7,
+        "overshoot": {
+          "due_s": 5.876890277017785,
+          "late_s": 0.12952778198575654,
+          "waited_for": "shrink_done",
+          "wait_for_at_s": 4.8969073769733695
+        }
+      },
+      "overlap_steps": 2,
+      "evictions": [],
+      "bytes": {
+        "weights": 1,
+        "kv_prefix": 12,
+        "kv_delta": 8
+      },
+      "validation": {
+        "mode": "bitwise",
+        "passed": true,
+        "mismatches": []
+      },
+      "audit": {
+        "weights_bitwise": true,
+        "checked_parameters": 6
+      },
+      "milestones": {
+        "switch_trigger": 6.973670629315446,
+        "peak_wait_start": 6.973670629315446,
+        "peak_wait_end": 6.973670629315446,
+        "compact_done": 6.973670629315446,
+        "base_wave_end": 8.173681029336429,
+        "base_done": 8.173681029336429,
+        "delta_done": 8.173681029336429,
+        "validation_done": 8.173681029336429,
+        "target_ready": 8.173681029336429,
+        "cutover": 8.173681029336429,
+        "source_release_done": 8.173681029336429
+      }
+    }
+  ],
+  "requests": [
+    {
+      "seq": 0,
+      "id": "r0",
+      "segment": 0,
+      "kind": "short",
+      "replica": 0,
+      "layout_at_admit": 4,
+      "input_len": 5,
+      "output_len": 3,
+      "generated_tokens": 3,
+      "t_arrive": 0.0,
+      "t_admit": 0.0,
+      "t_first": 0.33675371078883926,
+      "t_done": 2.6085085215860544
+    },
+    {
+      "seq": 1,
+      "id": "r1",
+      "segment": 0,
+      "kind": "short",
+      "replica": 1,
+      "layout_at_admit": 4,
+      "input_len": 6,
+      "output_len": 4,
+      "generated_tokens": 4,
+      "t_arrive": 0.0,
+      "t_admit": 0.0,
+      "t_first": 0.33675371078883926,
+      "t_done": 4.065576661063634
+    },
+    {
+      "seq": 2,
+      "id": "r2",
+      "segment": 0,
+      "kind": "short",
+      "replica": 0,
+      "layout_at_admit": 2,
+      "input_len": 7,
+      "output_len": 5,
+      "generated_tokens": 5,
+      "t_arrive": 0.0,
+      "t_admit": 5.551916476984453,
+      "t_first": 6.006418059003542,
+      "t_done": 6.006418059003542
+    },
+    {
+      "seq": 3,
+      "id": "r3",
+      "segment": 0,
+      "kind": "short",
+      "replica": 1,
+      "layout_at_admit": 2,
+      "input_len": 5,
+      "output_len": 9,
+      "generated_tokens": 9,
+      "t_arrive": 0.0,
+      "t_admit": 5.551916476984453,
+      "t_first": 6.006418059003542,
+      "t_done": 10.274815514496611
+    },
+    {
+      "seq": 4,
+      "id": "r4",
+      "segment": 0,
+      "kind": "short",
+      "replica": 0,
+      "layout_at_admit": 4,
+      "input_len": 6,
+      "output_len": 3,
+      "generated_tokens": 3,
+      "t_arrive": 0.0,
+      "t_admit": 0.0,
+      "t_first": 0.33675371078883926,
+      "t_done": 2.6085085215860544
+    },
+    {
+      "seq": 5,
+      "id": "r5",
+      "segment": 0,
+      "kind": "short",
+      "replica": 1,
+      "layout_at_admit": 4,
+      "input_len": 7,
+      "output_len": 4,
+      "generated_tokens": 4,
+      "t_arrive": 0.0,
+      "t_admit": 0.0,
+      "t_first": 0.33675371078883926,
+      "t_done": 4.065576661063634
+    },
+    {
+      "seq": 6,
+      "id": "r6",
+      "segment": 0,
+      "kind": "short",
+      "replica": 2,
+      "layout_at_admit": 4,
+      "input_len": 5,
+      "output_len": 7,
+      "generated_tokens": 7,
+      "t_arrive": 0.0,
+      "t_admit": 0.33675371078883926,
+      "t_first": 0.6735017215924836,
+      "t_done": 9.629813814483667
+    },
+    {
+      "seq": 7,
+      "id": "r7",
+      "segment": 0,
+      "kind": "short",
+      "replica": 3,
+      "layout_at_admit": 4,
+      "input_len": 6,
+      "output_len": 6,
+      "generated_tokens": 6,
+      "t_arrive": 0.0,
+      "t_admit": 0.33675371078883926,
+      "t_first": 0.6735017215924836,
+      "t_done": 6.973670629315446
+    },
+    {
+      "seq": 8,
+      "id": "r8",
+      "segment": 0,
+      "kind": "short",
+      "replica": 2,
+      "layout_at_admit": 4,
+      "input_len": 7,
+      "output_len": 3,
+      "generated_tokens": 3,
+      "t_arrive": 0.0,
+      "t_admit": 0.33675371078883926,
+      "t_first": 0.6735017215924836,
+      "t_done": 3.2535127216180353
+    },
+    {
+      "seq": 9,
+      "id": "r9",
+      "segment": 0,
+      "kind": "short",
+      "replica": 3,
+      "layout_at_admit": 4,
+      "input_len": 5,
+      "output_len": 5,
+      "generated_tokens": 5,
+      "t_arrive": 0.0,
+      "t_admit": 0.33675371078883926,
+      "t_first": 0.6735017215924836,
+      "t_done": 5.551916476984453
+    },
+    {
+      "seq": 10,
+      "id": "r10",
+      "segment": 1,
+      "kind": "long",
+      "replica": 2,
+      "layout_at_admit": 4,
+      "input_len": 6,
+      "output_len": 5,
+      "generated_tokens": 5,
+      "t_arrive": 0.0,
+      "t_admit": 0.33675371078883926,
+      "t_first": 0.6735017215924836,
+      "t_done": 5.551916476984453
+    },
+    {
+      "seq": 11,
+      "id": "r11",
+      "segment": 1,
+      "kind": "long",
+      "replica": 3,
+      "layout_at_admit": 4,
+      "input_len": 7,
+      "output_len": 6,
+      "generated_tokens": 6,
+      "t_arrive": 0.0,
+      "t_admit": 0.33675371078883926,
+      "t_first": 0.6735017215924836,
+      "t_done": 6.973670629315446
+    },
+    {
+      "seq": 12,
+      "id": "r12",
+      "segment": 1,
+      "kind": "long",
+      "replica": 0,
+      "layout_at_admit": 2,
+      "input_len": 5,
+      "output_len": 3,
+      "generated_tokens": 3,
+      "t_arrive": 0.0,
+      "t_admit": 5.551916476984453,
+      "t_first": 6.006418059003542,
+      "t_done": 7.573678829319677
+    },
+    {
+      "seq": 13,
+      "id": "r13",
+      "segment": 1,
+      "kind": "long",
+      "replica": 1,
+      "layout_at_admit": 2,
+      "input_len": 6,
+      "output_len": 4,
+      "generated_tokens": 4,
+      "t_arrive": 0.0,
+      "t_admit": 5.551916476984453,
+      "t_first": 6.006418059003542,
+      "t_done": 8.173681029336429
+    },
+    {
+      "seq": 14,
+      "id": "r14",
+      "segment": 1,
+      "kind": "long",
+      "replica": 2,
+      "layout_at_admit": 4,
+      "input_len": 7,
+      "output_len": 5,
+      "generated_tokens": 5,
+      "t_arrive": 0.0,
+      "t_admit": 4.065576661063634,
+      "t_first": 4.876890277017785,
+      "t_done": 10.919817214509555
+    },
+    {
+      "seq": 15,
+      "id": "r15",
+      "segment": 1,
+      "kind": "long",
+      "replica": 0,
+      "layout_at_admit": 2,
+      "input_len": 5,
+      "output_len": 9,
+      "generated_tokens": 9,
+      "t_arrive": 0.0,
+      "t_admit": 5.551916476984453,
+      "t_first": 6.006418059003542,
+      "t_done": 13.529828514595602
+    },
+    {
+      "seq": 16,
+      "id": "r16",
+      "segment": 1,
+      "kind": "long",
+      "replica": 1,
+      "layout_at_admit": 2,
+      "input_len": 6,
+      "output_len": 3,
+      "generated_tokens": 3,
+      "t_arrive": 0.0,
+      "t_admit": 5.551916476984453,
+      "t_first": 6.006418059003542,
+      "t_done": 8.173681029336429
+    },
+    {
+      "seq": 17,
+      "id": "r17",
+      "segment": 1,
+      "kind": "long",
+      "replica": 2,
+      "layout_at_admit": 4,
+      "input_len": 7,
+      "output_len": 4,
+      "generated_tokens": 4,
+      "t_arrive": 0.0,
+      "t_admit": 6.006418059003542,
+      "t_first": 6.973670629315446,
+      "t_done": 11.892320814536967
+    },
+    {
+      "seq": 18,
+      "id": "r18",
+      "segment": 1,
+      "kind": "long",
+      "replica": 3,
+      "layout_at_admit": 4,
+      "input_len": 5,
+      "output_len": 7,
+      "generated_tokens": 7,
+      "t_arrive": 0.0,
+      "t_admit": 6.006418059003542,
+      "t_first": 6.973670629315446,
+      "t_done": 13.857329914606263
+    },
+    {
+      "seq": 19,
+      "id": "r19",
+      "segment": 1,
+      "kind": "long",
+      "replica": 3,
+      "layout_at_admit": 4,
+      "input_len": 6,
+      "output_len": 6,
+      "generated_tokens": 6,
+      "t_arrive": 0.0,
+      "t_admit": 8.818685729314009,
+      "t_first": 9.629813814483667,
+      "t_done": 13.857329914606263
+    }
+  ],
+  "phase_durations_s": {
+    "normal": 11.982291214660826,
+    "switching": 1.875038699945435
+  },
+  "attention_impl": {
+    "decode": "fake",
+    "reason": "fake backend"
+  },
+  "config": {
+    "run_mode": "correctness",
+    "experiment": "failstop",
+    "decode_policy": "greedy",
+    "backend": "fake",
+    "validate_cutover": true,
+    "timing_valid": false
+  },
+  "failstop": {
+    "events_s": {
+      "fail": 4.876890277017785,
+      "shrink_done": 4.8969073769733695,
+      "rejoin_start": 6.973670629315446,
+      "expand_done": 8.173681029336429
+    },
+    "replay_prefill_tokens": 33,
+    "peak_eviction": [],
+    "tfs_breakdown": {
+      "shrink_wall_s": 0.020017099955584428
+    },
+    "advantage_sources": [
+      "weights via P2P/host library, no full model reload",
+      "EDP1 keeps serving",
+      "no process rebuild (emulate) / four processes (real)",
+      "replay only EDP0 in-flight requests"
+    ]
+  }
+}
