@@ -78,4 +78,4 @@ python -B -X utf8 -m pytest -q -o addopts='' --noconftest -p no:cacheprovider te
 ## 8. 交付登记
 
 - 第 0 步日志修正：`0d4b17acbb2784036dade9db9e84b9478579e782`。
-- 实现（A）：见本文件 B 提交补写。快验清单（B）与服务器命令（C）：见 [Step6_AnchorTP接入_服务器命令.md](Step6_AnchorTP接入_服务器命令.md)。
+- 实现（A）：`16b1617af90eb4ada0bd32d715dcc45ccd5ca91b`（`releases.json["step6"]` 自本提交起指向它；此前的 Step 6 清单 `8a1e576` 作废）。服务器命令（C，含 bundle）：见 [Step6_AnchorTP接入_服务器命令.md](Step6_AnchorTP接入_服务器命令.md)。
