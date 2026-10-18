@@ -56,9 +56,10 @@ class FailstopHooks:
     """
 
     def __init__(self, control, normal_map, degraded_map, edp0_replicas):
+        """The maps may be RankMaps or callables returning them (real worlds renumber ranks per epoch)."""
         self.control, self.normal_map, self.degraded_map, self.edp0 = control, normal_map, degraded_map, set(edp0_replicas)
         self.down = set()
-        self.replayed_tokens = 0
+        self.replayed_tokens = 0  # prompt + committed tokens re-prefilled after the fault
 
     def capacity(self, rank_map):
         return capacity(rank_map, self.down)
@@ -71,15 +72,17 @@ class FailstopHooks:
             self.replayed_tokens += sum(row.generated(run.step) + row.input_len for row in rows)
             self.control.requeue(rows, run.step)
             self.down.update(self.edp0)
-            run.target_rank_map = self.degraded_map
+            self.control.set_down(self.down)
+            run.target_rank_map = self.degraded_map() if callable(self.degraded_map) else self.degraded_map
         else:
             run.failstop_events['rejoin_start'] = now
-            run.target_rank_map = self.normal_map
+            run.target_rank_map = self.normal_map() if callable(self.normal_map) else self.normal_map
 
     def after(self, direction, run):
         now = run.clock()
         if direction == 'shrink':
             self.down.clear()
+            self.control.set_down(self.down)
             run.failstop_events['shrink_done'] = now
         else:
             run.failstop_events['expand_done'] = now

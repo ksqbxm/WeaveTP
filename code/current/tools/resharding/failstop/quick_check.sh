@@ -5,19 +5,26 @@ mountpoint -q /data
 source /data/ubuntu/lxh/weavetp/env.sh
 # The env.sh interpreter leads PATH (SL3060 otherwise resolves the base environment's python/torchrun).
 export PATH="$(dirname "$PYTHON"):$PATH"
-STEP= NODE= MIN_FREE_DISK_GB=1 SINGLE_NODE=
+STEP= NODE= MIN_FREE_DISK_GB=1 SINGLE_NODE= LAYER=a MODE=emulate PROFILE_FILE= REFERENCE_ROOT=
 while (($#)); do
   case "$1" in
     --step) STEP="$2"; shift 2 ;;
     --node) NODE="$2"; shift 2 ;;
     --min-free-disk-gb) MIN_FREE_DISK_GB="$2"; shift 2 ;;
     --single-node) SINGLE_NODE=--single-node; shift ;;
+    --layer) LAYER="$2"; shift 2 ;;
+    --mode) MODE="$2"; shift 2 ;;
+    --profile-file) PROFILE_FILE="$2"; shift 2 ;;
+    --reference-root) REFERENCE_ROOT="$2"; shift 2 ;;
     *) echo "Unknown argument: $1" >&2; exit 2 ;;
   esac
 done
 # Step 5 (before its fail-stop integration) needs only this node's eight GPUs; Step 6 (A part) is CPU only.
 [[ -z "$SINGLE_NODE" || "$STEP" == 5 || "$STEP" == 6 ]]
-[[ "$STEP" != 6 || -n "$SINGLE_NODE" ]]
+# Step 6 layers a/b1/b2 run on one node; layer b3 is the two-node fail-stop run.
+[[ "$STEP" != 6 || "$LAYER" == b3 || -n "$SINGLE_NODE" ]]
+[[ "$STEP" != 6 || "$LAYER" != b3 || -z "$SINGLE_NODE" ]]
+[[ "$LAYER" =~ ^(a|b1|b2|b3)$ && "$MODE" =~ ^(emulate|real)$ ]]
 case "$STEP" in
   2) NAME=step02_topology_rebind ;;
   3) NAME=step03_sources_and_transport ;;
@@ -35,7 +42,7 @@ SHA=$("$PYTHON" -c 'import json,sys; print(json.load(open(sys.argv[1]))["step"+s
 (cd "$REPO/code/current" && "$PYTHON" -c "import megatron.core.datasets.helpers_cpp")
 mkdir -p "/data/ubuntu/lxh/weavetp/acceptance/$NAME/kickoff"
 LOGDIR=$(mktemp -d "/data/ubuntu/lxh/weavetp/acceptance/$NAME/kickoff/${NODE}_$(date -u +%Y%m%dT%H%M%SZ)_XXXXXX")
-nohup "$PYTHON" -B "$HERE/quick_driver.py" --step "$STEP" --node "$NODE" --sha "$SHA" --repo "$REPO" --log-dir "$LOGDIR" --min-free-disk-gb "$MIN_FREE_DISK_GB" $SINGLE_NODE > "$LOGDIR/nohup.log" 2>&1 < /dev/null &
+nohup "$PYTHON" -B "$HERE/quick_driver.py" --step "$STEP" --node "$NODE" --sha "$SHA" --repo "$REPO" --log-dir "$LOGDIR" --min-free-disk-gb "$MIN_FREE_DISK_GB" $SINGLE_NODE --layer "$LAYER" --mode "$MODE" ${PROFILE_FILE:+--profile-file "$PROFILE_FILE"} ${REFERENCE_ROOT:+--reference-root "$REFERENCE_ROOT"} > "$LOGDIR/nohup.log" 2>&1 < /dev/null &
 printf '%s\n' "$!" > "$LOGDIR/driver.pid"
 if [[ -n "$SINGLE_NODE" ]]; then
   printf 'Started Step %s on %s alone (single node, no peer).\nLog: %s/nohup.log\n' "$STEP" "$NODE" "$LOGDIR"

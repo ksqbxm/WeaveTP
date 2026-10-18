@@ -150,6 +150,11 @@ class Ledger:
                 return state.running[seq]
         raise KeyError(seq)
 
+    def admit(self, rows):
+        """Mirror the control node's admissions (rows arrive through a Decision)."""
+        for row in rows:
+            self.replica(row.replica).add(row)
+
     def completions(self, step):
         return [row for state in self.replicas.values() for row in state.pop_done(step)]
 
@@ -238,6 +243,9 @@ class Decision:
     need_prefill_forward: bool = False
     sleep_until: float | None = None
     evictions: list = field(default_factory=list)       # seqs pushed back to the queue head
+    rows: list = field(default_factory=list)            # the admitted Running rows (domains mirror the ledger from them)
+    queue_len: int = 0
+    switch: str | None = None                           # a switch direction the control node orders for this domain
 
 
 class AdmissionController:
@@ -322,12 +330,14 @@ class AdmissionController:
                           request.input_len + request.generated, request.output_len, request.generated)
             self.ledger.replica(best).add(row)
             decision.admits.append((request.seq, best, row.input_len))
+            decision.rows.append(row)
             decision.prefill_tokens[best] += row.input_len
             self.pointer += 1
         return self.finish(decision, step, replicas)
 
     def finish(self, decision, step, replicas):
         decision.need_prefill_forward = bool(decision.admits)
+        decision.queue_len = len(self.queue) - self.pointer
         decision.completions = sorted(row.seq for r in replicas for row in self.ledger.replica(r).running.values()
                                       if row.finish_step == step)
         return decision

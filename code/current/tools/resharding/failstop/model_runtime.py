@@ -46,6 +46,8 @@ def prefill_tokens(model, context, tokens, micro_batch_size):
 
 
 class MegatronRuntime:
+    device = 'cuda'
+
     def __init__(self, args, live):
         self.args, self.live = args, live
 

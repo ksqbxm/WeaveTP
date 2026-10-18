@@ -51,9 +51,9 @@ def paged_decode_splitkv(q, pool, layer, block_tables, lengths, scale):
         blocks = [int(b) for b in block_tables[row] if b >= 0]
         length = int(lengths[row])
         query = q[row].float()
-        m = torch.full((query.shape[0],), -math.inf)
-        l = torch.zeros(query.shape[0])
-        acc = torch.zeros((query.shape[0], pool.v_dim))
+        m = torch.full((query.shape[0],), -math.inf, device=q.device)
+        l = torch.zeros(query.shape[0], device=q.device)
+        acc = torch.zeros((query.shape[0], pool.v_dim), device=q.device)
         by_segment = {}
         for position, block in enumerate(blocks):
             by_segment.setdefault(pool.locate(block)[0], []).append((position, block))

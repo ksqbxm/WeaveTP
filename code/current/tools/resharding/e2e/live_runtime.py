@@ -17,6 +17,7 @@ GPU-facing work goes through the injected backend (fake on CPU, Megatron in the 
 import time
 import traceback
 from dataclasses import dataclass, field
+from types import SimpleNamespace
 
 from . import controller as ctl
 from . import plan_executor
@@ -88,6 +89,32 @@ class ControlNode:
         with self.lock:
             return self.controller.idle(replicas)
 
+    # ---- the surface the Driver, hooks and switchers use (RemoteControl implements the same) ----------------
+    @property
+    def ledger(self):
+        return self.controller.ledger
+
+    def apply(self, decision):
+        pass  # decide() already admitted into the controller's ledger
+
+    def set_phase(self, domain, frozen, phase):
+        with self.lock:
+            self.frozen[domain], self.phase[domain] = frozen, phase
+
+    def set_down(self, replicas):
+        pass  # the in-process run's capacity closure reads the hooks' set directly
+
+    def replace_ledger(self, ledger, op, replicas, **spec):
+        with self.lock:
+            self.controller.ledger = ledger
+
+    def evict_for_peak(self, step, direction, growth, budget):
+        with self.lock:
+            return self.controller.evict_for_peak(step, direction, growth, budget)
+
+    def peak_ok(self, step, direction, growth, budget):
+        return ctl.peak_check(self.controller.ledger, step, direction, growth, budget)
+
 
 class LocalComm:
     """Single-process communication double: leader and only member of its domain."""
@@ -157,19 +184,22 @@ class DomainRun:
     request_log: dict = field(default_factory=dict)
     failstop_events: dict = field(default_factory=dict)
     hooks: object = None
+    local_replicas: tuple | None = None  # replicas this process runs forwards for (default: all of the domain)
     domain_replicas: object = None  # ledger -> replicas of this domain (default: all)
     target_rank_map: object = None  # fail-stop relabel target, set by the hooks
 
     @property
     def ledger(self):
-        """The admission controller's ledger: one object for every domain, replaced as a whole at cutover."""
-        return self.control.controller.ledger
+        """The admission controller's ledger (or this process's mirror of it), replaced as a whole at cutover."""
+        return self.control.ledger
 
 
 class Driver:
     def __init__(self, run: DomainRun):
         self.run = run
         self.pending_trigger = None
+        if run.local_replicas is None:
+            run.local_replicas = run.replicas
         if run.domain_replicas is None:
             run.domain_replicas = lambda ledger: tuple(sorted(ledger.replicas))
 
@@ -177,8 +207,8 @@ class Driver:
     def step(self):
         """A pending trigger runs its switch first (its foreground steps are logical steps too), then one step."""
         if self.pending_trigger is not None:
-            self.pending_trigger = None
-            self.switch()
+            trigger, self.pending_trigger = self.pending_trigger, None
+            self.switch(trigger)
         return self.body()
 
     def body(self):
@@ -188,7 +218,10 @@ class Driver:
         decision = run.control.fetch(run.domain, run.step) if run.comm.leader else None
         decision = run.comm.broadcast(decision)
         timing.t_ctrl_fetch = time.perf_counter() - t
+        if decision.phase == 'done':  # the control node has nothing left for this domain
+            return decision
         t = time.perf_counter()
+        run.control.apply(decision)
         if decision.sleep_until is not None and decision.sleep_until > now:
             wait = decision.sleep_until - now
             run.clock.sleep(wait)
@@ -202,15 +235,15 @@ class Driver:
         ok, tokens = True, 0
         try:
             if decision.need_prefill_forward:
-                for replica in run.replicas:
+                for replica in run.local_replicas:
                     seqs = prefill_rows.get(replica, [])
                     if seqs:
-                        seconds, count = run.backend.prefill(replica, seqs, run.ledger)
+                        seconds, count = run.backend.prefill(replica, seqs, run.ledger, run.policy)
                         timing.t_prefill += seconds
                         tokens += count  # the prefill's last position is each request's first generated token
                     else:
                         timing.t_sync += run.backend.dummy(replica, 'prefill')
-            for replica in run.replicas:
+            for replica in run.local_replicas:
                 rows = [row for row in run.ledger.replica(replica).running.values() if row.seq not in prefill_rows.get(replica, [])]
                 if rows:
                     seconds, count = run.backend.decode(replica, rows, run.ledger, run.policy)
@@ -228,20 +261,24 @@ class Driver:
         for row in done:
             run.backend.release(row.replica, row.seq)
             run.request_log.setdefault(row.seq, {}).update(t_done=run.clock() + timing.step_time, finish_step=run.step)
-        run.completed += len(done)
-        run.timeline.step(**self.timeline_row(decision, timing, len(done), tokens))
+        local_done = sum(1 for row in done if row.replica in run.local_replicas)  # this process's replicas only
+        run.completed += local_done
+        run.timeline.step(**self.timeline_row(decision, timing, local_done, tokens))
         run.clock.advance(timing.step_time)
-        trigger = run.executor.poll(self.anchor_state()) if run.executor is not None else None
+        if run.executor is not None:
+            trigger = run.executor.poll(self.anchor_state())
+        else:  # the control node orders switches (fail-stop events) through the decision
+            trigger = None if decision.switch is None else SimpleNamespace(kind='control', step=run.step, overshoot=0, direction=decision.switch)
         if not run.comm.all_ready(ok):
             raise RuntimeError(f'a rank failed at step {run.step}: {getattr(run, "failure", "peer")}')
         if trigger is not None:
             # Freeze now so the decision pushed for the next step admits nothing; the switch runs at its start.
             self.pending_trigger = trigger
-            run.control.frozen[run.domain] = True
-            run.control.phase[run.domain] = 'switching'
+            run.control.set_phase(run.domain, True, 'switching')
         run.step += 1
-        if run.comm.leader:
-            run.control.push(run.domain, run.step, run.replicas)
+        # Every rank reports the step; a remote control writes only from the leader but keeps the message count
+        # in step on all ranks, so a leader change (fail-stop renumbers ranks) continues the sequence.
+        run.control.push(run.domain, run.step, run.replicas)
         return decision
 
     def anchor_state(self):
@@ -253,23 +290,25 @@ class Driver:
 
     def timeline_row(self, decision, timing, completed, tokens):
         run = self.run
-        controller = run.control.controller
         snapshot = run.ledger.snapshot(run.step)
         return {'t': run.clock(), 'step': run.step, 'layout': run.layout, 'phase': decision.phase, 'gen_tokens': tokens,
                 'prefill_tokens': sum(decision.prefill_tokens.get(r, 0) for r in run.replicas),
                 'admitted': len(decision.admits), 'completed': completed,
-                'queue_len': len(controller.queue) - controller.pointer, 'head_block_reason': decision.head_block_reason,
+                'queue_len': decision.queue_len, 'head_block_reason': decision.head_block_reason,
                 'running': [snapshot[r]['n'] for r in run.replicas], 'kv_used_tokens': [snapshot[r]['used'] for r in run.replicas],
                 'kv_bytes_per_card': [run.backend.kv_bytes(r) for r in run.replicas], 'step_time': timing.step_time,
                 **timing.as_dict(), 'mem_alloc': run.backend.memory() if run.step % 10 == 0 else None,
                 'mem_peak': run.backend.memory() if run.step % 10 == 0 else None}
 
     # ---- switch -----------------------------------------------------------------------------------------------
-    def switch(self):
+    def switch(self, trigger):
         """Freeze -> peak -> compact -> base wave (foreground logical steps) -> audit -> delta -> validation ->
         cutover -> release -> regroup -> thaw; exposed waits become stall rows."""
         run = self.run
-        current = run.executor.current
+        if run.executor is not None:
+            current = run.executor.current
+        else:
+            current = plan_executor.Switch(len(run.switches), trigger.direction, None, {'kind': 'control'}, triggered=trigger)
         if run.hooks is not None:
             run.hooks.before(current.direction, run)
         stepped = {'seconds': 0.0}
@@ -281,15 +320,15 @@ class Driver:
             stepped['seconds'] += run.clock() - before
 
         switcher = run.backend.switcher(run, current.direction)
-        outcome = plan_executor.perform_switch(current, controller=run.control.controller, events=run.events, switcher=switcher,
+        outcome = plan_executor.perform_switch(current, control=run.control, events=run.events, switcher=switcher,
                                                validation=run.factories.validate_cutover, step=lambda: run.step, now=run.clock,
                                                peak=run.peak, decode_fn=decode_fn, growth=run.growth.get(current.direction, 0))
         run.switches.append(outcome)
-        run.executor.complete()
+        if run.executor is not None:
+            run.executor.complete()
         if run.hooks is not None:
             run.hooks.after(current.direction, run)
-        run.control.frozen[run.domain] = False
-        run.control.phase[run.domain] = 'normal'
+        run.control.set_phase(run.domain, False, 'normal')
         exposed = run.clock() - stall_start - stepped['seconds']
         if exposed > 1e-12:
             run.timeline.stall(t=run.clock(), step=run.step, layout=run.layout, reason=f'switch:{current.direction}', seconds=exposed)
@@ -338,5 +377,18 @@ def run_until_idle(drivers, max_steps):
         if control.idle():
             for driver in drivers:
                 driver.run.timeline.close()
+            return True
+    raise RuntimeError(f'run did not finish within {max_steps} steps')
+
+
+def run_until_done(drivers, max_steps):
+    """Remote control: every domain steps until its decision says done."""
+    pending = list(drivers)
+    for _ in range(max_steps):
+        for driver in list(pending):
+            if driver.step().phase == 'done':
+                driver.run.timeline.close()
+                pending.remove(driver)
+        if not pending:
             return True
     raise RuntimeError(f'run did not finish within {max_steps} steps')

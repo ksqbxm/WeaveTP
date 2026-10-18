@@ -8,7 +8,7 @@ from .requests_io import sha256_file
 VOCAB = 16
 
 
-def write_toy_inputs(directory, count=24, long_every=3, switches=None, failstop=False):
+def write_toy_inputs(directory, count=24, long_every=3, switches=None, failstop=False, rejoin_seconds=1.0):
     """requests.jsonl, workload.json and plan.json under `directory`; returns their paths.
 
     Prompts are 5-7 tokens, outputs 3-9 tokens; the workload is two segments (short, long);
@@ -33,7 +33,7 @@ def write_toy_inputs(directory, count=24, long_every=3, switches=None, failstop=
     if failstop:
         plan = {'version': 'v2-failstop', 'request_file_sha256': digest, 'events': [
             {'id': 'fail', 'type': 'fail', 'anchor': {'kind': 'completed_count', 'fraction': 0.25}},
-            {'id': 'rejoin', 'type': 'rejoin', 'anchor': {'kind': 'after_event_seconds', 'event': 'fail', 'seconds': 1.0},
+            {'id': 'rejoin', 'type': 'rejoin', 'anchor': {'kind': 'after_event_seconds', 'event': 'fail', 'seconds': rejoin_seconds},
              'wait_for': 'shrink_done'}]}
     else:
         plan = {'version': 'v2', 'request_file_sha256': digest, 'switches': switches or []}

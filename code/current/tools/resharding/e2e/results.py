@@ -19,9 +19,7 @@ def build_result(*, method, workload_id, segments_run, request_rows, switches, p
                  duration_s, logical_steps, failstop=None):
     result = {'schema_version': SCHEMA_VERSION, 'method': method, 'workload_id': workload_id, 'segments_run': list(segments_run),
               'totals': totals(request_rows, duration_s, logical_steps), 'switches': switches, 'requests': request_rows,
-              'phase_durations_s': phase_durations_s, 'attention_impl': attention_impl, 'config': config}
-    if failstop is not None:
-        result['failstop'] = failstop
+              'phase_durations_s': phase_durations_s, 'attention_impl': attention_impl, 'config': config, 'failstop': failstop}
     return result
 
 

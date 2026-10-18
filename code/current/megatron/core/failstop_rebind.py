@@ -119,6 +119,13 @@ class ModelBinding:
             self.log.append(report)
             return report
 
+    def refresh(self):
+        """The same communicators serve the next epoch (emulate): follow the resources' generation."""
+        with self.resources.lock:
+            require(not self.resources.ready and not self.resources.pending, 'refresh requires a quiescent forward/work boundary')
+            self.generation = self.resources.generation
+            self.log.append({'changes': [], 'refresh': True, 'bound_layout': self.layout})
+
     def close(self):
         self.forward_ready = False
         for hook in self.hooks:

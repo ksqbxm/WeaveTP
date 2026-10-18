@@ -6,6 +6,7 @@ from tools.resharding.e2e import controller as ctl
 from tools.resharding.e2e import (
     factories,
     failstop_adapter,
+    live_runtime,
     plan_executor,
     results,
     timeline,
@@ -71,7 +72,7 @@ def run_switch(tmp_path, validation, peak):
         decoded.append(phase)
         steps['n'] += 1
 
-    outcome = plan_executor.perform_switch(executor.current, controller=controller, events=events, switcher=switcher,
+    outcome = plan_executor.perform_switch(executor.current, control=live_runtime.ControlNode(controller, lambda: 0.0), events=events, switcher=switcher,
                                            validation=validation, step=lambda: steps['n'], now=lambda: 1.0, peak=peak,
                                            decode_fn=decode_fn, growth=0)
     executor.complete()
@@ -110,7 +111,7 @@ def test_drain_mode_polls_decode_until_the_budget_fits(tmp_path):
         running = [row for s in controller.ledger.replicas.values() for row in s.running.values()]
         controller.ledger.replica(running[0].replica).remove(running[0].seq)
 
-    outcome = plan_executor.perform_switch(executor.current, controller=controller, events=timeline.SwitchEventWriter(tmp_path / 'e.jsonl'),
+    outcome = plan_executor.perform_switch(executor.current, control=live_runtime.ControlNode(controller, lambda: 0.0), events=timeline.SwitchEventWriter(tmp_path / 'e.jsonl'),
                                            switcher=FakeSwitcher(), validation=plan_executor.ToleranceValidation(False),
                                            step=lambda: state['step'], now=lambda: 0.0, peak={'mode': 'drain', 'budget': budget},
                                            decode_fn=decode_fn, growth=0)

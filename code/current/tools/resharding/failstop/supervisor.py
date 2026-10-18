@@ -14,6 +14,7 @@ from pathlib import Path
 from common import (
     ASYNC_PROBE,
     MODEL_PROBE,
+    SERVING_PROBE,
     STEP_PROBES,
     TOPOLOGY_PROBES,
     Journal,
@@ -97,7 +98,7 @@ class Supervisor:
                    "TORCH_FR_DUMP_TEMP_FILE": str(self.root / f"flight_{slot}_"),
                    "TORCH_NCCL_TRACE_BUFFER_SIZE": "10000"}
             child, record = self.children.spawn(
-                [sys.executable, str(HERE / {ASYNC_PROBE: "async_worker.py", MODEL_PROBE: "model_worker.py",
+                [sys.executable, str(HERE / {ASYNC_PROBE: "async_worker.py", MODEL_PROBE: "model_worker.py", SERVING_PROBE: "serving_worker.py",
                                             **{p: "topology_worker.py" for p in TOPOLOGY_PROBES.values()}}.get(
                                             self.config.get("probe"), "worker.py")),
                  "--config", str(self.root / "worker_config.json"),
@@ -279,7 +280,7 @@ def main():
         journal.event("process_exit")
         return
     _, bus = connect(config)
-    if config.get("probe") in STEP_PROBES.values() and config["mode"] == "emulate":
+    if config.get("probe") in (*STEP_PROBES.values(), SERVING_PROBE) and config["mode"] == "emulate":
         from topology_probe import EmulateSupervisor
 
         supervisor = EmulateSupervisor(config, bus, journal)

@@ -62,9 +62,9 @@ class FakeBackend:
                     key[group, offset, layer, head] = torch.tensor([kv_row(layer, position, head, d, token) for d in range(context.pool.k_dim)])
                     value[group, offset, layer, head] = torch.tensor([-kv_row(layer, position, head, d, token) for d in range(context.pool.v_dim)])
 
-    def prefill(self, replica, seqs, ledger):
+    def prefill(self, replica, seqs, ledger, policy):
         context = self.contexts[replica]
-        tokens = 0
+        tokens, rows, logits = 0, [ledger.row(seq) for seq in seqs], []
         for seq in seqs:
             # A replayed request prefills its prompt plus the tokens it had already committed.
             history = list(self.histories.get(seq, self.prompts[seq]))[:ledger.row(seq).input_len]
@@ -74,7 +74,11 @@ class FakeBackend:
             for position, token in enumerate(history):
                 self.write_token(context, seq, position, token)
             tokens += len(history)
-            self.histories[seq].append(int(logits_for(history).argmax()))
+            logits.append(logits_for(history))
+        for row in rows:
+            row.generated_so_far = row.generated_at_admit
+        for seq, token in zip(seqs, policy.next_tokens(torch.stack(logits), rows)):
+            self.histories[seq].append(int(token))
         a, rate = PREFILL[self.layout(replica)]
         return a + tokens / rate, len(seqs)
 
@@ -232,7 +236,11 @@ class FakeSwitcher:
         return {'mode': mode, 'passed': not mismatches, 'mismatches': mismatches}
 
     def cutover(self, direction):
-        self.run.control.controller.ledger = self.target_ledger
+        if self.direction in ('2->4', '4->2'):
+            self.run.control.replace_ledger(self.target_ledger, 'regroup', self.target_replicas(), to_tp=4 if self.direction == '2->4' else 2)
+        else:
+            rank_map = {str(r): {'tp': s['tp'], 'ranks': list(s['ranks'])} for r, s in self.target_ledger.rank_map.replicas.items()}
+            self.run.control.replace_ledger(self.target_ledger, 'relabel', self.target_replicas(), rank_map=rank_map)
         self.backend.rank_map = self.target_ledger.rank_map
 
     def release_source(self, direction):
@@ -241,4 +249,4 @@ class FakeSwitcher:
         self.backend.contexts.update(self.targets)
 
     def regroup(self, direction):
-        self.run.replicas = self.target_replicas()
+        self.run.replicas = self.run.local_replicas = self.target_replicas()  # the fake steps every replica of its domain

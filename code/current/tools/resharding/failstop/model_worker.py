@@ -156,11 +156,15 @@ class Worker:
         self.pack = pack
         if self.binding is not None and (self.healthy or phase == 2):
             # Only a model that keeps serving is rebound, and only when the world rebuilt its communicators.
+            # Rebind at every epoch, also onto the same (emulate) groups: the binding's generation must follow the
+            # session's, or the first forward after the transition is refused as stale.
             groups = pack['target'] if self.healthy else pack['service2']
-            if groups is not self.binding.groups:
-                self.session.resources.ready = False
+            self.session.resources.ready = False
+            if groups is self.binding.groups:
+                self.binding.refresh()
+            else:
                 self.binding.rebind(groups)
-                self.session.resources.activate(self.session.cache_key())
+            self.session.resources.activate(self.session.cache_key())
             require(groups.local_ranks['expt_tp'] == (self.coord if self.healthy else self.tp2_coord),
                     'rebind changed the serving shard coordinate')
         return pack

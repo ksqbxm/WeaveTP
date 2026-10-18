@@ -524,6 +524,11 @@ class Attention(MegatronModule, ABC):
         attn_mask_type = self.attn_mask_type
         if inference_context is None:
             return query, key, value, rotary_pos_emb, attn_mask_type, None
+        if getattr(inference_context, 'is_block_kv', False):
+            # Block-level KV (tools/resharding/e2e/block_kv.py): the context appends this layer's
+            # K/V into its block pool; attention is dispatched by the MLA core-attention hook.
+            query, key, value = inference_context.adjust_key_value(self.layer_number, query, key, value)
+            return query, key, value, rotary_pos_emb, AttnMaskType.no_mask, None
 
         # =================================================
         # Pre-allocate memory for key-values for inference.

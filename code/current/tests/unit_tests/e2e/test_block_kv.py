@@ -170,3 +170,27 @@ def test_paged_reference_splitkv_and_selection():
     else:
         with pytest.raises(RuntimeError, match='not importable'):
             attention_paged.select_implementation('triton')
+
+
+def test_compaction_scratch_block_stays_outside_the_destination_range():
+    """Released low block ids must not become the scratch block: the first request's blocks are freed, the
+    second request (sitting on high ids) is compacted down onto them and keeps its content."""
+    pool = block_kv.BlockPool(groups=1, group_heads=1, k_dim=2, v_dim=2, block_tokens=4, segment_tokens=16, layers=1, dtype=torch.float32)
+    context = block_kv.BlockKVContext(pool, max_delta_steps=2)
+    context.admit(0, 7)
+    context.admit(1, 9)
+    context.prepare_step(prefill=[(0, 7), (1, 9)], decode=[])
+    for seq in (0, 1):
+        table = context.tables[seq]
+        for position in range(table.length):
+            block, offset = table.position(position, 4)
+            key, value = pool.block_views(block)
+            key[0, offset] = float(100 * seq + position)
+            value[0, offset] = float(-(100 * seq + position))
+    context.release(0)
+    before = attention_paged.gather_request(pool, 0, context.tables[1].blocks, 9)
+    block_kv.compact(context, {1: 0})
+    assert sorted(context.tables[1].blocks)[:2] == [0, 1]  # moved down onto the freed ids
+    after = attention_paged.gather_request(pool, 0, context.tables[1].blocks, 9)
+    assert torch.equal(before[0], after[0]) and torch.equal(before[1], after[1])
+

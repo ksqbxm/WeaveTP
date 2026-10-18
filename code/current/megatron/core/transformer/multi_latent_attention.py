@@ -372,6 +372,12 @@ class MultiLatentAttention(Attention):
             core_attn_out = self._checkpointed_attention_forward(
                 query, key, value, attention_mask, packed_seq_params=packed_seq_params
             )
+        elif getattr(inference_context, 'is_block_kv', False):
+            # Block-level KV: prefill is dense over the block-diagonal mask, decode is paged.
+            core_attn_out = inference_context.core_attention(
+                self.layer_number, query, key, value, attention_mask,
+                dense_attention=self.core_attention, softmax_scale=self.softmax_scale,
+            )
         else:
             if inference_context is None or inference_context.is_static_batching():
                 extra_kwargs = {}
@@ -888,7 +894,10 @@ class MLASelfAttention(MultiLatentAttention):
                 )
             else:
                 q_len = q.size()[0]
-                if inference_context is not None:
+                if getattr(inference_context, 'rotary_positions', None) is not None:
+                    # Block-level KV: one position per token (yarn's mscale is position independent).
+                    rotary_pos_emb = rotary_pos_emb[inference_context.rotary_positions]
+                elif inference_context is not None:
                     # add offset to the sequence start for inference
                     sequence_start = inference_context.sequence_len_offset
                     sequence_end = sequence_start + q_len

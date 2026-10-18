@@ -17,20 +17,29 @@ import run_topology
 
 class QuickTests(unittest.TestCase):
     def run_driver(self, *, failure=None, peer='PASS', step=2, child_output=b'', min_free=None, node='SL3060',
-                   single_node=False):
+                   single_node=False, layer='a'):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             logs = root / 'kickoff' / 'local'
             logs.mkdir(parents=True)
             layouts = ['tp2', 'tp4'] if single_node else ['tp2']
-            flags = {'quick_mode': True, 'correctness_only': True, 'shared_gpu_mode': step != 6, 'timing_valid': False, 'accepted': False}
+            flags = {'quick_mode': True, 'correctness_only': True, 'shared_gpu_mode': step != 6 or layer != 'a', 'timing_valid': False,
+                     'accepted': False}
+            layers = {'a': {'passed': failure != 'metric', 'runs': {'scaling': {'check_passed': True, 'switches': ['2->4', '4->2']},
+                                                                   'failstop': {'check_passed': failure != 'metric', 'switches': ['shrink', 'expand']}},
+                            'tests': {'passed': True, 'summary_line': '35 passed'}},
+                      'b1': {'passed': failure != 'metric', 'nrmse_max': 0.012, 'cosine_min': 0.999, 'top1_agreement': 1.0,
+                             'm1_ms': {'static_decode': 30.0, 'block_alone_decode': 31.0, 'block_batched_decode': 34.0},
+                             'attention_impl': {'decode': 'torch_splitkv', 'reason': 'requested'}, 'memory': {'physical_vs_segment_accounting_error': 0.0}},
+                      'b2': {'passed': failure != 'metric', 'in_process_bitwise': {'tp2_a': True, 'tp2_b': True, 'tp4': True},
+                             'cross_process_tp2_bitwise': failure != 'metric', 'forwards': {'tp4': 140}, 'crossed_block_boundary': True},
+                      'b3': {'passed': failure != 'metric', 'mode': 'emulate', 'metrics': {'requests_completed': 24, 'check_passed': True},
+                             'files': {'result.json': '/data/x/result.json'}}}
             summary = ({**flags, 'all_checks_passed': True, 'layouts_requested': layouts,
                         'deterministic_step_time_ratio': {} if failure == 'metric' else {l: {'median_ratio': 1.25} for l in layouts}}
                        if step == 5 else
-                       {**flags, 'all_checks_passed': failure != 'metric', 'backend': 'fake', 'single_node': True, 'gpus_used': 0,
-                        'runs': {'scaling': {'check_passed': True, 'switches': ['2->4', '4->2']},
-                                 'failstop': {'check_passed': failure != 'metric', 'switches': ['shrink', 'expand']}},
-                        'tests': {'passed': True, 'summary_line': '29 passed'}}
+                       {**flags, 'all_checks_passed': failure != 'metric', 'layer': layer, 'backend': 'fake' if layer == 'a' else 'block',
+                        'single_node': layer != 'b3', 'gpus_used': 0 if layer == 'a' else 8, 'layers': {layer: layers[layer]}}
                        if step == 6 else
                        {**flags, 'all_cases_passed': True, 'emulate': 'passed', 'real': 'passed',
                         'edp1_rejoin_pause_s': None if failure == 'metric' else 0.5})
@@ -70,6 +79,7 @@ class QuickTests(unittest.TestCase):
                 stack.enter_context(patch.dict(sys.modules, fcntl=SimpleNamespace(LOCK_EX=1, LOCK_NB=2, flock=Mock())))
                 stack.enter_context(patch.object(sys, 'argv', ['quick_driver', '--node', node, '--sha', 'a' * 40,
                                                               '--repo', str(root), '--log-dir', str(logs), '--step', str(step)] +
+                                                 (['--layer', layer] if step == 6 else []) +
                                                  ([] if min_free is None else ['--min-free-disk-gb', str(min_free)]) +
                                                  (['--single-node'] if single_node else [])))
                 stack.enter_context(patch.object(subprocess, 'check_output', side_effect=git))
@@ -90,7 +100,9 @@ class QuickTests(unittest.TestCase):
                 argv = popen.call_args.args[0]
                 self.assertEqual(float(argv[argv.index('--min-free-disk-gb') + 1]), 1.0 if min_free is None else min_free)
                 self.assertEqual(('--mode' in argv, argv[2].endswith({6: 'run_serving.py', 5: 'run_model.py', 4: 'run_async.py',
-                                                                      3: 'run_sources.py', 2: 'run_topology.py'}[step])), (step < 5, True))
+                                                                      3: 'run_sources.py', 2: 'run_topology.py'}[step])),
+                                 (step < 5 or (step == 6 and layer == 'b3'), True))
+                self.assertEqual('--layer' in argv and argv[argv.index('--layer') + 1] == layer, step == 6)
                 self.assertEqual('--layouts' in argv and argv[argv.index('--layouts') + 1] == 'tp2,tp4', single_node and step == 5)
                 self.assertEqual((logs / 'runner.log').read_bytes(), child_output)
             else:
@@ -193,13 +205,30 @@ class QuickTests(unittest.TestCase):
                          ('PASS', 6, True, 300, False))
         self.assertTrue(result['suite'].startswith('s6q_') and result['suite'].endswith('_single'))
         self.assertEqual(result['runs'], {'scaling': ['2->4', '4->2'], 'failstop': ['shrink', 'expand']})
-        self.assertIn('QUICK CHECK step=6 result=PASS', result['output'])
+        self.assertIn('QUICK CHECK step=6 layer=a result=PASS', result['output'])
         self.assertIn('backend=fake single_node=true accepted=false', result['output'])
         failed = self.run_driver(step=6, single_node=True, failure='metric')
         self.assertEqual(failed['result'], 'FAIL')
-        self.assertIn('fake-backend', failed['error'])
+        self.assertIn('layer a', failed['error'])
         self.assertIn('pytest.log', self.run_driver(step=6, single_node=True, failure='suite')['error'])
         with self.assertRaises(SystemExit):  # Step 6 has no two-node form
             self.run_driver(step=6)
+
+    def test_step6_real_model_layers_single_node_and_two_node(self):
+        for layer in ('b1', 'b2'):
+            result = self.run_driver(step=6, single_node=True, layer=layer)
+            self.assertEqual((result['result'], result['layer'], result['shared_gpu_mode'], result['budget_s']), ('PASS', layer, True, 300))
+            self.assertIn(f'QUICK CHECK step=6 layer={layer} result=PASS', result['output'])
+            self.assertIn('backend=block attention=torch_splitkv', result['output'])
+            self.assertEqual(self.run_driver(step=6, single_node=True, layer=layer, failure='metric')['result'], 'FAIL')
+        b3 = self.run_driver(step=6, layer='b3')  # two nodes: the rendezvous assigns the suite
+        self.assertEqual((b3['result'], b3['single_node'], b3['layer']), ('PASS', False, 'b3'))
+        self.assertIn('single_node=false', b3['output'])
+        with self.assertRaises(SystemExit):
+            self.run_driver(step=6, layer='b3', single_node=True)
+        with self.assertRaises(SystemExit):
+            self.run_driver(step=6, layer='b1')
+
+
 if __name__ == '__main__':
     unittest.main()

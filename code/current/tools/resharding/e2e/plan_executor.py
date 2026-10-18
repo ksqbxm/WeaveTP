@@ -66,7 +66,7 @@ class PlanExecutor:
         self.armed += 1
 
 
-def perform_switch(switch, *, controller, events, switcher, validation, step, now, peak, decode_fn, growth):
+def perform_switch(switch, *, control, events, switcher, validation, step, now, peak, decode_fn, growth):
     """Run one switch; `switcher` supplies the GPU-facing steps (compact, base, audit, delta, cutover, release, regroup).
 
     peak: {'mode': 'drain'|'evict', 'budget': bytes} - drain waits (polling decode_fn) until the
@@ -84,11 +84,11 @@ def perform_switch(switch, *, controller, events, switcher, validation, step, no
     mark('peak_wait_start')
     if peak is not None:
         if peak['mode'] == 'evict':
-            outcome.evictions = controller.evict_for_peak(step(), direction, growth, peak['budget'])
+            outcome.evictions = control.evict_for_peak(step(), direction, growth, peak['budget'])
             if outcome.evictions:
                 mark('peak_eviction', evicted=outcome.evictions, count=len(outcome.evictions))
         else:
-            while not ctl.peak_check(controller.ledger, step(), direction, growth, peak['budget']):
+            while not control.peak_ok(step(), direction, growth, peak['budget']):
                 decode_fn(phase='drain')
     mark('peak_wait_end')
     compact = switcher.compact(direction)

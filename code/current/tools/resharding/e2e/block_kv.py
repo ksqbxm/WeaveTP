@@ -13,6 +13,7 @@ renderers emit Megatron `TransferOp`s or Step 3 `Shard`s from the same moves, so
 
 import math
 from dataclasses import dataclass
+from types import SimpleNamespace
 
 import torch
 
@@ -39,13 +40,21 @@ class BlockPool:
         self.in_use = set()
 
     # ---- allocation (K1) --------------------------------------------------------------------------------------
-    def _new_segment(self):
+    def _new_segment(self, index=None):
+        """Back segment `index` (default: the first hole, else a new one); zero-filled so masked V rows never carry NaN."""
         shape = (self.groups, self.segment_tokens, self.layers, self.group_heads)
-        key = torch.empty((*shape, self.k_dim), dtype=self.dtype, device=self.device)
-        value = torch.empty((*shape, self.v_dim), dtype=self.dtype, device=self.device)
-        index = len(self.segments)
-        self.segments.append((key, value))
+        key = torch.zeros((*shape, self.k_dim), dtype=self.dtype, device=self.device)
+        value = torch.zeros((*shape, self.v_dim), dtype=self.dtype, device=self.device)
+        if index is None:
+            holes = [i for i, s in enumerate(self.segments) if s is None]
+            index = holes[0] if holes else len(self.segments)
+        if index == len(self.segments):
+            self.segments.append((key, value))
+        else:
+            require(self.segments[index] is None, f'segment {index} is already backed')
+            self.segments[index] = (key, value)
         self.free.extend(range(index * self.blocks_per_segment, (index + 1) * self.blocks_per_segment))
+        return index
 
     def allocate(self, count):
         while len(self.free) < count:
@@ -137,16 +146,82 @@ class BlockKVContext:
 
     is_block_kv = True
 
-    def __init__(self, pool, *, max_sequence_length=16384 + 512, max_delta_steps=32):
+    def __init__(self, pool, *, max_sequence_length=16384 + 512, max_delta_steps=32, attention=None):
         self.pool, self.max_sequence_length, self.max_delta_steps = pool, max_sequence_length, max_delta_steps
         self.tables = {}
         self.key_value_memory_dict = {}
         self.sequence_len_offset = 0
+        self.max_batch_size, self.batch_size_offset = 1, 0
+        self.config = SimpleNamespace(materialize_only_last_token_logits=False)  # every token's logits are read
+        self.attention = attention  # paged decode: (q[T, np, dk], pool, layer, block_tables, lengths, scale) -> [T, np, dv]
         self.step = None
+        self.mode = None            # 'prefill' | 'decode' | 'dummy' while a forward runs
+        self.rotary_positions = None
+        self.writes = []
+        self.prefill_mask = self.block_tables = self.lengths = None
 
     @staticmethod
     def is_static_batching():
         return True
+
+    @staticmethod
+    def is_dynamic_batching():
+        return False
+
+    def is_decode_only(self):
+        return self.mode == 'decode'
+
+    # ---- forward side (the three Megatron hooks call these) -------------------------------------------------
+    def begin_forward(self, mode, device):
+        """Arm the hooks for one forward: positions, per-segment write indices, mask or block tables."""
+        require(mode in ('prefill', 'decode', 'dummy'), f'unknown forward mode {mode}')
+        step = self.step
+        self.mode = mode
+        if mode == 'dummy':
+            self.rotary_positions = torch.zeros(1, dtype=torch.int64, device=device)
+            self.writes = []
+            return
+        total = sum(length for _, length in step['prefill'])
+        if mode == 'prefill':
+            tokens = range(total)
+            self.prefill_mask = step['prefill_mask'][None, None].to(device)
+        else:
+            tokens = range(total, total + len(step['decode']))
+            self.block_tables = step['block_tables'].to(device)
+            self.lengths = step['lengths'].to(device)
+        self.rotary_positions = step['positions'][tokens.start:tokens.stop].to(device)
+        by_segment = {}
+        for index, token in enumerate(tokens):
+            block, offset = step['slots'][token]
+            segment, position = self.pool.locate(block)
+            by_segment.setdefault(segment, ([], []))
+            by_segment[segment][0].append(index)
+            by_segment[segment][1].append(position * self.pool.block_tokens + offset)
+        self.writes = [(segment, torch.tensor(idx, dtype=torch.int64, device=device), torch.tensor(pos, dtype=torch.int64, device=device))
+                       for segment, (idx, pos) in sorted(by_segment.items())]
+
+    def end_forward(self):
+        self.mode = self.rotary_positions = None
+        self.writes = []
+
+    def adjust_key_value(self, layer_number, query, key, value):
+        """Hook 1: append this layer's K/V ([S, 1, np, dim], post-RoPE) into the blocks; dummy forwards write nothing."""
+        if self.mode != 'dummy':
+            layer = layer_number - 1
+            pool = self.pool
+            for segment, idx, pos in self.writes:
+                kseg, vseg = pool.segments[segment]
+                n = idx.numel()
+                kseg[:, pos, layer] = key[idx, 0].reshape(n, pool.groups, pool.group_heads, key.shape[-1]).permute(1, 0, 2, 3).to(kseg.dtype)
+                vseg[:, pos, layer] = value[idx, 0].reshape(n, pool.groups, pool.group_heads, value.shape[-1]).permute(1, 0, 2, 3).to(vseg.dtype)
+        return query, key, value
+
+    def core_attention(self, layer_number, query, key, value, attention_mask, *, dense_attention, softmax_scale):
+        """Hook 2: decode attends over the blocks (paged), prefill densely over the block-diagonal mask, dummy over itself."""
+        if self.mode == 'decode':
+            out = self.attention(query[:, 0], self.pool, layer_number - 1, self.block_tables, self.lengths, softmax_scale)
+            return out.reshape(query.shape[0], 1, -1).to(query.dtype)
+        return dense_attention(query, key, value, self.prefill_mask if self.mode == 'prefill' else None)
 
     def admit(self, seq, prompt_tokens):
         """Blocks for the prompt plus the first generated token's slot."""
@@ -221,10 +296,14 @@ def zone_blocks(context, assignment):
                 if zone == 'A':
                     order.extend(table.blocks[:full])
                 else:
-                    open_block = table.blocks[full:full + 1]
-                    order.extend(open_block)
+                    # The open block always exists (a request whose length fills its blocks exactly writes its next
+                    # token into a new one during the switch), plus the next block when fewer than max_delta_steps
+                    # slots remain, so nothing is allocated between compaction and the delta.
+                    if len(table.blocks) <= full:
+                        table.blocks.extend(pool.allocate(1))
+                    order.append(table.blocks[full])
                     slack = (full + 1) * pool.block_tokens - table.length
-                    if open_block and slack < context.max_delta_steps:
+                    if slack < context.max_delta_steps:
                         if len(table.blocks) <= full + 1:
                             table.blocks.extend(pool.allocate(1))
                         order.append(table.blocks[full + 1])
@@ -241,10 +320,18 @@ def compact(context, assignment):
     pool = context.pool
     order, zones = zone_blocks(context, assignment)
     require(len(set(order)) == len(order), 'a block appears twice in the compaction order')
-    # Positions are the lowest block ids still backed by a segment (released segments leave holes in the id space).
-    backed = [b for i, s in enumerate(pool.segments) if s is not None for b in range(i * pool.blocks_per_segment, (i + 1) * pool.blocks_per_segment)]
-    destination = {block: backed[position] for position, block in enumerate(order)}
-    spare = pool.allocate(1)[0]
+    # The compacted layout occupies block ids 0..n-1 (token coordinates KVPlanBuilder counts from zero);
+    # a released segment in that range is backed again first.
+    for segment in range(math.ceil(len(order) / pool.blocks_per_segment)):
+        if segment >= len(pool.segments) or pool.segments[segment] is None:
+            pool._new_segment(segment)
+    destination = {block: position for position, block in enumerate(order)}
+    # The temporary block must lie outside the destination range, or it would be both scratch and a target.
+    if not any(b >= len(order) for b in pool.free):
+        pool._new_segment()
+    spare = min(b for b in pool.free if b >= len(order))
+    pool.free.remove(spare)
+    pool.in_use.add(spare)
     spare_key, spare_value = pool.block_views(spare)
     moved = 0
     placed = {}
@@ -280,7 +367,7 @@ def compact(context, assignment):
     pool.in_use = {destination.get(block, block) for block in pool.in_use}
     pool.free = sorted(set(range(len(pool.segments) * pool.blocks_per_segment)) - pool.in_use
                        - {b for i, s in enumerate(pool.segments) if s is None for b in range(i * pool.blocks_per_segment, (i + 1) * pool.blocks_per_segment)})
-    runs = {key: pool.runs(backed[begin:end]) for key, (begin, end) in zones.items()}
+    runs = {key: pool.runs(list(range(begin, end))) for key, (begin, end) in zones.items()}
     return {'moved_blocks': moved, 'zones': zones, 'runs': runs, 'tokens': {key: (end - begin) * pool.block_tokens for key, (begin, end) in zones.items()}}
 
 
@@ -374,18 +461,15 @@ class KVPlanBuilder:
         return moves
 
     @staticmethod
-    def zone_tokens_from_tables(tables, assignment, block_tokens, max_delta_steps):
-        """(source, target, zone) -> tokens, from block tables and the same open-block rule compaction uses."""
+    def zone_tokens_from_tables(tables, assignment, block_tokens, max_delta_steps=None):
+        """(source, target, zone) -> tokens from compacted block tables: A = the full blocks, B = every block beyond
+        them (the open block and the reserved next one that compaction allocated)."""
         result = {}
         for seq, (source, target) in assignment.items():
             table = tables[seq]
             full = table.length // block_tokens
             result[source, target, 'A'] = result.get((source, target, 'A'), 0) + full * block_tokens
-            open_blocks = 1 if len(table.blocks) > full else 0
-            slack = (full + 1) * block_tokens - table.length
-            if open_blocks and slack < max_delta_steps:
-                open_blocks = 2
-            result[source, target, 'B'] = result.get((source, target, 'B'), 0) + open_blocks * block_tokens
+            result[source, target, 'B'] = result.get((source, target, 'B'), 0) + max(0, len(table.blocks) - full) * block_tokens
         return result
 
     # ---- renderers --------------------------------------------------------------------------------------------

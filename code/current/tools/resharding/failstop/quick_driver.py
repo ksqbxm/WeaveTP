@@ -98,14 +98,21 @@ def main():
     parser.add_argument('--sha', required=True)
     parser.add_argument('--repo', type=Path, required=True)
     parser.add_argument('--log-dir', type=Path, required=True)
+    parser.add_argument('--layer', choices=('a', 'b1', 'b2', 'b3'), default='a',
+                        help='Step 6: a = fake backend + CPU tests; b1/b2 = real model on one node; b3 = two-node fail-stop e2e')
+    parser.add_argument('--mode', choices=('emulate', 'real'), default='emulate', help='Step 6 b3: fault mode')
+    parser.add_argument('--profile-file', help='Step 6 b3: frozen Step 3 profile.json')
+    parser.add_argument('--reference-root', help='Step 6 b3: run_model.py output root with tp2/ and tp4/ reference hashes')
     parser.add_argument('--single-node', action='store_true',
                         help='Step 5: both layouts on this node without a peer (six checkpoint loads, 600 s budget); '
                              'Step 6: the CPU fake-backend check (always single node, no GPU)')
     args = parser.parse_args()
     if args.single_node and args.step not in (5, 6):
         parser.error('--single-node applies to Steps 5 and 6 only')
-    if args.step == 6 and not args.single_node:
-        parser.error('Step 6 (fake backend, CPU only) runs with --single-node')
+    if args.step == 6 and args.layer != 'b3' and not args.single_node:
+        parser.error('Step 6 layers a/b1/b2 run on one node: pass --single-node')
+    if args.step == 6 and args.layer == 'b3' and args.single_node:
+        parser.error('Step 6 layer b3 is the two-node fail-stop run: start both nodes without --single-node')
     # Two nodes split the Step 5 layouts within 300 s; one node runs both layouts and needs twice the budget.
     budget = 600 if args.step == 5 and args.single_node else 300
     started, deadline = time.monotonic(), time.monotonic() + budget
@@ -113,7 +120,8 @@ def main():
     conn = stream = child = None
     restore = False
     status = {'step': args.step, 'node': args.node, 'quick_mode': True, 'correctness_only': True,
-              'shared_gpu_mode': args.step != 6, 'timing_valid': False, 'accepted': False, 'result': 'FAIL',
+              'shared_gpu_mode': args.step != 6 or args.layer != 'a', 'timing_valid': False, 'accepted': False, 'result': 'FAIL',
+              'layer': args.layer if args.step == 6 else None,
               'single_node': args.single_node, 'budget_s': budget}
     # Steps share a checkout, so all quick steps must hold the same local lock.
     lock = (args.repo / '.failstop_quick.lock').open('w')
@@ -146,7 +154,10 @@ def main():
             2: 'run_topology.py', 3: 'run_sources.py', 4: 'run_async.py', 5: 'run_model.py', 6: 'run_serving.py'}[args.step]
         # Step 5 runs layouts under the deterministic contract (split across the two nodes, or both on one
         # node); Step 6 (A part) is the fake backend plus the e2e CPU tests; the fault matrix is Steps 2-4.
-        extra = {5: ['--layouts', 'tp2,tp4'] if args.single_node else [], 6: []}.get(
+        b3 = ['--mode', args.mode] + (['--profile-file', args.profile_file] if args.profile_file else []) + \
+            (['--reference-root', args.reference_root] if args.reference_root else [])
+        extra = {5: ['--layouts', 'tp2,tp4'] if args.single_node else [],
+                 6: ['--layer', args.layer] + (b3 if args.layer == 'b3' else [])}.get(
             args.step, ['--mode', 'both', '--rounds', '1', '--real-launches', '1'])
         argv = [sys.executable, '-B', str(entry), '--node', args.node, '--suite-id', suite, '--output', str(run), *extra,
                 '--quick', '--correctness-only', '--budget-seconds', str(max(1, deadline - time.monotonic() - 45)),
@@ -172,7 +183,8 @@ def main():
             status['runner_error'] = runner_error(tail)
             raise RuntimeError(f"runner exited {code}: {status['runner_error']} ({hint}; full output: {runner_log})")
         summary = json.loads((run / args.node / 'summary.json').read_text())
-        flags = (summary['quick_mode'] and summary['correctness_only'] and summary['shared_gpu_mode'] == (args.step != 6) and
+        flags = (summary['quick_mode'] and summary['correctness_only'] and
+                 summary['shared_gpu_mode'] == (args.step != 6 or args.layer != 'a') and
                  not summary['timing_valid'] and not summary['accepted'])
         if args.step == 5:
             ratios = summary.get('deterministic_step_time_ratio') or {}
@@ -185,13 +197,24 @@ def main():
             status['layouts'] = summary['layouts_requested']
             status['deterministic_step_time_ratio'] = {layout: ratio['median_ratio'] for layout, ratio in ratios.items()}
         elif args.step == 6:
-            runs = summary['runs']
-            if not (summary['all_checks_passed'] and flags and summary['backend'] == 'fake' and summary['single_node'] and
-                    summary['gpus_used'] == 0 and summary['tests']['passed'] and set(runs) == {'scaling', 'failstop'} and
-                    all(r['check_passed'] for r in runs.values())):
-                raise RuntimeError('incomplete Step 6 fake-backend checks')
-            status['runs'] = {name: r['switches'] for name, r in runs.items()}
-            status['tests'] = summary['tests']['summary_line']
+            layer = summary['layers'][args.layer]
+            if not (summary['all_checks_passed'] and flags and summary['layer'] == args.layer and layer['passed'] and
+                    summary['single_node'] == (args.layer != 'b3')):
+                raise RuntimeError(f'incomplete Step 6 layer {args.layer} checks')
+            if args.layer == 'a':
+                runs = layer['runs']
+                if not (summary['backend'] == 'fake' and summary['gpus_used'] == 0 and layer['tests']['passed'] and
+                        set(runs) == {'scaling', 'failstop'} and all(r['check_passed'] for r in runs.values())):
+                    raise RuntimeError('incomplete Step 6 fake-backend checks')
+                status['runs'] = {name: r['switches'] for name, r in runs.items()}
+                status['tests'] = layer['tests']['summary_line']
+            elif args.layer == 'b1':
+                status['b1'] = {k: layer[k] for k in ('nrmse_max', 'cosine_min', 'top1_agreement', 'm1_ms', 'attention_impl')}
+                status['b1']['pool_error'] = layer['memory']['physical_vs_segment_accounting_error']
+            elif args.layer == 'b2':
+                status['b2'] = {k: layer[k] for k in ('in_process_bitwise', 'cross_process_tp2_bitwise', 'forwards', 'crossed_block_boundary')}
+            else:
+                status['b3'] = {'mode': layer['mode'], 'metrics': layer.get('metrics'), 'files': layer.get('files')}
         else:
             if not (summary['all_cases_passed'] and flags and summary['emulate'] == summary['real'] == 'passed'):
                 raise RuntimeError('incomplete emulate/real correctness matrix')
@@ -255,9 +278,13 @@ def main():
         code = 0 if status['result'] == 'PASS' else 1
         (args.log_dir / 'exit_code').write_text(str(code) + '\n')
         print(json.dumps(status, indent=2), flush=True)
-        if args.step == 6:
-            print(f"QUICK CHECK step=6 result={status['result']} (fake backend: controller/kv/anchors/decode/timeline, "
+        if args.step == 6 and args.layer == 'a':
+            print(f"QUICK CHECK step=6 layer=a result={status['result']} (fake backend: controller/kv/anchors/decode/timeline, "
                   f"failstop cycle; runs={status.get('runs')}; tests={status.get('tests')}) backend=fake single_node=true "
+                  f"accepted=false logs={run}", flush=True)
+        elif args.step == 6:
+            print(f"QUICK CHECK step=6 layer={args.layer} result={status['result']} ({json.dumps(status.get(args.layer), default=str)}) "
+                  f"backend=block attention=torch_splitkv shared_gpu_mode=true single_node={str(args.single_node).lower()} "
                   f"accepted=false logs={run}", flush=True)
         elif args.step == 5:
             print(f"QUICK CHECK step=5 result={status['result']} (memory preflight, deterministic reference/candidate "

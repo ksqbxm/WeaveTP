@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from tools.resharding.e2e import controller as ctl
+from tools.resharding.e2e.decode_policy import Greedy
 from tools.resharding.e2e.timeline import read_jsonl
 from tools.resharding.e2e.toy_inputs import write_toy_inputs as write_inputs
 
@@ -46,7 +47,7 @@ def test_dummy_forwards_write_no_kv_count_no_token_and_land_in_t_sync(tmp_path):
     backend = fake_backend.FakeBackend(rank_map, {0: [1, 2, 3]})
     ledger = ctl.Ledger(rank_map)
     ledger.replica(0).add(ctl.Running(0, 0, 0, 5, 3, 3))
-    backend.prefill(0, [0], ledger)
+    backend.prefill(0, [0], ledger, Greedy())
     before = backend.checksum(0), backend.checksum(1)
     assert backend.dummy(1, 'decode') > 0 and (backend.checksum(0), backend.checksum(1)) == before
     result, _ = run(tmp_path, '--e2e-experiment', 'scaling', '--e2e-world-size', '8', '--e2e-decode-policy', 'greedy')

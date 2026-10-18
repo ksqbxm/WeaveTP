@@ -1,22 +1,43 @@
-"""Step 6 A-part quick runner: the fake-backend serving loop (scaling 2->4 and 4->2, fail-stop
-fail -> replay -> expand) plus the e2e CPU tests, on one node without GPUs.
+"""Step 6 quick runner, layered (all layers: `accepted` stays false, correctness only).
 
-summary.json carries the quick-driver flags; `accepted` stays false until the real-model B part
-runs on the servers. Writes `<output>/<node>/{scaling,failstop}/out/*`, `pytest.log`, `summary.json`
-and `error.txt` on failure.
+  --layer a   fake backend full loop (scaling + fail-stop) and the e2e CPU tests; no GPU (A part).
+  --layer b1  real model, one node, TP4 (8 GPUs): block-KV serving against the static-KV path
+              (logits nrmse/cosine, M1 step times, pool accounting), torch split-KV decode.
+  --layer b2  real model, one node, deterministic mode: batched bitwise check - two independent TP2
+              processes (GPUs 0-3 and 4-7) and one TP4 process, each running the schedule twice.
+  --layer b3  two nodes: the serving driver inside the Step 5 fail-stop worker, fault -> shrink ->
+              replay -> rejoin -> expand on DeepSeek-V2-Lite (emulate by default, real with --mode real).
+Writes `<output>/<node>/summary.json` (quick-driver flags), the layer's own files and `error.txt` on failure.
 """
 
 import argparse
 import importlib.util
 import json
+import os
 import re
+import shlex
 import subprocess
 import sys
 import time
 import traceback
 from pathlib import Path
 
-from common import NODES, SERVING_PROBE, require, write_json
+import model_memory
+import torch
+from common import (
+    DEFAULTS,
+    DETERMINISTIC_ENVIRONMENT,
+    NODES,
+    SERVING_PROBE,
+    require,
+    require_megatron_helpers,
+    write_json,
+)
+from determinism import compare_records
+from run_model import environment, format_table
+from run_probe import repository_commit, run_case
+from run_topology import cases
+from safety import check_data_space, pidfd_implementations
 
 CODE_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(CODE_ROOT))
@@ -24,8 +45,10 @@ sys.path.insert(0, str(CODE_ROOT / 'examples' / 'rl'))
 
 import run_e2e_scaling  # noqa: E402
 
+from tools.resharding.correctness.router_determinism_driver import model_arguments  # noqa: E402
 from tools.resharding.e2e.toy_inputs import write_toy_inputs  # noqa: E402
 
+GIB = 1 << 30
 RUNS = {
     'scaling': dict(count=24, failstop=False, policy='teacher_forcing', world_size=8, expected=['2->4', '4->2'],
                     switches=[{'direction': '2->4', 'anchor': {'kind': 'before_admit', 'seq': 12}},
@@ -33,10 +56,11 @@ RUNS = {
     'failstop': dict(count=20, failstop=True, policy='greedy', world_size=16, expected=['shrink', 'expand'], switches=None),
 }
 TESTS = ('tests/unit_tests/e2e',)
+GEOMETRY = {'layers': 27, 'heads': 16, 'group_heads': 4, 'k_dim': 192, 'v_dim': 128}
 
 
+# ---- layer a -------------------------------------------------------------------------------------------------
 def fake_run(name, root):
-    """One full driver loop on the fake backend; passes when the checker, the switch sequence and every validation pass."""
     spec = RUNS[name]
     inputs = write_toy_inputs(root / name / 'inputs', count=spec['count'], switches=spec['switches'], failstop=spec['failstop'])
     out = root / name / 'out'
@@ -59,7 +83,6 @@ def fake_run(name, root):
 
 
 def run_tests(root, deadline):
-    """The e2e CPU tests with the runner's interpreter; the last pytest line is the summary."""
     require(importlib.util.find_spec('pytest') is not None, 'pytest is not installed in this Python environment')
     argv = [sys.executable, '-B', '-m', 'pytest', '-q', '-o', 'addopts=', '--noconftest', '-p', 'no:cacheprovider', *TESTS]
     log = root / 'pytest.log'
@@ -68,34 +91,194 @@ def run_tests(root, deadline):
                               timeout=max(1.0, deadline - time.monotonic())).returncode
     lines = log.read_text(encoding='utf-8', errors='replace').strip().splitlines()
     summary = lines[-1] if lines else 'pytest produced no output'
-    passed = code == 0 and re.search(r'\d+ passed', summary) is not None
-    return {'exit_code': code, 'passed': passed, 'summary_line': summary, 'log': str(log)}
+    return {'exit_code': code, 'passed': code == 0 and re.search(r'\d+ passed', summary) is not None, 'summary_line': summary, 'log': str(log)}
+
+
+def layer_a(args, root, deadline):
+    runs = {name: fake_run(name, root) for name in RUNS}
+    tests = run_tests(root, deadline - 15)
+    return {'runs': runs, 'tests': tests, 'passed': all(r['check_passed'] for r in runs.values()) and tests['passed']}
+
+
+# ---- layers b1 / b2 ------------------------------------------------------------------------------------------
+def torchrun(nproc, rendezvous=None):
+    command = [sys.executable, '-m', 'torch.distributed.run', f'--nproc_per_node={nproc}', '--nnodes=1']
+    command += ['--standalone'] if rendezvous is None else ['--rdzv-backend=c10d', f'--rdzv-endpoint=127.0.0.1:{rendezvous}', f'--rdzv-id=step6_{rendezvous}']
+    return command + ['tools/resharding/failstop/serving_layers.py']
+
+
+def launch_layers(name, layout, gpus, out, args, *, deterministic, extra=(), rendezvous=None, mps_pipe):
+    """One serving_layers torchrun; returns the Popen and the log path (the caller waits)."""
+    argv = torchrun(len(gpus), rendezvous) + model_arguments(layout, args.checkpoint, 8, args.seq_length) + \
+        ['--sl-layer', name, '--sl-output', str(out), '--sl-attention', 'torch', *extra] + (['--deterministic-mode'] if deterministic else [])
+    out.mkdir(parents=True, exist_ok=True)
+    (out / 'command.txt').write_text(shlex.join(argv) + '\n', encoding='utf-8')
+    log = (out / 'torchrun.log').open('wb')
+    env = environment('reference' if deterministic else 'timing', gpus, mps_pipe)
+    child = subprocess.Popen(argv, cwd=CODE_ROOT, env=env, stdout=log, stderr=subprocess.STDOUT)
+    return child, out / 'torchrun.log'
+
+
+def wait_children(children, deadline):
+    for child, log in children:
+        remaining = max(1.0, deadline - time.monotonic())
+        try:
+            code = child.wait(timeout=remaining)
+        except subprocess.TimeoutExpired:
+            child.kill()
+            child.wait(timeout=30)
+            raise RuntimeError(f'torchrun exceeded the budget; see {log}')
+        require(code == 0, f'torchrun exited {code}; see {log}')
+
+
+def preflight(args, root, layouts, gpus=range(8)):
+    memory = model_memory.preflight(args.node, args.seq_length, gpus, layouts)
+    write_json(root / 'memory_preflight.json', memory)
+    print(format_table(memory), flush=True)
+    require(not memory['run_shortages'], 'insufficient GPU memory: ' + '; '.join(memory['run_shortages']))
+    return memory
+
+
+def layer_b1(args, root, deadline):
+    require_megatron_helpers()
+    preflight(args, root, ['tp4'])
+    child, log = launch_layers('b1', 'tp4', list(range(8)), root / 'b1', args, deterministic=False, mps_pipe=str(root / 'absent_mps_pipe'))
+    wait_children([(child, log)], deadline)
+    result = json.loads((root / 'b1' / 'result.json').read_text(encoding='utf-8'))
+    served = next((r for r in result['ranks'] if 'batched' in r), None)
+    require(served is not None, 'no rank served the probe request')
+    rank0 = result['ranks'][0]
+    return {'passed': result['passed'], 'attention_impl': rank0['attention_impl'], 'nrmse_max': max(served['alone']['nrmse_max'], served['batched']['nrmse_max']),
+            'cosine_min': min(served['alone']['cosine_min'], served['batched']['cosine_min']), 'top1_agreement': served['batched']['top1_agreement'],
+            'm1_ms': rank0['m1_ms'], 'memory': rank0['memory'], 'thresholds': result['thresholds'], 'result': str(root / 'b1' / 'result.json')}
+
+
+def cross_process_bitwise(a, b, ranks):
+    mismatches = []
+    for rank in ranks:
+        left = torch.load(a / f'records_rank_{rank}.pt', weights_only=False)['records']
+        right = torch.load(b / f'records_rank_{rank}.pt', weights_only=False)['records']
+        if len(left) != len(right):
+            mismatches.append({'rank': rank, 'reason': f'{len(left)} vs {len(right)} forwards'})
+            continue
+        first = next((c for c in (compare_records(x, y) for x, y in zip(left, right)) if not c['equal']), None)
+        if first is not None:
+            mismatches.append({'rank': rank, **first})
+    return {'passed': not mismatches, 'mismatches': mismatches[:3], 'ranks': len(ranks)}
+
+
+def layer_b2(args, root, deadline):
+    require_megatron_helpers()
+    memory = preflight(args, root, ['tp2', 'tp4'])
+    need = memory['reference_runs']['tp2']['required_free_bytes_per_gpu']
+    short = [g['index'] for g in memory['inventory'][4:8] if g['free_bytes'] < need]
+    require(not short, f'the second TP2 process needs {need / GIB:.2f} GiB free on GPUs 4-7; short on {short}')
+    mps = str(root / 'absent_mps_pipe')
+    pair = [launch_layers('b2', 'tp2', list(range(0, 4)), root / 'b2' / 'tp2_a', args, deterministic=True, rendezvous=args.port_base, mps_pipe=mps),
+            launch_layers('b2', 'tp2', list(range(4, 8)), root / 'b2' / 'tp2_b', args, deterministic=True, rendezvous=args.port_base + 1, mps_pipe=mps)]
+    wait_children(pair, deadline)
+    wait_children([launch_layers('b2', 'tp4', list(range(8)), root / 'b2' / 'tp4', args, deterministic=True, mps_pipe=mps)], deadline)
+    results = {name: json.loads((root / 'b2' / name / 'result.json').read_text(encoding='utf-8')) for name in ('tp2_a', 'tp2_b', 'tp4')}
+    cross = cross_process_bitwise(root / 'b2' / 'tp2_a', root / 'b2' / 'tp2_b', range(4))
+    write_json(root / 'b2' / 'cross_process.json', cross)
+    rank0 = results['tp4']['ranks'][0]
+    return {'passed': all(r['passed'] for r in results.values()) and cross['passed'] and all(r['manifests_identical'] for r in results.values()),
+            'in_process_bitwise': {name: r['passed'] for name, r in results.items()}, 'cross_process_tp2_bitwise': cross['passed'],
+            'forwards': {name: r['ranks'][0]['forwards'] for name, r in results.items()},
+            'crossed_block_boundary': rank0['crossed_block_boundary'], 'dummy_forwards_tp4_rank0': rank0['dummy_forwards'],
+            'attention_impl': rank0['attention_impl'], 'results': {name: str(root / 'b2' / name / 'result.json') for name in results}}
+
+
+# ---- layer b3 ------------------------------------------------------------------------------------------------
+def worker_arguments(checkpoint, prompt_tokens, seq_length):
+    argv = model_arguments('tp4', checkpoint, prompt_tokens, seq_length)
+    argv[argv.index('--global-batch-size') + 1] = '4'
+    return argv + ['--deterministic-mode']
+
+
+def layer_b3(args, root, deadline):
+    require_megatron_helpers()
+    profile, reference = Path(args.profile_file or ''), Path(args.reference_root or '')
+    require(profile.is_file(), f'--profile-file (frozen Step 3 profile) is required for b3; not found: {profile}')
+    if args.node == 'SL3061':  # only the EDP0 node audits migrated targets against the reference hashes
+        for tp in (2, 4):
+            require(all((reference / f'tp{tp}' / 'reference' / f'parameters_rank_{r}.json').is_file() for r in range(2 * tp)),
+                    f'reference parameter hashes for tp{tp} are missing under {reference} (run_model.py reference role)')
+    inputs = write_toy_inputs(root / 'inputs', count=args.b3_requests, failstop=True, rejoin_seconds=args.b3_rejoin_seconds)
+    selected = cases(args.mode, 1, 1, args.suite_id)
+    case = selected[0]
+    for key in ('PYTORCH_ALLOC_CONF', 'PYTORCH_CUDA_ALLOC_CONF'):
+        os.environ.pop(key, None)
+    os.environ.update(DETERMINISTIC_ENVIRONMENT)
+    remaining = deadline - time.monotonic()
+    require(remaining > 90, 'budget exhausted before the b3 launch')
+    config = {**{k: v for k, v in DEFAULTS.items() if k != 'repeats'}, **case,
+              'probe': SERVING_PROBE, 'kind': case['mode'], 'profile_only': False, 'node': args.node, 'output': str(root / case['launch']),
+              'master': args.master, 'port': args.port_base, 'commit': repository_commit(), 'mps_pipe': None,
+              'quick_mode': True, 'correctness_only': True, 'shared_gpu_mode': True, 'timing_valid': False,
+              'min_free_disk_gb': args.min_free_disk_gb, **pidfd_implementations(),
+              'startup_timeout_s': min(240, remaining - 30), 'stage_timeout_s': min(240, remaining - 30),
+              'reclaim_timeout_s': min(120, remaining - 30), 'launch_timeout_s': remaining,
+              'profile_file': str(profile), 'reference_root': str(reference), 'deterministic_mode': True,
+              'kv_heads': GEOMETRY['heads'], 'memory_margin_bytes': 2 * GIB, 'memory_limit_bytes': None,
+              'model_argv': worker_arguments(args.checkpoint, 8, args.seq_length),
+              'serving': {'requests': str(inputs['requests']), 'workload': str(inputs['workload']), 'plan': str(inputs['plan']),
+                          'b_max': 4, 'decode_policy': 'greedy', 'block_tokens': 64, 'segment_tokens': 4096, 'max_delta_steps': 32,
+                          'attention': 'torch', 'growth': {'shrink': 0, 'expand': 2}, 'geometry': GEOMETRY, 'capacity_tokens': None}}
+    print(f"Starting {case['launch']} mode={case['mode']} (serving worker, {args.b3_requests} toy requests)", flush=True)
+    outcome = run_case(config)
+    record = {'launch': case['launch'], 'mode': case['mode'], 'status': outcome['status'], 'passed': outcome['status'] == 'passed',
+              'output': config['output']}
+    controller_result = Path(config['output']) / 'controller_result.json'
+    if controller_result.exists():
+        result = json.loads(controller_result.read_text(encoding='utf-8'))
+        record['metrics'] = result.get('metrics')
+        record['files'] = {name: str(Path(config['output']) / name) for name in ('result.json', 'check.json', 'events_actual.json')
+                           if (Path(config['output']) / name).exists()}
+        if args.node == NODES[0]:
+            record['passed'] = record['passed'] and bool(result.get('metrics')) and result['metrics']['check_passed'] and result['metrics']['kv_check_passed']
+    return record
+
+
+LAYERS = {'a': layer_a, 'b1': layer_b1, 'b2': layer_b2, 'b3': layer_b3}
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--node', choices=NODES, required=True)
     parser.add_argument('--suite-id', required=True)
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--quick', action='store_true')
     parser.add_argument('--correctness-only', action='store_true')
     parser.add_argument('--budget-seconds', type=float, default=300)
-    parser.add_argument('--min-free-disk-gb', type=float, default=1, help='accepted for the shared quick-driver argv; this runner needs no /data space check')
+    parser.add_argument('--min-free-disk-gb', type=float, default=1)
+    parser.add_argument('--layer', choices=tuple(LAYERS), default='a')
+    parser.add_argument('--mode', choices=('emulate', 'real'), default='emulate', help='b3 only')
+    parser.add_argument('--checkpoint', default=os.environ.get('CHECKPOINT', '/data/models/DeepSeek-V2-Lite-megatron-v2'))
+    parser.add_argument('--seq-length', type=int, default=512, help='b1/b2/b3: max_position_embeddings (rotary table and static baseline)')
+    parser.add_argument('--profile-file', help='b3: frozen Step 3 profile.json')
+    parser.add_argument('--reference-root', help='b3: run_model.py output root with tp2/ and tp4/ reference parameter hashes')
+    parser.add_argument('--master', default='10.60.14.1')
+    parser.add_argument('--port-base', type=int, default=29840)
+    parser.add_argument('--b3-requests', type=int, default=24)
+    parser.add_argument('--b3-rejoin-seconds', type=float, default=5.0)
     args = parser.parse_args(argv)
-    require(args.quick and args.correctness_only, 'the Step 6 A part runs only as the quick correctness check')
+    require(args.quick and args.correctness_only, 'the Step 6 layers run only as the quick correctness check')
     started = time.monotonic()
     deadline = started + args.budget_seconds
     root = args.output / args.node
     root.mkdir(parents=True, exist_ok=False)
-    summary = {'step': 6, 'probe': SERVING_PROBE, 'node': args.node, 'suite_id': args.suite_id, 'backend': 'fake', 'gpus_used': 0,
-               'single_node': True, 'quick_mode': True, 'correctness_only': True, 'shared_gpu_mode': False, 'timing_valid': False,
-               'accepted': False, 'runs': {}, 'tests': None, 'all_checks_passed': False}
+    if args.layer != 'a':
+        check_data_space(args.min_free_disk_gb, root / 'disk_space.jsonl')
+    summary = {'step': 6, 'probe': SERVING_PROBE, 'layer': args.layer, 'node': args.node, 'suite_id': args.suite_id,
+               'backend': 'fake' if args.layer == 'a' else 'block', 'attention': 'none' if args.layer == 'a' else 'torch_splitkv',
+               'gpus_used': {'a': 0, 'b1': 8, 'b2': 8, 'b3': 8}[args.layer], 'mode': args.mode if args.layer == 'b3' else None,
+               'single_node': args.layer != 'b3', 'quick_mode': True, 'correctness_only': True, 'shared_gpu_mode': args.layer != 'a',
+               'timing_valid': False, 'accepted': False, 'all_checks_passed': False, 'seq_length': args.seq_length}
     try:
-        for name in RUNS:
-            summary['runs'][name] = fake_run(name, root)
-        summary['tests'] = run_tests(root, deadline - 15)
-        summary['all_checks_passed'] = all(r['check_passed'] for r in summary['runs'].values()) and summary['tests']['passed']
-        require(summary['all_checks_passed'], 'fake-backend run or e2e tests failed; see summary.json and pytest.log')
+        summary['layers'] = {args.layer: LAYERS[args.layer](args, root, deadline)}
+        summary['all_checks_passed'] = summary['layers'][args.layer]['passed']
+        require(summary['all_checks_passed'], f'layer {args.layer} failed; see summary.json')
     except BaseException:
         summary['error'] = traceback.format_exc()
         (root / 'error.txt').write_text(summary['error'], encoding='utf-8')
@@ -103,7 +286,7 @@ def main(argv=None):
     finally:
         summary['elapsed_s'] = time.monotonic() - started
         write_json(root / 'summary.json', summary)
-    print(json.dumps({key: summary[key] for key in ('runs', 'tests', 'all_checks_passed', 'elapsed_s')}, indent=2), flush=True)
+    print(json.dumps({key: summary[key] for key in ('layer', 'layers', 'all_checks_passed', 'elapsed_s')}, indent=2, default=str), flush=True)
     return 0
 
 

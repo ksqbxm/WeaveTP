@@ -12,6 +12,7 @@ from common import (
     ASYNC_PROBE,
     MODEL_PROBE,
     NODES,
+    SERVING_PROBE,
     TOPOLOGY_PROBES,
     Journal,
     connect,
@@ -197,7 +198,11 @@ def run(config):
                 for child, record in children.children:
                     require(child.poll() in (None, 0), f"{record['role']} exited {child.returncode}")
 
-            if config.get("probe") in (ASYNC_PROBE, MODEL_PROBE):
+            if config.get("probe") == SERVING_PROBE:
+                from serving_probe import control as serving_control
+
+                result = serving_control(config, bus, journal, check)
+            elif config.get("probe") in (ASYNC_PROBE, MODEL_PROBE):
                 from async_probe import control as async_control
 
                 result = async_control(config, bus, journal, check)
