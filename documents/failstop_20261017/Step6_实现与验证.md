@@ -130,3 +130,21 @@ cd code/current && python -B -X utf8 -m pytest -q -o addopts='' --noconftest -p 
 - B3 的 `totals.duration_s` 是四份副本 timeline 的步时累加（与 `--check` 自洽），墙钟见 `failstop.serving_wall_s`；`timing_valid=false`。
 - 峰值记录型驱逐对真实 worker 走同一条 `evict_for_peak` 路径，但本轮负载不会触发，服务器未验证。
 - B3 快验的负载是 `toy_inputs`（24 条 5–7 token 请求），rejoin 在 fail 后 5 s；正式负载与 45 s 仍按总计划 §7。
+
+## B 部分上机反馈与审核修正（2026-10-18，实现 `0c2abffb245036c17e5318fce8ac5917f0fe4bd2`）
+
+用户回传（清单 `a07bde7`）的四个问题与整体审核（正确性、完备性、简洁性）的处理：
+
+1. **服务器有 Triton，A 层两项测试失败。** 测试此前假设环境没有 Triton。现在 `test_block_context_forward` 与 `test_block_kv` 在两种环境下都验证同一件事：本轮没有 kernel（`paged_decode_triton.KERNEL is None`），`auto` 落到 `torch_splitkv` 并记录原因（有 Triton 时 `triton_kernel_unavailable`，无 Triton 时 `triton_not_importable`），`triton` 偏好在两种环境下都报错；有 Triton 时用替身 kernel 走自检路径。`select_implementation` 对"要求 Triton 但 kernel 失败"统一抛 `RuntimeError`（原因链在 `__cause__`），测试里 `1 / 0` 的 `ZeroDivisionError` 不再穿透。
+2. **`quick_check.sh --step 6` 缺 `--single-node` 时静默返回。** 条件检查改为显式 `fail`：打印原因与用法并以 2 退出；新增 `--help`；b3 必须带 `--profile-file` 与 `--reference-root`。本机对错误参数组合逐一验证（退出码 2）。
+3. **文档占位符。** `a07bde7` 是清单提交，本轮交付时服务器命令文档的清单 SHA 由其后的钉定提交回填，所以在该提交检出的仓库里看到的是回填前的占位符（HEAD 的 `0c16960` 已回填）。本轮起不再在清单提交里放占位符：清单提交只含 `releases.json`、实现与验证文档和证据；服务器命令文档与总计划登记在钉定提交里一次写入真实 SHA。
+4. **B3 的 profile。** 两台机器的 `profiles/` 下没有 `step3_*.json`，候选是 Step 3 快验 `s3q_20261017T200325_62b5818c` 在 SL3061 的 `real_00` 与 emulate 两份 `profile.json`。用 **`real_00`**：混合规划器的输入是每对设备的实测 P2P 带宽/延迟，real launch 在真实的 NCCL 世界里测得，与 B3 的传输环境一致；两份文件的设备身份相同（worker 校验 profile 的 16 个 GPU 身份与本次拓扑一致）。固定路径 `/data/ubuntu/lxh/weavetp/profiles/step3_s3q_20261017T200325_62b5818c_real_00.json`，两台同路径，拷贝命令见[服务器命令](Step6_服务器命令.md) §1b。
+
+审核修正（不保留旧路径）：
+
+- `DomainRun.validation` 直接注入校验策略，删除由 `None` 拼成的 `RuntimeFactories` 表、`validation_factories` 与未用的 `run_until_done`；`factories.py` 仍是 §3.6 的接口声明与 CPU 测试对象。
+- 删除对必有字段的 `.get` 兜底：切换结果的 `bytes`/`overlap_steps`、`serving['capacity_tokens']`、b3 记录的 `metrics`/`files`（SL3060 的控制门持有指标与结果文件，SL3061 显式为 `None`）、quick_driver 的 b3 结论字段；扩容 KV 检查结果由每个接收 rank 的 `kv_checks` 进入 summary，控制门据此判定。
+- 受害者的后端只绑定一次空 TP4 上下文作为扩容目标（`join_as_victim` 先 `make_backend(4)`，`expand_prefix` 对受害者直接用 `backend.context`），不再先建一个用不到的上下文。
+- B1 探针是否由本副本服务改为看 alone 运行的 trace 是否非空。
+
+CPU：227 项通过（[cpu_tests_b.log](step6_cpu_evidence/cpu_tests_b.log)）。服务器 GPU：A 层此前两项失败是测试的环境假设问题，B1/B2/B3 仍待上机。
