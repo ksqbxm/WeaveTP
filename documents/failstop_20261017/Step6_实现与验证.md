@@ -76,7 +76,7 @@ cd code/current && python -B -X utf8 -m pytest -q -o addopts='' --noconftest -p 
 
 # B 部分：真实模型接入（2026-10-18）
 
-实现提交：`ab5a4a90a1088df232eadcce0b5a2dd0ba152dba`（含 A 部分 `0f1776a0ff0929114d68318f62e7e2c3d957f508` 之后的全部改动），快验清单 `@@MANIFEST_B@@`（`releases.json["step6"]`）。用户指示（2026-10-18）：Step 3/4/5 两节点快验已在服务器通过；B 部分一次写完并与 Step 3/4 重钉一起交付；**本轮暂停 Triton paged decode kernel**，decode 固定用 torch split-KV（`--e2e-attention torch`），`auto` 模式与 Triton 接口保留但不实现不调试，B1 去掉 Triton 自检项。
+实现提交：`ab5a4a90a1088df232eadcce0b5a2dd0ba152dba`（含 A 部分 `0f1776a0ff0929114d68318f62e7e2c3d957f508` 之后的全部改动），快验清单 `a07bde7a2a357581505f8d72988839d6401dc222`（`releases.json["step6"]`）。用户指示（2026-10-18）：Step 3/4/5 两节点快验已在服务器通过；B 部分一次写完并与 Step 3/4 重钉一起交付；**本轮暂停 Triton paged decode kernel**，decode 固定用 torch split-KV（`--e2e-attention torch`），`auto` 模式与 Triton 接口保留但不实现不调试，B1 去掉 Triton 自检项。
 
 状态：BlockKVContext 的三处 Megatron 钩子、真实模型 BlockBackend、远程控制协议、B3 服务 worker 与控制门、B1/B2 torchrun、`quick_check.sh --step 6 --layer a|b1|b2|b3` 已实现并通过 CPU 测试（含 16 个 CPU actor 的 B3 协议模拟，emulate 与 real 两种模式）；**服务器 GPU 全部未运行**，`accepted=false`。
 

@@ -1,6 +1,6 @@
 # Step 6：阶段 B 固定槽位服务、请求 KV 与事件注入
 
-状态：A 部分（统一服务驱动的 fake 后端、CPU 测试与 `quick_check.sh --step 6 --single-node`）已实现，实现 `0f1776a0ff0929114d68318f62e7e2c3d957f508`，见 [Step6_实现与验证.md](Step6_实现与验证.md) 与 [Step6_服务器命令.md](Step6_服务器命令.md)。B 部分（真实模型：Megatron 三处钩子、block 后端、B3 服务 worker 与控制门、B1/B2/B3 分层快验）已实现，实现 `ab5a4a90a1088df232eadcce0b5a2dd0ba152dba`，清单 `@@MANIFEST_B@@`，服务器 GPU 未运行，见同两份文档的 B 部分。专用 GPU 测试标识：`step06_batched_serving`。
+状态：A 部分（统一服务驱动的 fake 后端、CPU 测试与 `quick_check.sh --step 6 --single-node`）已实现，实现 `0f1776a0ff0929114d68318f62e7e2c3d957f508`，见 [Step6_实现与验证.md](Step6_实现与验证.md) 与 [Step6_服务器命令.md](Step6_服务器命令.md)。B 部分（真实模型：Megatron 三处钩子、block 后端、B3 服务 worker 与控制门、B1/B2/B3 分层快验）已实现，实现 `ab5a4a90a1088df232eadcce0b5a2dd0ba152dba`，清单 `a07bde7a2a357581505f8d72988839d6401dc222`，服务器 GPU 未运行，见同两份文档的 B 部分。专用 GPU 测试标识：`step06_batched_serving`。
 
 2026-10-18 用户指示分两部分推进：A 部分现在开始（统一服务驱动的计划与 CPU/fake 后端实现，不依赖 Step 3–5 上机），B 部分等阶段 A 服务器验收。统一服务驱动的计划稿见 [Step6_服务驱动计划.md](Step6_服务驱动计划.md)，**待用户审阅后才编码**；用户所述扩缩容计划 W1–W4 文档在仓库中未找到，计划稿 §0 给出了与 C1–C11/K1–K7 的映射并列出待确认问题。
 
