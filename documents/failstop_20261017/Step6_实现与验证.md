@@ -1,6 +1,6 @@
 # Step 6 实现与验证（A 部分：统一服务驱动的 fake 后端、CPU 测试与快验入口）
 
-实现提交：`0f1776a0ff0929114d68318f62e7e2c3d957f508`（分支 `codex/failstop`；首个实现提交 `9a8a28da41c2a6de0903cc06b2934dd9dd55e5fe`，随后补两进程 Gloo 控制组测试）。快验清单提交 `@@MANIFEST@@`（`releases.json["step6"]` 指向实现提交），服务器命令见 [Step6_服务器命令.md](Step6_服务器命令.md)。计划稿见 [Step6_服务驱动计划.md](Step6_服务驱动计划.md)（已吸收 2026-10-18 五条审阅意见），W1–W4 设计依据见 [参考](参考_扩缩容实施计划_W1-W4设计依据.md)。
+实现提交：`0f1776a0ff0929114d68318f62e7e2c3d957f508`（分支 `codex/failstop`；首个实现提交 `9a8a28da41c2a6de0903cc06b2934dd9dd55e5fe`，随后补两进程 Gloo 控制组测试）。快验清单提交 `df7ad5d33364fbd481c82c8164aad093ce984d54`（`releases.json["step6"]` 指向实现提交），服务器命令见 [Step6_服务器命令.md](Step6_服务器命令.md)。计划稿见 [Step6_服务驱动计划.md](Step6_服务驱动计划.md)（已吸收 2026-10-18 五条审阅意见），W1–W4 设计依据见 [参考](参考_扩缩容实施计划_W1-W4设计依据.md)。
 
 本轮写代码前已阅读 CODEX.md、[总计划](00_总计划.md)、[06_Step6](06_Step6_批量服务与事件.md)、计划稿、W1–W4 参考、Step 3/4/5 的实现与服务器命令文档及 code/current/AGENTS.md；Python imports 变动后执行 `python -m isort`（本机无 `uv`）。
 
