@@ -69,6 +69,8 @@ python -B -X utf8 -m pytest -q -o addopts='' --noconftest -p no:cacheprovider te
 
 ## 7. 已知限制
 
+- **独占预检的 MPS_OWNER 例外（2026-10-18 用户授权）**：SL3060 有别人的常驻 MPS（`nvidia-cuda-mps-server`，约 56 MiB）。timing 运行前 `export MPS_OWNER=<该用户名>`，`serving_config.require_exclusive_gpus` 与监管器 `inspect` 对属主等于 `MPS_OWNER` 的 server/daemon 放行：管道定位不到或无权限记 `owner_exception` 后继续，该卡须 util 0 且显存 ≤ 200 MiB，MPS 客户端必须为空，其他进程和其他属主仍拒绝（`safety.mps_snapshot/check_gpu_processes` 的 `mps_owner` 参数；T08 `check_idle` 的同一规则）。不设 `MPS_OWNER` 时行为与总计划 §4 原文相同。
+
 - 24 条玩具请求在 rejoin 前排空，b3 快验的 `stats_valid=false`（如实记录，正式集不会）。
 - timing 模式跳过参考 hash 与 KV 快照比对，正确性只由 correctness 模式证明；两模式的迁移计划由 `source_plan_*.json` 对照。
 - 传输仍是同步波次（Step 4 的重叠不在本实验内），两方法相同；EDP1 在波次执行期间不解码（与 B3 相同），只在等待计划键时解码。
@@ -78,4 +80,4 @@ python -B -X utf8 -m pytest -q -o addopts='' --noconftest -p no:cacheprovider te
 ## 8. 交付登记
 
 - 第 0 步日志修正：`0d4b17acbb2784036dade9db9e84b9478579e782`。
-- 实现（A）：`16b1617af90eb4ada0bd32d715dcc45ccd5ca91b` + 启动脚本目录修正 `f2a85e9074e11c98605f72ce25f53c29e2f5fa7b`（`releases.json["step6"]` 指向后者；此前的 Step 6 清单 `8a1e576` 作废）。服务器命令（C，含 bundle）：见 [Step6_AnchorTP接入_服务器命令.md](Step6_AnchorTP接入_服务器命令.md)。
+- 实现（A）：`16b1617af90eb4ada0bd32d715dcc45ccd5ca91b` + 启动脚本目录修正 `f2a85e9074e11c98605f72ce25f53c29e2f5fa7b`+ 独占预检 MPS_OWNER 例外 `560361c60c6c1ad503b9afda14cd984e011dbd2a`（`releases.json["step6"]` 指向最后者；此前的 Step 6 清单 `8a1e576` 作废）。服务器命令（C，含 bundle）：见 [Step6_AnchorTP接入_服务器命令.md](Step6_AnchorTP接入_服务器命令.md)。
