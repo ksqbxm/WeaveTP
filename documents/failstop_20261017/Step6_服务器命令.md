@@ -1,6 +1,6 @@
 # Step 6 服务器命令（A 部分 fake 快验 + B 部分真实模型分层快验）
 
-实现 `0f1776a0ff0929114d68318f62e7e2c3d957f508`，快验清单 `df7ad5d33364fbd481c82c8164aad093ce984d54`（`releases.json["step6"]`），见[实现与验证](Step6_实现与验证.md)。本批不含任何 GPU 运行：快验在一个节点上用 CPU 跑 fake 后端完整循环（扩缩容 2→4、4→2 与 fail-stop fail→replay→expand）加 `tests/unit_tests/e2e` 的 CPU 测试，`accepted=false`、`timing_valid=false`。它不占 GPU，不依赖 Step 3/4/5 的上机顺序，可随时运行；真实模型的 B 部分（B1 单域固定 TP4 → B2 → B3）等阶段 A 服务器验收后另行交付。
+**当前交付是下一段的 B 部分（清单 `a07bde7a2a357581505f8d72988839d6401dc222`）；本段是 A 部分的历史记录。** A 部分实现 `0f1776a0ff0929114d68318f62e7e2c3d957f508`，快验清单 `df7ad5d33364fbd481c82c8164aad093ce984d54`（已被 B 部分清单取代），见[实现与验证](Step6_实现与验证.md)。A 部分不含任何 GPU 运行：快验在一个节点上用 CPU 跑 fake 后端完整循环（扩缩容 2→4、4→2 与 fail-stop fail→replay→expand）加 `tests/unit_tests/e2e` 的 CPU 测试，`accepted=false`、`timing_valid=false`。它不占 GPU，不依赖 Step 3/4/5 的上机顺序，可随时运行；真实模型的 B 部分（B1 单域固定 TP4 → B2 → B3）等阶段 A 服务器验收后另行交付。
 
 
 **2026-10-18 B 部分交付**：实现 `ab5a4a90a1088df232eadcce0b5a2dd0ba152dba`，快验清单 `a07bde7a2a357581505f8d72988839d6401dc222`（`releases.json["step6"]`，与 Step 3/4 重钉的清单 `371daf8` 一并打入 bundle `step6b_a07bde7.bundle`），见[实现与验证](Step6_实现与验证.md) B 部分。快验分四层，都是 `quick_check.sh --step 6 --layer <层>`，每层预算 300 s，`accepted=false`：
