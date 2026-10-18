@@ -94,6 +94,9 @@ class StepClock:
     def sleep(self, seconds):
         self.t += seconds
 
+    def stamp(self, step_time):
+        return self.t
+
 
 class RecordingBackend(BlockBackend):
     """Keeps every forward's logits (CPU) with the rows it served, for comparisons and bitwise records."""

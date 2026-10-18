@@ -229,8 +229,16 @@ class Driver:
         prefill_rows = {}
         for seq, replica, tokens in decision.admits:
             prefill_rows.setdefault(replica, []).append(seq)
-            log = run.request_log.setdefault(seq, {})
-            log.update(t_admit=run.clock(), admit_step=run.step, replica=replica, layout_at_admit=run.ledger.replica(replica).tp)
+            log = run.request_log.setdefault(seq, {'admits': [], 't_tokens': []})
+            admit = {'t': run.clock(), 'step': run.step, 'replica': replica, 'layout': run.ledger.replica(replica).tp,
+                     'generated_at_admit': run.ledger.row(seq).generated_at_admit}
+            log['admits'].append(admit)  # a replayed request keeps its first admit; every admit is listed here
+            log['replica'] = replica
+            for key, value in (('t_admit', admit['t']), ('admit_step', admit['step']), ('layout_at_admit', admit['layout'])):
+                log.setdefault(key, value)
+        # Rows that commit one token in this step's decode (ledger state before the forwards, domain-wide).
+        decode_rows = {replica: [row.seq for row in run.ledger.replica(replica).running.values()
+                                 if row.seq not in prefill_rows.get(replica, [])] for replica in run.replicas}
         timing.t_ctrl_apply = time.perf_counter() - t
         ok, tokens = True, 0
         try:
@@ -255,12 +263,19 @@ class Driver:
             ok = False
             run.failure = traceback.format_exc()
         run.generated += tokens
-        for seq in [s for seqs in prefill_rows.values() for s in seqs]:
-            run.request_log[seq]['t_first'] = run.clock() + timing.step_time
+        stamp = run.clock.stamp(timing.step_time)  # the end of this step on the run clock
+        if ok:
+            for seq in [s for seqs in prefill_rows.values() for s in seqs]:
+                log = run.request_log[seq]
+                log.setdefault('t_first', stamp)  # a replay re-prefills; the first token keeps its original time
+                log['t_tokens'].append(stamp)
+            for seqs in decode_rows.values():
+                for seq in seqs:
+                    run.request_log[seq]['t_tokens'].append(stamp)
         done = run.control.complete(run.step, run.replicas)
         for row in done:
             run.backend.release(row.replica, row.seq)
-            run.request_log.setdefault(row.seq, {}).update(t_done=run.clock() + timing.step_time, finish_step=run.step)
+            run.request_log.setdefault(row.seq, {'admits': [], 't_tokens': []}).update(t_done=stamp, finish_step=run.step)
         local_done = sum(1 for row in done if row.replica in run.local_replicas)  # this process's replicas only
         run.completed += local_done
         run.timeline.step(**self.timeline_row(decision, timing, local_done, tokens))
@@ -351,6 +366,10 @@ class FakeClock:
     def sleep(self, seconds):
         self.t += seconds
 
+    def stamp(self, step_time):
+        """The end of the step being recorded (the clock advances by step_time afterwards)."""
+        return self.t + step_time
+
 
 class WallClock:
     def __init__(self):
@@ -364,6 +383,10 @@ class WallClock:
 
     def sleep(self, seconds):
         time.sleep(seconds)
+
+    def stamp(self, step_time):
+        """Wall time already includes the step's work: no step_time is added."""
+        return self()
 
 
 def run_until_idle(drivers, max_steps):

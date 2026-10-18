@@ -26,7 +26,13 @@ from tools.resharding.e2e.live_runtime import (
     run_until_idle,
 )
 from tools.resharding.e2e.plan_executor import PlanExecutor, validation_for
-from tools.resharding.e2e.results import build_result, check, write_result
+from tools.resharding.e2e.results import (
+    build_result,
+    check,
+    merge_request_logs,
+    request_row,
+    write_result,
+)
 from tools.resharding.e2e.timeline import SwitchEventWriter, TimelineWriter, read_jsonl
 
 
@@ -132,16 +138,8 @@ def failstop_rows(degraded):
 
 
 def write_outputs(out, args, drivers, instances, requests, hooks):
-    logs = {}
-    for driver in drivers:
-        logs.update(driver.run.request_log)
-    rows = []
-    for instance in instances:
-        log = logs.get(instance.seq, {})
-        rows.append({'seq': instance.seq, 'id': instance.id, 'segment': instance.segment, 'kind': instance.kind,
-                     'replica': log.get('replica'), 'layout_at_admit': log.get('layout_at_admit'), 'input_len': instance.input_len,
-                     'output_len': instance.output_len, 'generated_tokens': instance.output_len, 't_arrive': instance.arrive_s,
-                     't_admit': log.get('t_admit'), 't_first': log.get('t_first'), 't_done': log.get('t_done')})
+    logs = merge_request_logs(driver.run.request_log for driver in drivers)
+    rows = [request_row(instance, logs.get(instance.seq, {})) for instance in instances]
     duration = drivers[0].run.clock()
     timeline_rows = [r for d in drivers for r in read_jsonl(d.run.timeline.path)]
     steps = sum(d.run.step for d in drivers)

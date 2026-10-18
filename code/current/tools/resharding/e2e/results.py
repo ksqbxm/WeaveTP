@@ -6,6 +6,37 @@ from pathlib import Path
 SCHEMA_VERSION = 'e2e-serving-v1'
 
 
+def merge_request_logs(logs):
+    """One record per seq from several domains' request_log dicts (a replayed request is admitted on more than one).
+
+    admits and t_tokens are unions in time order; t_admit/t_first/layout_at_admit come from the earliest admit,
+    replica from the latest, t_done from whichever domain completed it.
+    """
+    merged = {}
+    for log in logs:
+        for seq, entry in log.items():
+            seq = int(seq)
+            record = merged.setdefault(seq, {'admits': [], 't_tokens': []})
+            record['admits'] = sorted(record['admits'] + list(entry['admits']), key=lambda a: (a['t'], a['step']))
+            record['t_tokens'] = sorted(record['t_tokens'] + list(entry['t_tokens']))
+            for key in ('t_first', 't_done', 'finish_step'):
+                if key in entry:
+                    record[key] = min(record[key], entry[key]) if key == 't_first' and key in record else entry[key]
+    for record in merged.values():
+        if record['admits']:
+            first, last = record['admits'][0], record['admits'][-1]
+            record.update(t_admit=first['t'], admit_step=first['step'], layout_at_admit=first['layout'], replica=last['replica'])
+    return merged
+
+
+def request_row(instance, log):
+    return {'seq': instance.seq, 'id': instance.id, 'segment': instance.segment, 'kind': instance.kind,
+            'replica': log.get('replica'), 'layout_at_admit': log.get('layout_at_admit'), 'input_len': instance.input_len,
+            'output_len': instance.output_len, 'generated_tokens': instance.output_len, 't_arrive': instance.arrive_s,
+            't_admit': log.get('t_admit'), 't_first': log.get('t_first'), 't_done': log.get('t_done'),
+            'admits': log.get('admits', []), 't_tokens': log.get('t_tokens', [])}
+
+
 def totals(request_rows, duration_s, logical_steps):
     inputs = sum(r['input_len'] for r in request_rows)
     outputs = sum(r['output_len'] for r in request_rows)

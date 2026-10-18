@@ -222,16 +222,8 @@ def control(config, bus, journal, check):
 def write_outputs(root, config, instances, workload, summaries, times, trigger, fail_spec, rejoin_spec, reports, maps, initial, pauses,
                   reclaim, controller, drained_before_rejoin):
     """result.json / check.json (W4) and events_actual.json (06_Step6 §4) from the domain summaries and the gate's times."""
-    logs = {}
-    for summary in summaries.values():
-        logs.update({int(k): v for k, v in summary['request_log'].items()})
-    rows = []
-    for instance in instances:
-        log = logs[instance.seq]
-        rows.append({'seq': instance.seq, 'id': instance.id, 'segment': instance.segment, 'kind': instance.kind, 'replica': log['replica'],
-                     'layout_at_admit': log['layout_at_admit'], 'input_len': instance.input_len, 'output_len': instance.output_len,
-                     'generated_tokens': instance.output_len, 't_arrive': instance.arrive_s, 't_admit': log['t_admit'],
-                     't_first': log['t_first'], 't_done': log['t_done']})
+    logs = results.merge_request_logs(summary['request_log'] for summary in summaries.values())
+    rows = [results.request_row(instance, logs[instance.seq]) for instance in instances]
     timeline_rows = [r for s in summaries.values() for r in s['timeline']]  # one timeline per dense replica
     phases = {}
     for row in timeline_rows:

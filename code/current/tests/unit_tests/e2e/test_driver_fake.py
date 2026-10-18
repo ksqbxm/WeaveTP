@@ -71,6 +71,15 @@ def test_failstop_run_replays_edp0_and_expands(tmp_path):
     assert edp1 and edp0 and {r['layout'] for r in edp0 if r['kind'] == 'step'} == {4, 2}
     assert all(r['replica'] is not None for r in result['requests'])
     assert result['config']['validate_cutover'] is True
+    # Per-token stamps: one per committed token, monotone, first == t_first, last == t_done; a replayed
+    # request lists both admits but keeps its original admit/first-token times.
+    for r in result['requests']:
+        assert len(r['t_tokens']) == r['output_len'] and r['t_tokens'] == sorted(r['t_tokens'])
+        assert r['t_first'] == r['t_tokens'][0] and r['t_done'] == r['t_tokens'][-1]
+        assert r['t_admit'] == r['admits'][0]['t'] and r['admits'][0]['generated_at_admit'] == 0
+    replayed = [r for r in result['requests'] if len(r['admits']) > 1]
+    assert replayed and sum(a['generated_at_admit'] for r in replayed for a in r['admits'][1:]) +         sum(r['input_len'] for r in replayed) <= fs['replay_prefill_tokens']
+    assert all(r['admits'][1]['t'] > r['t_first'] and r['replica'] == r['admits'][-1]['replica'] for r in replayed)
     with pytest.raises(ValueError, match='contradicts'):
         entry.main(['--e2e-requests', str(tmp_path / 'requests.jsonl'), '--e2e-workload', str(tmp_path / 'workload.json'),
                     '--e2e-out-dir', str(tmp_path / 'x'), '--e2e-backend', 'fake', '--e2e-run-mode', 'timing', '--e2e-validate-cutover', 'on'])
