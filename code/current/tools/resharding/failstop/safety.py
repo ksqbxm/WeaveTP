@@ -119,26 +119,47 @@ def gpu_snapshot(log):
             "driver_version": root.findtext("driver_version"), "memory_resolution_mib": 1}
 
 
+MPS_SERVER_IDLE_MIB = 200  # an idle resident MPS server keeps well under this (SL3060: 56 MiB)
+
+
 def parse_pids(text):
     tokens = text.split()
     require(all(t.isdecimal() and int(t) > 0 for t in tokens), f"invalid MPS response: {text!r}")
     return {int(t) for t in tokens}
 
 
-def mps_snapshot(log, snapshot, explicit_pipe=None, shared_gpu_mode=False):
-    """Query real service pipes; shared mode records daemons whose pipe cannot be located."""
+def process_owner(pid):
+    """User name owning a live process (its /proc entry)."""
+    import pwd
+
+    return pwd.getpwuid(Path(f"/proc/{int(pid)}").stat().st_uid).pw_name
+
+
+def mps_snapshot(log, snapshot, explicit_pipe=None, shared_gpu_mode=False, mps_owner=None):
+    """Query real service pipes; shared mode records daemons whose pipe cannot be located.
+
+    mps_owner (exclusive mode only; the user's 2026-10-18 authorisation, 00_总计划 §4): the resident MPS
+    daemon/server owned by that user may stay unlocatable or unqueried and is recorded as such; every other
+    daemon keeps the exclusive rules, and a located pipe whose query fails is still an error.
+    """
     raw = command(["ps", "-eo", "pid=,user=,comm=,args=", "-ww"], log)
-    controls, servers = set(), set()
+    controls, servers, users = set(), set(), {}
     for line in raw.splitlines():
         parts = line.split(None, 3)
         if len(parts) < 4:
             continue
-        pid, _, comm, args = parts
+        pid, user, comm, args = parts
         executable = Path(args.split()[0]).name
         if executable == "nvidia-cuda-mps-control":
             controls.add(int(pid))
         if executable == "nvidia-cuda-mps-server":
             servers.add(int(pid))
+        if executable in ("nvidia-cuda-mps-control", "nvidia-cuda-mps-server"):
+            users[int(pid)] = user
+
+    def exempt(pids):
+        return mps_owner is not None and bool(pids) and all(users.get(pid) == mps_owner for pid in pids)
+    tolerant = shared_gpu_mode or mps_owner is not None
     servers |= {p["pid"] for g in snapshot["gpus"] for p in g["processes"]
                 if Path(p["name"]).name == "nvidia-cuda-mps-server"}
     original = os.environ.get("CUDA_MPS_PIPE_DIRECTORY", "/tmp/nvidia-mps")
@@ -161,19 +182,19 @@ def mps_snapshot(log, snapshot, explicit_pipe=None, shared_gpu_mode=False):
         except FileNotFoundError:
             continue
         except PermissionError as error:
-            require(shared_gpu_mode, f"unreadable MPS PID file: {pidfile}: {error}")
+            require(tolerant, f"unreadable MPS PID file: {pidfile}: {error}")
             inaccessible_pipes.append({"pipe": pipe, "reason": str(error)})
             continue
         if pid in controls:
             located[pid] = pipe
             service_pipes.add(pipe)
         else:
-            require(shared_gpu_mode, f"stale/unmatched MPS PID file: {pidfile}")
+            require(tolerant, f"stale/unmatched MPS PID file: {pidfile}")
             inaccessible_pipes.append({"pipe": pipe, "reason": f"unmatched PID {pid}"})
     missing = controls - set(located)
     if not shared_gpu_mode:
-        require(not missing, f"cannot locate actual MPS pipe for daemons {missing}")
-        require(not servers or controls, "MPS server exists without an inspectable control daemon")
+        require(not missing or exempt(missing), f"cannot locate actual MPS pipe for daemons {missing}")
+        require(not servers or controls or exempt(servers), "MPS server exists without an inspectable control daemon")
     clients, queried_servers, queries = set(), set(), []
     for pid, pipe in located.items():
         env = {**os.environ, "CUDA_MPS_PIPE_DIRECTORY": pipe}
@@ -190,9 +211,13 @@ def mps_snapshot(log, snapshot, explicit_pipe=None, shared_gpu_mode=False):
             clients.update(per_server[server])
         queries.append({"control_pid": pid, "pipe": pipe, "servers": per_server})
     if not shared_gpu_mode:
-        require(servers <= queried_servers, f"unqueried MPS servers: {servers-queried_servers}")
+        require(servers <= queried_servers or exempt(servers - queried_servers), f"unqueried MPS servers: {servers-queried_servers}")
     complete = not missing and servers <= queried_servers and not inaccessible_pipes
-    result = {"original_pipe": original, "original_pipe_has_service": original in service_pipes,
+    exception = None
+    if mps_owner is not None and not shared_gpu_mode and (missing or servers - queried_servers or inaccessible_pipes):
+        exception = {"mps_owner": mps_owner, "exempt_daemons": sorted(missing), "exempt_servers": sorted(servers - queried_servers),
+                     "owners": {str(pid): users.get(pid) for pid in sorted(missing | (servers - queried_servers))}}
+    result = {"original_pipe": original, "original_pipe_has_service": original in service_pipes, "owner_exception": exception,
               "queries": queries, "servers": sorted(servers | queried_servers), "clients": sorted(clients),
               "skipped_daemons": [{"pid": pid, "reason": "actual pipe unavailable"} for pid in sorted(missing)],
               "inaccessible_pipes": inaccessible_pipes, "unqueried_servers": sorted(servers - queried_servers),
@@ -202,8 +227,11 @@ def mps_snapshot(log, snapshot, explicit_pipe=None, shared_gpu_mode=False):
     return result
 
 
-def check_gpu_processes(snapshot, mps, expected=None, shared_gpu_mode=False, task_pids=()):
-    """expected maps PID to UUID; only shared mode permits foreign MPS clients."""
+def check_gpu_processes(snapshot, mps, expected=None, shared_gpu_mode=False, task_pids=(), mps_owner=None):
+    """expected maps PID to UUID; only shared mode permits foreign MPS clients.
+
+    Exclusive mode tolerates an MPS server process on an otherwise idle card only when mps_owner is given,
+    the process belongs to that user and the card holds at most MPS_SERVER_IDLE_MIB (the T08 MPS_OWNER rule)."""
     expected = expected or {}
     require(len(set(expected.values())) == len(expected), "worker GPU UUID assignment is not one-to-one")
     forbidden_clients = set(mps["clients"]) & (set(task_pids) | set(expected)) if shared_gpu_mode else set(mps["clients"])
@@ -215,7 +243,12 @@ def check_gpu_processes(snapshot, mps, expected=None, shared_gpu_mode=False, tas
         for process in gpu["processes"]:
             pid = process["pid"]
             if pid in mps["servers"] and Path(process["name"]).name == "nvidia-cuda-mps-server":
-                foreign[gpu["uuid"]].append(process)
+                if not shared_gpu_mode:
+                    owner = process_owner(pid)
+                    require(mps_owner is not None and owner == mps_owner,
+                            f"MPS server {pid} (owner {owner}) on {gpu['uuid']}; exclusive runs allow only MPS_OWNER={mps_owner}")
+                    require(gpu["used_mib"] <= MPS_SERVER_IDLE_MIB, f"GPU {gpu['uuid']} holds {gpu['used_mib']} MiB with the idle MPS server")
+                foreign[gpu["uuid"]].append({**process, "owner_exception": None if shared_gpu_mode else mps_owner})
                 continue
             if pid not in expected:
                 require(pid not in task_pids, f"unexpected registered GPU process {process} on {gpu['uuid']}")

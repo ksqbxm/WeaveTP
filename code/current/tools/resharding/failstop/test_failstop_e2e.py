@@ -70,6 +70,26 @@ class ServingConfigTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, 'unrelated GPU process'):
                 serving_config.require_exclusive_gpus(Path('unused'))
 
+    def test_exclusive_precheck_tolerates_only_the_owners_resident_mps_server(self):
+        import safety
+        server = {'pid': 1641043, 'name': '/usr/bin/nvidia-cuda-mps-server', 'used_mib': 56}
+        state = {'gpus': [{'index': i, 'uuid': f'u{i}', 'used_mib': 56 if i == 0 else 0, 'util_percent': 0,
+                           'processes': [server] if i == 0 else []} for i in range(8)]}
+        mps = {'clients': [], 'servers': [1641043]}
+        with patch.object(serving_config, 'gpu_snapshot', return_value=state), patch.object(serving_config, 'mps_snapshot', return_value=mps), \
+                patch.object(safety, 'process_owner', return_value='mpsuser'):
+            report = serving_config.require_exclusive_gpus(Path('unused'), 'mpsuser')
+            self.assertEqual(report['mps_owner_exception'], {'u0': [{**server, 'owner_exception': 'mpsuser'}]})
+            with self.assertRaisesRegex(RuntimeError, 'MPS_OWNER=None'):
+                serving_config.require_exclusive_gpus(Path('unused'))
+            with self.assertRaisesRegex(RuntimeError, 'owner mpsuser'):
+                serving_config.require_exclusive_gpus(Path('unused'), 'someone')
+        heavy = {'gpus': [{**g, 'used_mib': 4096 if i == 0 else 0} for i, g in enumerate(state['gpus'])]}
+        with patch.object(serving_config, 'gpu_snapshot', return_value=heavy), patch.object(serving_config, 'mps_snapshot', return_value=mps), \
+                patch.object(safety, 'process_owner', return_value='mpsuser'):
+            with self.assertRaisesRegex(RuntimeError, 'holds 4096 MiB'):
+                serving_config.require_exclusive_gpus(Path('unused'), 'mpsuser')
+
 
 class EntryTests(unittest.TestCase):
     def argv(self, root, inputs, plan, **extra):

@@ -25,6 +25,7 @@ DEFAULTS = {
     "scenario": "failstop",  # failstop (fault + rejoin cycle) | nofault (fixed layout; serving runs only)
     "run_mode": "correctness",  # correctness (deterministic, audited) | timing (default mode, no audits; serving runs)
     "shared_gpu_mode": False,
+    "mps_owner": None,  # exclusive runs: the one user whose resident nvidia-cuda-mps-server may stay (MPS_OWNER)
     "quick_mode": False,
     "timing_valid": False,  # only a non-shared timing serving run sets it (serving_config)
     "repeats": 10,

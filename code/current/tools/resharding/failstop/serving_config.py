@@ -47,14 +47,17 @@ def apply_environment(run_mode):
             os.environ.pop(key, None)
 
 
-def require_exclusive_gpus(log):
-    """A timing launch refuses to start unless every GPU of this node is idle and free of foreign processes."""
+def require_exclusive_gpus(log, mps_owner=None):
+    """A timing launch refuses to start unless every GPU of this node is idle and free of foreign processes;
+    the resident MPS server owned by `mps_owner` (environment MPS_OWNER) is the one tolerated exception."""
     snapshot = gpu_snapshot(log)
-    mps = mps_snapshot(log, snapshot, shared_gpu_mode=False)
-    check_gpu_processes(snapshot, mps, shared_gpu_mode=False)
-    busy = [g['index'] for g in snapshot['gpus'] if g['processes']]
+    mps = mps_snapshot(log, snapshot, shared_gpu_mode=False, mps_owner=mps_owner)
+    foreign = check_gpu_processes(snapshot, mps, shared_gpu_mode=False, mps_owner=mps_owner)
+    exempt = {p['pid'] for processes in foreign.values() for p in processes}
+    busy = [g['index'] for g in snapshot['gpus'] if any(p['pid'] not in exempt for p in g['processes'])]
     require(not busy, f'GPUs {busy} hold processes; timing runs need all 16 GPUs idle')
-    return snapshot
+    require(not mps['clients'], f"MPS clients present: {mps['clients']}")
+    return {**snapshot, 'mps': mps, 'mps_owner_exception': {uuid: processes for uuid, processes in foreign.items() if processes}}
 
 
 def serving_config(*, node, launch, mode, output, master, port, commit, remaining, min_free_disk_gb, quick, shared_gpu,
@@ -79,6 +82,7 @@ def serving_config(*, node, launch, mode, output, master, port, commit, remainin
             'node': node, 'output': str(output), 'master': master, 'port': port, 'commit': commit, 'mps_pipe': None,
             'method': method, 'scenario': scenario, 'run_mode': run_mode,
             'quick_mode': quick, 'correctness_only': correctness, 'shared_gpu_mode': shared_gpu,
+            'mps_owner': None if shared_gpu else os.environ.get('MPS_OWNER'),
             'timing_valid': not correctness and not shared_gpu, 'deterministic_mode': correctness,
             'min_free_disk_gb': min_free_disk_gb, **pidfd_implementations(),
             'startup_timeout_s': long, 'stage_timeout_s': long, 'reclaim_timeout_s': min(120, remaining - 30),

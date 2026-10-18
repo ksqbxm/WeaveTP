@@ -70,8 +70,8 @@ class Supervisor:
     def inspect(self, name, expected=None):
         raw = self.root / f"{name}_raw.jsonl"
         snapshot = gpu_snapshot(raw)
-        mps = mps_snapshot(raw, snapshot, self.config.get("mps_pipe"), self.config["shared_gpu_mode"])
-        foreign = check_gpu_processes(snapshot, mps, expected, self.config["shared_gpu_mode"], self.task_pids)
+        mps = mps_snapshot(raw, snapshot, self.config.get("mps_pipe"), self.config["shared_gpu_mode"], self.config["mps_owner"])
+        foreign = check_gpu_processes(snapshot, mps, expected, self.config["shared_gpu_mode"], self.task_pids, self.config["mps_owner"])
         if name == "preflight":
             self.foreign = foreign
         new_foreign = {uuid: [p for p in processes if p["pid"] not in
@@ -198,7 +198,7 @@ class Supervisor:
         for _ in range(self.config["stable_samples"] - 1):
             time.sleep(self.config["sample_s"])
             sample = gpu_snapshot(self.root / "baseline_raw.jsonl")
-            check_gpu_processes(sample, mps, shared_gpu_mode=self.config["shared_gpu_mode"])
+            check_gpu_processes(sample, mps, shared_gpu_mode=self.config["shared_gpu_mode"], mps_owner=self.config["mps_owner"])
             samples.append(sample)
         baselines = baseline_ranges(samples, self.config)
         write_json(self.root / "baseline.json", {"samples": samples, "ranges": baselines})

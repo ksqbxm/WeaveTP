@@ -137,7 +137,8 @@ def main(argv=None):
         output = root / launch
         require(not output.exists(), f'{output} exists: reruns take a new suite id')
         if args.run_mode == 'timing':  # refused launches leave this record and no launch directory
-            write_json(root / f'{launch}_preflight_exclusive.json', require_exclusive_gpus(root / f'{launch}_preflight_exclusive.jsonl'))
+            write_json(root / f'{launch}_preflight_exclusive.json',
+                       require_exclusive_gpus(root / f'{launch}_preflight_exclusive.jsonl', os.environ.get('MPS_OWNER')))
         config = serving_config(node=args.node, launch=launch, mode=args.mode, output=output, master=args.master,
                                 port=args.port_base + index, commit=commit, remaining=remaining, min_free_disk_gb=args.min_free_disk_gb,
                                 quick=False, shared_gpu=args.correctness_only, run_mode=args.run_mode, method=args.method,

@@ -288,6 +288,19 @@ class SafetyTests(unittest.TestCase):
                 with self.assertRaisesRegex(RuntimeError, "cannot locate"):
                     safety.mps_snapshot(Path(directory) / "raw", {"gpus": []})
 
+    def test_owner_exempt_daemon_may_stay_unlocatable_in_exclusive_mode(self):
+        raw = ("123 mpsuser nvidia-cuda-mps /usr/bin/nvidia-cuda-mps-control -d\n"
+               "456 mpsuser nvidia-cuda-mps-server /usr/bin/nvidia-cuda-mps-server\n")
+        with tempfile.TemporaryDirectory() as directory, patch.object(safety, "command", return_value=raw), \
+                patch.object(Path, "read_bytes", side_effect=PermissionError), patch.object(Path, "exists", return_value=False):
+            mps = safety.mps_snapshot(Path(directory) / "raw", {"gpus": []}, mps_owner="mpsuser")
+            self.assertEqual((mps["state"], mps["servers"], mps["unqueried_servers"]), ("partial", [456], [456]))
+            self.assertEqual(mps["owner_exception"]["exempt_daemons"], [123])
+            with self.assertRaisesRegex(RuntimeError, "cannot locate"):
+                safety.mps_snapshot(Path(directory) / "raw", {"gpus": []}, mps_owner="other")
+            with self.assertRaisesRegex(RuntimeError, "cannot locate"):
+                safety.mps_snapshot(Path(directory) / "raw", {"gpus": []})
+
     def test_context_check_requires_independent_worker_pid_and_correct_uuid(self):
         gpu = {"uuid": "GPU-a", "util_percent": 0, "processes": [{"pid": 20, "name": "python"}]}
         snapshot = {"gpus": [gpu]}
