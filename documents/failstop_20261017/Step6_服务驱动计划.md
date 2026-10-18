@@ -1,6 +1,6 @@
 # Step 6 计划（修订版）：统一服务驱动，fail-stop 端到端先跑通，扩缩容只加功能
 
-状态：**修订计划稿，待用户审阅；未编码。** 2026-10-18 用户发来《第 1 行扩缩容端到端实验：实施计划》修订版（副本：[参考_扩缩容实施计划_W1-W4设计依据.md](参考_扩缩容实施计划_W1-W4设计依据.md)），指示以其中 W1–W4 的设计为准修订本计划；附件只作设计依据与数字来源，其中分支起点、W0、W5–W7 一律忽略；本轮只在 `codex/failstop` 开发，扩缩容以后从本分支拉 `codex/e2e-scaling`。
+状态：**第二次修订稿（已吸收 2026-10-18 五条审阅意见），用户已批准开始 A 部分编码。** 2026-10-18 用户发来《第 1 行扩缩容端到端实验：实施计划》修订版（副本：[参考_扩缩容实施计划_W1-W4设计依据.md](参考_扩缩容实施计划_W1-W4设计依据.md)），指示以其中 W1–W4 的设计为准修订本计划；附件只作设计依据与数字来源，其中分支起点、W0、W5–W7 一律忽略；本轮只在 `codex/failstop` 开发，扩缩容以后从本分支拉 `codex/e2e-scaling`。
 
 写本稿前复核了 CODEX.md、[总计划](00_总计划.md) §6.2/§7/§8、[原 Step 6](06_Step6_批量服务与事件.md)、[Step 7](07_Step7_端到端矩阵与统计.md)、附件 W1–W4 全文、`documents/e2e_prep_20261008/sim/e2e_sim.py`（`Req.arrive`、`Replica`、`regroup`、`peak_ok`、`pre_shrink_cap`、`admit_step` 均在本分支）、Step 3/4/5 现有代码（`mixed_sources.Shard`/`build_mixed_plan`、`mixed_transport.execute`、`async_state.PeakBudget/ReplicaDriver/recovery_queue`、`model_shards.py`、`model_worker.py`）。
 
@@ -49,7 +49,9 @@ code/current/tests/unit_tests/e2e/            CPU 测试
 
 设计照原文：每个逻辑步 rank 0 用接纳控制器算出 `Decision{admits[(seq, replica)], prefill_tokens[], completions[], phase, head_block_reason, need_prefill_forward, sleep_until, switch_trigger}`，`broadcast_object_list` 到 Gloo `control_group`；所有 rank 对同一账本应用同一决策。任一副本有接纳则先 prefill 前向（无接纳副本喂 1 个 dummy token）再 decode 前向，否则只 decode。dummy 前向三不：不写 KV、不计 token、不计入 `t_prefill/t_decode`，耗时记 `t_sync`。每步末 `_all_ready(ok)`（MIN 归约）达成共识；每 10 步一次 `torch.cuda.mem_get_info` 护栏（低于阈值暂停接纳、`head_block_reason=mem`）。开环下队列空且下一条未到时 rank 0 决策带 `sleep_until`，所有 rank 真等（`t_wait`，`head_block_reason=arrival`）。控制流只走 CPU `control_group`，不碰 `NCCLCopyService` 的流。`step_time = t_prefill + t_decode + t_sync + t_ctrl + t_wait`，`t_ctrl` 目标 < 3 ms。
 
-本轮：A 全部实现并测（fake 后端两进程 Gloo 广播跑完整循环，五项之和断言，dummy 三不断言，开环等待按墙钟）；B 接真实模型。
+**决策提前一步（审阅意见 3）**：控制节点在第 s 步末按账本末状态算第 s+1 步的 `Decision` 并预推到控制 store；域 rank 0 在第 s+1 步开始时直接取、不等待跨机往返。`Decision` 带 `for_step`，域侧校验步号连续。接纳语义不变，生效晚一步（TTFT 影响 ≤ 1 步，写入字段说明）；锚点判定同样晚一步，overshoot 记录包含这一步。单域（扩缩容）也走预推路径，与 `e2e_sim` 的对照测试把"晚一步生效"作为对照条件。`t_ctrl` 拆为 `t_ctrl_fetch`（取决策）与 `t_ctrl_apply`（账本应用 + 域内广播），fake 循环与冒烟都单独报出，目标合计 < 3 ms。
+
+本轮：A 全部实现并测（fake 后端两进程 Gloo 广播跑完整循环，五项之和断言，dummy 三不断言，开环等待按墙钟，预推决策的步号连续性与晚一步生效）；B 接真实模型。
 
 差异：**步进域**。原文"所有副本同步推进"是单域（16 卡一个 `control_group`）。fail-stop 要求 EDP1 在 EDP0 停服/重建期间继续推进（总计划 §6.2、Step 4 合同），所以 `Driver` 按"步进域"运行：域 = 共享集合通信、必须同步步进的 rank 集合；每个域有自己的 Gloo 控制组和域内 rank 0。扩缩容是一个域，退化为原文设计（与 `e2e_sim` 同轨迹的对照测试就在单域下做）。fail-stop 是两个域（EDP0、EDP1），各自步数独立；全局 FCFS 接纳由控制节点（SL3060，Step 1–5 的控制器进程）上的 `AdmissionController` 持有，各域每步经控制 store（`common.Bus`）取本域 `Decision` 再域内广播。这是对原文的扩展，不改变单域语义。
 
@@ -69,7 +71,7 @@ code/current/tests/unit_tests/e2e/            CPU 测试
 
 **`KVPlanBuilder` 同时覆盖两种映射（审阅重点一）**：构建分两层。第一层 `kv_moves(src_rank_map, dst_rank_map, ledger_assignment) -> [(src_rank, dst_rank, head_group, zone, block_range)]`，只用 head 组归属与块表：head 组 k 在源布局由"持有组 k 的 rank"给出，在目标布局由"需要组 k 的 rank"给出，二者都从 `rank_map` 的 `(replica, tp_coord, tp_size)` 推出（TP2 tp-rank j 持有组 {2j, 2j+1}，TP4 tp-rank k 持有组 k），请求→目标副本的分配来自账本（扩缩容 D16：2→4 合并 2i/2i+1，4→2 按 `seq` 分给预留较少的子副本；fail-stop：EDP0 扩容时四卡都是目标、请求不重分）。第二层是两个渲染器：`as_transfer_ops()` 输出 Megatron `TransferOp(param_name='kv::seg_xxxx.key|value', peer_rank, is_send, my_slice, peer_slice, task_id)`，与缓存的权重 `ReshardPlan` 合并交给 `_run_async_waves`（扩缩容路径）；`as_shards()` 输出 Step 3 `Shard`（全局坐标 `[token, 1, head, dim]` 的 head 段与 token 区间，与 Step 5 `model_shards.kv_shards` 同一坐标约定），交给 `build_mixed_plan` + `mixed_transport.execute`（fail-stop 路径）。CPU 测试：同一账本下，D16 2→4 的 moves 满足"rank 4i+k 从 4i+k//2 与 4i+2+k//2 各收组 k，其一为本地"、4→2 满足"子副本 tp-rank j 从 TP4 rank 4i+2j、4i+2j+1 各收组 2j、2j+1 且只含分给它的请求"、任务数 ≤ 2 × 27 × 2 × 16；fail-stop EDP0 TP2→TP4 的 moves 与 Step 5 `map_kv_heads` 的 head 算术一致，渲染成 `Shard` 后经 `build_mixed_plan` 执行得到的目标与 `map_kv_heads` 逐位相等。两种渲染器的字节总量相等。
 
-差异：(1) fail-stop 缩容不迁 KV（故障作废 EDP0 在途，重新 prefill；Step 5 §3），`KVPlanBuilder` 对该方向返回空计划；扩缩容 4→2 迁 KV。(2) 两条执行路径并存（Megatron 规划器 vs Step 3 混合规划器），由工厂选择，见 3.6。
+差异：(1) fail-stop 缩容不迁 KV，`KVPlanBuilder` 对该方向返回空计划；扩缩容 4→2 迁 KV。**核对依据（审阅意见 1）**：`megatron/core/failstop.py` 的 `FaultSession.failed` 固定为 EDP0 中 etp ∈ {0, 1} 的四张卡（坐标 (0,0),(1,0),(0,1),(1,1)），`replica_group_specs` 的 dense TP 组为连续 4 卡，EDP0 的两个 dense DP 副本恰是两个 EP 半区，**每个 dense 副本都失去 2 个 TP rank**；MLA KV 按 head 切分（K `[S,B,heads/TP,192]`），丢失 head 的 KV 无法由其他卡补回，重算丢失 head 又须跑完整前向。所以"另一个 dense 副本 KV 完好"在固定坐标下不成立，只有故障取走整个 dense 副本（某 EP 的 etp 0–3）时才成立，而那与总计划 §3 的坐标和"每个 EP 保留原专家归属"矛盾。(2) 两条执行路径并存（Megatron 规划器 vs Step 3 混合规划器），由工厂选择，见 3.6。(3) 测试增加：同一账本下 `as_transfer_ops()` 与 `as_shards()` 的任务数同量级，均 ≤ 2 × 27 × 2 × 16，防止 `as_shards()` 退化成按请求出任务。
 
 ### 3.4 注意力（W2，K4）
 
@@ -87,7 +89,7 @@ code/current/tests/unit_tests/e2e/            CPU 测试
 
 本轮：A 全部实现与测试（四种锚点各自触发/不重复/overshoot，`ceil` 边界，rejoin 到期早于/晚于 shrink_done，切换流程各阶段顺序用 fake 传输验证，校验步开关）；B 接真实切换。
 
-差异：(1) fail-stop 的缩容由故障事件强制触发，不是计划切换，流程中"峰值等待"换成 Step 4 `PeakBudget.check`（预算不足直接报错，不改停服策略，总计划 §6.2），"压实"只对扩容执行；(2) 校验步在 fail-stop 下不是容差比较而是 Step 5 的逐位合同（`determinism.compare_records`），所以 `validate_cutover` 是注入的策略对象：扩缩容默认 `ToleranceValidation`（原文，默认关），fail-stop 用 `BitwiseValidation`（确定性模式，默认开）。
+差异：(1) fail-stop 的缩容由故障事件强制触发，不是计划切换；"峰值等待"换成 Step 4 `PeakBudget.check`，"压实"只对扩容执行。**峰值不足的退化（审阅意见 4）**：不 abort，而是按接纳倒序把在跑请求驱逐回队首（保留原提交时间与已生成历史，恢复时重新 prefill），直到预算满足；记 `peak_eviction` 事件（驱逐请求数、token 数、释放字节、所在步）写入 `result.json.failstop.peak_eviction[]` 与 timeline 的 `stall` 行；驱逐不是静默，无事件记录的运行不得通过。总计划 §6.2 的"报错"口径随本稿同步修改。(2) 校验步在 fail-stop 下是 Step 5 的逐位合同（`determinism.compare_records`），所以 `validate_cutover` 是注入的策略对象：扩缩容 `ToleranceValidation`，fail-stop `BitwiseValidation`；**是否开启由运行模式决定，不由默认值决定（审阅意见 2，见 3.8 与 §4）**。
 
 ### 3.6 工厂注入（审阅重点三）
 
@@ -118,7 +120,9 @@ code/current/tests/unit_tests/e2e/            CPU 测试
 
 `decode_policy.py`：`DecodePolicy` 协议 `next_tokens(logits, ledger_rows) -> tokens` 与 `is_done(row)`；`Greedy`（argmax，达到固定 `output_len` 结束，忽略 EOS）与 `TeacherForcing`（下一 token 取参考 `output_token_ids`，结束同上）。两者都有 CPU 测试，由 `--e2e-decode-policy greedy|teacher_forcing` 选择，`Driver` 只调用协议。
 
-入口 `examples/rl/run_e2e_scaling.py`，`add_e2e_args` 按原文定义全部 `--e2e-*`：`--e2e-requests/--e2e-workload/--e2e-plan/--e2e-method/--e2e-out-dir/--e2e-segments k..m/--e2e-timeline on|off/--e2e-kv-block-tokens 64/--e2e-kv-segment-tokens 4096/--e2e-attention auto|triton|torch/--e2e-validate-cutover on|off/--e2e-backend block|fake/--e2e-audit-direct-tp4-load`，另加 `--e2e-decode-policy greedy|teacher_forcing`、`--e2e-experiment scaling|failstop`（后者只是一组默认值：工厂表的 fail-stop 列、`BitwiseValidation`、greedy、锚点注册表含 fail-stop 两种、步进域两个）。`main()` 照 `live.main()` 的 `args_defaults` 初始化 Megatron。fail-stop 的 Step 1–5 控制器/监管器仍负责进程生命周期与故障注入，worker 进程内运行的是本驱动。
+运行模式（审阅意见 2）：必填参数 `--e2e-run-mode correctness|timing`，无默认值。`correctness`：`--deterministic-mode`、校验步开（fail-stop 逐位 / 扩缩容容差）、Step 5 manifest 记录，所有时间字段 `timing_valid=false`；`timing`：默认模式、校验步关、不物化全部 logits，TFS/TTP/吞吐只从此模式取。`--e2e-validate-cutover` 若显式给出且与运行模式矛盾则报错；`result.json.config.run_mode` 记录。
+
+入口 `examples/rl/run_e2e_scaling.py`，`add_e2e_args` 按原文定义全部 `--e2e-*`：`--e2e-requests/--e2e-workload/--e2e-plan/--e2e-method/--e2e-out-dir/--e2e-segments k..m/--e2e-timeline on|off/--e2e-kv-block-tokens 64/--e2e-kv-segment-tokens 4096/--e2e-attention auto|triton|torch/--e2e-validate-cutover on|off/--e2e-backend block|fake/--e2e-audit-direct-tp4-load`，另加 `--e2e-run-mode correctness|timing`（必填）、`--e2e-decode-policy greedy|teacher_forcing`、`--e2e-experiment scaling|failstop`（后者只是一组默认值：工厂表的 fail-stop 列、`BitwiseValidation` 作为校验策略、greedy、锚点注册表含 fail-stop 两种、步进域两个）。`main()` 照 `live.main()` 的 `args_defaults` 初始化 Megatron。fail-stop 的 Step 1–5 控制器/监管器仍负责进程生命周期与故障注入，worker 进程内运行的是本驱动。
 
 ## 4. fail-stop 特有部分（本轮实现）
 
@@ -127,10 +131,15 @@ code/current/tests/unit_tests/e2e/            CPU 测试
 - 解码 greedy，固定输出长度 ≤ 256，忽略 EOS；请求集为用户指定的 ShareGPT 子集（A 部分用 fixture，正式子集待用户指定）。
 - 峰值检查用 Step 4 `PeakBudget`（源/目标权重、源/目标 KV、接收缓冲、临时、余量）。
 - 两个步进域、全局接纳在控制节点（3.1）；`FaultSession.rank_map()` 适配器（3.2）；KV 缩容不迁、扩容前缀 + 增量经 Step 3 混合规划器（3.3、3.6）；逐位校验用 Step 5 合同（3.5）。
+- 事件锚点选择留余量：`completed_count = ceil(0.25N)` 在正式负载确定时核对切换峰值预算有 ≥ 10% 余量，不满足则在 plan.json 生成时报告（审阅意见 4）。
+- **两种运行模式（审阅意见 2）**：correctness 运行用于 A6 逐位验收，确定性模式，每次切换多跑一个校验步并物化全部 logits，时间字段 `timing_valid=false`；timing 运行用于 Step 7 的 TFS/TTP/吞吐与停机时间，默认模式，校验步关，由 `--e2e-run-mode` 显式选择。
+- **对重启基线的 TFS 优势来源（审阅意见 1）**：缩容时 EDP0 在途请求全部重新 prefill（KV 不可保留，见 3.3 核对），因此优势不来自 KV 保留，而来自 (a) 权重经 P2P/主机库取得而非从磁盘重载整模型；(b) emulate 不重建进程与 CUDA 上下文、real 只重建 4 个进程；(c) EDP1 持续服务；(d) 重新 prefill 只针对 EDP0 在途请求。`result.json.failstop` 增加 `replay_prefill_tokens` 与 `tfs_breakdown`（权重取得、进程重建、重新 prefill 三段区间），使结果能说明优势来源。
 
 ## 5. 扩缩容 GPU 部分：只留接口，不运行
 
 不做：16 卡 TP2×DP8 `LiveRuntime` 双布局构建（`StandbyWeights` 两套、初始 `swap_model_weights`、两方向权重计划缓存）、固定 TP2/TP4 基线、正式运行、W5 数据集、W6 plan.json、W7 脚本。以后加这些时只需：在 `live_runtime.py` 填 `LiveRuntime.build_dual_layout()`（工厂默认列已定义），在 `factories.py` 的扩缩容默认列换成真实实现，新增数据/脚本文件；不改第 3 节任何模块的接口。
+
+B 部分之后的第一个增强项（审阅意见 1）：**完好 dense 副本的 KV 保留**。前提是故障模式改为取走整个 dense 副本（某 EP 的 etp 0–3）或 KV 改为非 head 切分布局，否则无 KV 可保留；实现路径已预留：与扩容同一条 `KVPlanBuilder.as_shards()`，源为残余 TP4 副本。该项需用户先修改总计划 §3 的故障坐标才有意义，本轮不做。
 
 ## 6. 交付顺序与验证
 
@@ -139,7 +148,10 @@ code/current/tests/unit_tests/e2e/            CPU 测试
    - `tests/unit_tests/e2e/`：控制器全部策略与 `e2e_sim` 同轨迹；`requests_io`；`BlockPool`/压实/`KVPlanBuilder`（两种映射、两种渲染、任务计数、字节一致）；`prepare_step`；注意力参考/回退/自检；锚点与执行器流程；`decode_policy` 两种；timeline/results 与 `--check`；fake 后端两域/单域跑完整循环（含 Gloo 广播，2 进程）与 fail-stop 事件（fail → replay → 回队 → expand）。
    - 快验 `quick_check.sh --step 6 --single-node`：单节点 fake 后端完整循环 + 上述 CPU 测试，5 分钟内，结论行 `QUICK CHECK step=6 result=PASS (fake backend: controller/kv/anchors/decode/timeline, failstop cycle) backend=fake single_node=true`，`accepted=false`。
    - 顺带修复并一起提交：(a) Step 4 `async_worker.py` 的 `require(overlap > 0, ...)` 在 `correctness_only` 下只记录 `overlap_ms`，不作硬断言（共享 GPU 时误判过一次）；(b) `quick_check.sh` 与各 runner 把 `$(dirname "$PYTHON")` 放到 PATH 最前，并在启动前 `"$PYTHON" -c "import megatron.core.datasets.helpers_cpp"` 预检，失败即在任何 GPU 工作之前报错（SL3060 继承 base 环境 Python 3.13、缺 pybind11 导致现场编译失败）。
-3. **B 部分**（阶段 A 服务器验收通过后）：真实模型 + 块级 KV + 分页注意力（Megatron 3 处钩子、Triton 自检）、接 Step 3/4 迁移（`as_shards()` 路径、Step 4 重叠）、确定性模式 batched 逐位检查（原 Step 6 §6 六个用例），跑出 fail-stop 端到端第一个结果。
+3. **B 部分**（阶段 A 服务器验收通过后，分三步，审阅意见 5）：
+   - B1：用 fail-stop 稳态段（故障前）做一次**单域、固定 TP4、无切换**的真实运行（EDP0 与 EDP1 作为同一域的两个副本锁步推进），验收：各 rank 账本一致、五项步时之和等于 `step_time`、两次吞吐差 < 2%。扩缩容接入时第一次 GPU 运行因此不再是 16 卡双布局。
+   - B2：真实模型 + 块级 KV + 分页注意力（Megatron 3 处钩子、Triton 自检），接 Step 3/4 迁移（`as_shards()` 路径，Step 4 重叠随后）与 fail-stop 事件。
+   - B3：确定性模式 batched 逐位检查（原 Step 6 §6 六个用例），跑出 fail-stop 端到端第一个结果（correctness 与 timing 各一次）。
 
 ## 7. 与 W1–W4 原文的差异汇总
 
@@ -149,8 +161,10 @@ code/current/tests/unit_tests/e2e/            CPU 测试
 | 控制器 | 扩缩容策略集 | 同一控制器加容量注入、停服容量 0、恢复队列 | fail-stop 语义 |
 | KV 计划 | `TransferOp` 合并进 `_run_async_waves` | 两层：共享 `kv_moves` + 两个渲染器（`TransferOp` / Step 3 `Shard`） | fail-stop 的源覆盖（残余 TP4 + EDP1 + 主机）只有混合规划器能表达 |
 | KV 缩容 | 4→2 迁 KV | fail-stop 缩容不迁，重新 prefill | 故障作废在途 KV（Step 5 §3） |
-| 切换触发 | 锚点计划 | fail-stop 缩容由故障事件强制，峰值用 `PeakBudget` 直接报错 | 总计划 §6.2 |
-| 校验步 | 容差，默认关 | 策略对象：扩缩容容差默认关；fail-stop 逐位默认开 | Step 5 §2.1 |
+| 切换触发 | 锚点计划 | fail-stop 缩容由故障事件强制 | 总计划 §6.2 |
+| 峰值不足 | 暂停接纳只解码（drain） | fail-stop：按接纳倒序驱逐回队首直到预算满足，记录事件 | 审阅意见 4；总计划 §6.2 同步修改 |
+| 校验步 | 容差，默认关 | 策略对象（扩缩容容差 / fail-stop 逐位），开关由 `--e2e-run-mode` 决定 | Step 5 §2.1；审阅意见 2 |
+| 决策 | 当步算当步广播 | 第 s 步末预推第 s+1 步决策，晚一步生效 | 审阅意见 3 |
 | 结果 | 原 schema | 原 schema + `failstop{}` | 总计划 §7/§8 |
 | 入口参数 | `--e2e-*` | 同，另加 `--e2e-decode-policy`、`--e2e-experiment` | 两实验共用 |
 | 分支/W0/W5–W7 | 新分支、数据集、plan、脚本 | 忽略，本分支开发 | 用户指示 |
@@ -161,8 +175,8 @@ code/current/tests/unit_tests/e2e/            CPU 测试
 2. **锚点与 `decode_policy` 可插拔**：3.5 的 `Anchor` 协议 + 注册表（四实现），3.8 的 `DecodePolicy` 协议（两实现）；`PlanExecutor`、`Driver` 只依赖协议。
 3. **工厂注入**：3.6 的 `RuntimeFactories` 八项，默认列与 fail-stop 列并列；`LiveRuntime`/`Driver` 不直接引用任何具体实现。
 
-## 9. 待确认
+## 9. 审阅记录与待确认
 
-1. fail-stop 两域 + 控制节点全局接纳（3.1）是否接受；若要求 EDP0/EDP1 也同步步进，则与总计划 §6.2 的"独立推进"冲突，需你裁决。
-2. B 部分 fail-stop 的传输先用同步 `mixed_transport.execute`，Step 4 重叠作为随后一项接入，是否接受。
-3. 快验 `--step 6` 只跑 fake 后端（CPU），不占 GPU；是否仍要求走两节点握手形式（本稿为单节点）。
+2026-10-18 审阅意见与处理：(1) 缩容 KV：核对固定故障坐标后不可保留，文档写明优势来源，KV 保留列为 B 后第一个增强项（需改故障坐标）；(2) 校验步由 `--e2e-run-mode` 决定，correctness/timing 两种运行；(3) 决策提前一步预推，`t_ctrl` 拆两段；(4) 峰值不足改为记录型驱逐，总计划 §6.2 同步，注入时刻留 10% 余量，两种渲染任务数测试；(5) B 部分先做单域固定布局 GPU 运行。用户已批准开始 A 部分编码。
+
+仍待确认：快验 `--step 6` 只跑 fake 后端（CPU），本稿为单节点形式。
