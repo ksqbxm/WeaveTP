@@ -24,20 +24,13 @@ from pathlib import Path
 
 import model_memory
 import torch
-from common import (
-    DEFAULTS,
-    DETERMINISTIC_ENVIRONMENT,
-    NODES,
-    SERVING_PROBE,
-    require,
-    require_megatron_helpers,
-    write_json,
-)
+from common import NODES, SERVING_PROBE, require, require_megatron_helpers, write_json
 from determinism import compare_records
 from run_model import environment, format_table
 from run_probe import repository_commit, run_case
 from run_topology import cases
-from safety import check_data_space, pidfd_implementations
+from safety import check_data_space
+from serving_config import apply_environment, serving_config
 
 CODE_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(CODE_ROOT))
@@ -48,7 +41,6 @@ import run_e2e_scaling  # noqa: E402
 from tools.resharding.correctness.router_determinism_driver import model_arguments  # noqa: E402
 from tools.resharding.e2e.toy_inputs import write_toy_inputs  # noqa: E402
 
-GIB = 1 << 30
 RUNS = {
     'scaling': dict(count=24, failstop=False, policy='teacher_forcing', world_size=8, expected=['2->4', '4->2'],
                     switches=[{'direction': '2->4', 'anchor': {'kind': 'before_admit', 'seq': 12}},
@@ -56,7 +48,7 @@ RUNS = {
     'failstop': dict(count=20, failstop=True, policy='greedy', world_size=16, expected=['shrink', 'expand'], switches=None),
 }
 TESTS = ('tests/unit_tests/e2e',)
-GEOMETRY = {'layers': 27, 'heads': 16, 'group_heads': 4, 'k_dim': 192, 'v_dim': 128}
+GIB = 1 << 30
 
 
 # ---- layer a -------------------------------------------------------------------------------------------------
@@ -190,50 +182,40 @@ def layer_b2(args, root, deadline):
 
 
 # ---- layer b3 ------------------------------------------------------------------------------------------------
-def worker_arguments(checkpoint, prompt_tokens, seq_length):
-    argv = model_arguments('tp4', checkpoint, prompt_tokens, seq_length)
-    argv[argv.index('--global-batch-size') + 1] = '4'
-    return argv + ['--deterministic-mode']
+def b3_passed(outcome, metrics, method):
+    """Gate metrics (SL3060 only): every request completed, the result self-audit and the expand KV check passed;
+    AnchorTP additionally paused EDP0 (no foreground step) and moved no delta on both switches."""
+    if outcome['status'] != 'passed':
+        return False
+    if metrics is None:
+        return True
+    passed = metrics['check_passed'] and metrics['kv_check_passed']
+    if method == 'anchortp':
+        passed = passed and all(s['overlap_steps'] == 0 and s['kv_delta_bytes'] == 0 for s in metrics['edp0_switches'])
+    return bool(passed)
 
 
 def layer_b3(args, root, deadline):
     require_megatron_helpers()
-    profile, reference = Path(args.profile_file or ''), Path(args.reference_root or '')
-    require(profile.is_file(), f'--profile-file (frozen Step 3 profile) is required for b3; not found: {profile}')
-    if args.node == 'SL3061':  # only the EDP0 node audits migrated targets against the reference hashes
-        for tp in (2, 4):
-            require(all((reference / f'tp{tp}' / 'reference' / f'parameters_rank_{r}.json').is_file() for r in range(2 * tp)),
-                    f'reference parameter hashes for tp{tp} are missing under {reference} (run_model.py reference role)')
+    require(Path(args.profile_file or '').is_file(), f'--profile-file (frozen Step 3 profile) is required for b3; not found: {args.profile_file}')
     inputs = write_toy_inputs(root / 'inputs', count=args.b3_requests, failstop=True, rejoin_seconds=args.b3_rejoin_seconds)
-    selected = cases(args.mode, 1, 1, args.suite_id)
-    case = selected[0]
-    for key in ('PYTORCH_ALLOC_CONF', 'PYTORCH_CUDA_ALLOC_CONF'):
-        os.environ.pop(key, None)
-    os.environ.update(DETERMINISTIC_ENVIRONMENT)
-    remaining = deadline - time.monotonic()
-    require(remaining > 90, 'budget exhausted before the b3 launch')
-    config = {**{k: v for k, v in DEFAULTS.items() if k != 'repeats'}, **case,
-              'probe': SERVING_PROBE, 'kind': case['mode'], 'profile_only': False, 'node': args.node, 'output': str(root / case['launch']),
-              'master': args.master, 'port': args.port_base, 'commit': repository_commit(), 'mps_pipe': None,
-              'quick_mode': True, 'correctness_only': True, 'shared_gpu_mode': True, 'timing_valid': False,
-              'min_free_disk_gb': args.min_free_disk_gb, **pidfd_implementations(),
-              'startup_timeout_s': min(240, remaining - 30), 'stage_timeout_s': min(240, remaining - 30),
-              'reclaim_timeout_s': min(120, remaining - 30), 'launch_timeout_s': remaining,
-              'profile_file': str(profile), 'reference_root': str(reference), 'deterministic_mode': True,
-              'kv_heads': GEOMETRY['heads'], 'memory_margin_bytes': 2 * GIB, 'memory_limit_bytes': None,
-              'model_argv': worker_arguments(args.checkpoint, 8, args.seq_length),
-              'serving': {'requests': str(inputs['requests']), 'workload': str(inputs['workload']), 'plan': str(inputs['plan']),
-                          'b_max': 4, 'decode_policy': 'greedy', 'block_tokens': 64, 'segment_tokens': 4096, 'max_delta_steps': 32,
-                          'attention': 'torch', 'growth': {'shrink': 0, 'expand': 2}, 'geometry': GEOMETRY, 'capacity_tokens': None}}
-    print(f"Starting {case['launch']} mode={case['mode']} (serving worker, {args.b3_requests} toy requests)", flush=True)
+    case = cases(args.mode, 1, 1, args.suite_id)[0]
+    apply_environment('correctness')
+    config = serving_config(node=args.node, launch=case['launch'], mode=case['mode'], output=root / case['launch'], master=args.master,
+                            port=args.port_base, commit=repository_commit(), remaining=deadline - time.monotonic(),
+                            min_free_disk_gb=args.min_free_disk_gb, quick=True, shared_gpu=True, run_mode='correctness',
+                            method=args.method, scenario='failstop', checkpoint=args.checkpoint, seq_length=args.seq_length,
+                            profile_file=args.profile_file or '', reference_root=args.reference_root, requests=inputs['requests'],
+                            workload=inputs['workload'], plan=inputs['plan'], b_max=4, capacity_tokens=None)
+    print(f"Starting {case['launch']} mode={case['mode']} method={args.method} (serving worker, {args.b3_requests} toy requests)", flush=True)
     outcome = run_case(config)
     # The gate (SL3060) owns the metrics and the result files; SL3061's controller result carries the status only.
     result = json.loads((Path(config['output']) / 'controller_result.json').read_text(encoding='utf-8'))
     metrics = result['metrics'] if args.node == NODES[0] else None
-    record = {'launch': case['launch'], 'mode': case['mode'], 'status': outcome['status'], 'output': config['output'], 'metrics': metrics,
-              'files': {name: str(Path(config['output']) / name) for name in ('result.json', 'check.json', 'events_actual.json')} if metrics else None,
-              'passed': outcome['status'] == 'passed' and (metrics is None or (metrics['check_passed'] and metrics['kv_check_passed']))}
-    return record
+    return {'launch': case['launch'], 'mode': case['mode'], 'method': args.method, 'status': outcome['status'], 'output': config['output'],
+            'metrics': metrics,
+            'files': {name: str(Path(config['output']) / name) for name in ('result.json', 'check.json', 'events_actual.json')} if metrics else None,
+            'passed': b3_passed(outcome, metrics, args.method)}
 
 
 LAYERS = {'a': layer_a, 'b1': layer_b1, 'b2': layer_b2, 'b3': layer_b3}
@@ -250,6 +232,7 @@ def main(argv=None):
     parser.add_argument('--min-free-disk-gb', type=float, default=1)
     parser.add_argument('--layer', choices=tuple(LAYERS), default='a')
     parser.add_argument('--mode', choices=('emulate', 'real'), default='emulate', help='b3 only')
+    parser.add_argument('--method', choices=('weavetp', 'anchortp'), default='weavetp', help='b3 only: recovery method under test')
     parser.add_argument('--checkpoint', default=os.environ.get('CHECKPOINT', '/data/models/DeepSeek-V2-Lite-megatron-v2'))
     parser.add_argument('--seq-length', type=int, default=512, help='b1/b2/b3: max_position_embeddings (rotary table and static baseline)')
     parser.add_argument('--profile-file', help='b3: frozen Step 3 profile.json')
@@ -269,6 +252,7 @@ def main(argv=None):
     summary = {'step': 6, 'probe': SERVING_PROBE, 'layer': args.layer, 'node': args.node, 'suite_id': args.suite_id,
                'backend': 'fake' if args.layer == 'a' else 'block', 'attention': 'none' if args.layer == 'a' else 'torch_splitkv',
                'gpus_used': {'a': 0, 'b1': 8, 'b2': 8, 'b3': 8}[args.layer], 'mode': args.mode if args.layer == 'b3' else None,
+               'method': args.method if args.layer == 'b3' else None,
                'single_node': args.layer != 'b3', 'quick_mode': True, 'correctness_only': True, 'shared_gpu_mode': args.layer != 'a',
                'timing_valid': False, 'accepted': False, 'all_checks_passed': False, 'seq_length': args.seq_length}
     try:

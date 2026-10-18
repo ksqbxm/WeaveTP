@@ -5,7 +5,7 @@ set -euo pipefail
 usage() {
   cat <<'USAGE'
 usage: quick_check.sh --step N --node SL3060|SL3061 [--single-node] [--layer a|b1|b2|b3] [--mode emulate|real]
-                      [--profile-file PATH] [--reference-root DIR] [--min-free-disk-gb N]
+                      [--method weavetp|anchortp] [--profile-file PATH] [--reference-root DIR] [--min-free-disk-gb N]
 
   --step N            2 (topology), 3 (sources/transport), 4 (async driver), 5 (model correctness), 6 (serving)
   --node              this node; two-node steps are started on both nodes within 60 seconds
@@ -13,6 +13,7 @@ usage: quick_check.sh --step N --node SL3060|SL3061 [--single-node] [--layer a|b
   --layer             Step 6 only: a = fake backend + CPU tests (default), b1/b2 = real model on this node,
                       b3 = two-node fail-stop end to end (never with --single-node)
   --mode              Step 6 b3 fault mode (default emulate)
+  --method            Step 6 b3 recovery method under test (default weavetp; anchortp = fixed-path paused migration)
   --profile-file      Step 6 b3: frozen Step 3 profile.json, same path on both nodes
   --reference-root    Step 6 b3: run_model.py output root with tp2/ and tp4/ reference hashes (read on SL3061)
   --min-free-disk-gb  /data free-space threshold for the quick run (default 1)
@@ -25,7 +26,7 @@ fail() {
   exit 2
 }
 
-STEP= NODE= MIN_FREE_DISK_GB=1 SINGLE_NODE= LAYER=a MODE=emulate PROFILE_FILE= REFERENCE_ROOT=
+STEP= NODE= MIN_FREE_DISK_GB=1 SINGLE_NODE= LAYER=a MODE=emulate METHOD=weavetp PROFILE_FILE= REFERENCE_ROOT=
 while (($#)); do
   case "$1" in
     --help|-h) usage; exit 0 ;;
@@ -35,6 +36,7 @@ while (($#)); do
     --single-node) SINGLE_NODE=--single-node; shift ;;
     --layer) LAYER="$2"; shift 2 ;;
     --mode) MODE="$2"; shift 2 ;;
+    --method) METHOD="$2"; shift 2 ;;
     --profile-file) PROFILE_FILE="$2"; shift 2 ;;
     --reference-root) REFERENCE_ROOT="$2"; shift 2 ;;
     *) fail "unknown argument: $1" ;;
@@ -53,6 +55,7 @@ esac
 [[ "$MIN_FREE_DISK_GB" =~ ^[0-9]+([.][0-9]+)?$ ]] || fail "--min-free-disk-gb must be a number (got '${MIN_FREE_DISK_GB}')"
 [[ "$LAYER" =~ ^(a|b1|b2|b3)$ ]] || fail "--layer must be a, b1, b2 or b3 (got '${LAYER}')"
 [[ "$MODE" =~ ^(emulate|real)$ ]] || fail "--mode must be emulate or real (got '${MODE}')"
+[[ "$METHOD" =~ ^(weavetp|anchortp)$ ]] || fail "--method must be weavetp or anchortp (got '${METHOD}')"
 # Step 5 (before its fail-stop integration) needs only this node's eight GPUs; Step 6 layers a/b1/b2 run on one node,
 # layer b3 is the two-node fail-stop run.
 if [[ -n "$SINGLE_NODE" && "$STEP" != 5 && "$STEP" != 6 ]]; then fail "--single-node applies to Step 5 and Step 6 only"; fi
@@ -72,7 +75,7 @@ SHA=$("$PYTHON" -c 'import json,sys; print(json.load(open(sys.argv[1]))["step"+s
 (cd "$REPO/code/current" && "$PYTHON" -c "import megatron.core.datasets.helpers_cpp") || fail "megatron.core.datasets.helpers_cpp does not import in this Python environment"
 mkdir -p "/data/ubuntu/lxh/weavetp/acceptance/$NAME/kickoff"
 LOGDIR=$(mktemp -d "/data/ubuntu/lxh/weavetp/acceptance/$NAME/kickoff/${NODE}_$(date -u +%Y%m%dT%H%M%SZ)_XXXXXX")
-nohup "$PYTHON" -B "$HERE/quick_driver.py" --step "$STEP" --node "$NODE" --sha "$SHA" --repo "$REPO" --log-dir "$LOGDIR" --min-free-disk-gb "$MIN_FREE_DISK_GB" $SINGLE_NODE --layer "$LAYER" --mode "$MODE" ${PROFILE_FILE:+--profile-file "$PROFILE_FILE"} ${REFERENCE_ROOT:+--reference-root "$REFERENCE_ROOT"} > "$LOGDIR/nohup.log" 2>&1 < /dev/null &
+nohup "$PYTHON" -B "$HERE/quick_driver.py" --step "$STEP" --node "$NODE" --sha "$SHA" --repo "$REPO" --log-dir "$LOGDIR" --min-free-disk-gb "$MIN_FREE_DISK_GB" $SINGLE_NODE --layer "$LAYER" --mode "$MODE" --method "$METHOD" ${PROFILE_FILE:+--profile-file "$PROFILE_FILE"} ${REFERENCE_ROOT:+--reference-root "$REFERENCE_ROOT"} > "$LOGDIR/nohup.log" 2>&1 < /dev/null &
 printf '%s\n' "$!" > "$LOGDIR/driver.pid"
 if [[ -n "$SINGLE_NODE" ]]; then
   printf 'Started Step %s on %s alone (single node, no peer).\nLog: %s/nohup.log\n' "$STEP" "$NODE" "$LOGDIR"

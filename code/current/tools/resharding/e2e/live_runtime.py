@@ -236,9 +236,10 @@ class Driver:
             log['replica'] = replica
             for key, value in (('t_admit', admit['t']), ('admit_step', admit['step']), ('layout_at_admit', admit['layout'])):
                 log.setdefault(key, value)
-        # Rows that commit one token in this step's decode (ledger state before the forwards, domain-wide).
+        # Rows that commit one token in this step's decode on the replicas this process runs (ledger state before
+        # the forwards); token times are recorded by the process that served the request, admits domain-wide.
         decode_rows = {replica: [row.seq for row in run.ledger.replica(replica).running.values()
-                                 if row.seq not in prefill_rows.get(replica, [])] for replica in run.replicas}
+                                 if row.seq not in prefill_rows.get(replica, [])] for replica in run.local_replicas}
         timing.t_ctrl_apply = time.perf_counter() - t
         ok, tokens = True, 0
         try:
@@ -265,17 +266,18 @@ class Driver:
         run.generated += tokens
         stamp = run.clock.stamp(timing.step_time)  # the end of this step on the run clock
         if ok:
-            for seq in [s for seqs in prefill_rows.values() for s in seqs]:
-                log = run.request_log[seq]
-                log.setdefault('t_first', stamp)  # a replay re-prefills; the first token keeps its original time
-                log['t_tokens'].append(stamp)
-            for seqs in decode_rows.values():
-                for seq in seqs:
+            for replica in run.local_replicas:
+                for seq in prefill_rows.get(replica, []):
+                    log = run.request_log[seq]
+                    log.setdefault('t_first', stamp)  # a replay re-prefills; the first token keeps its original time
+                    log['t_tokens'].append(stamp)
+                for seq in decode_rows[replica]:
                     run.request_log[seq]['t_tokens'].append(stamp)
         done = run.control.complete(run.step, run.replicas)
         for row in done:
             run.backend.release(row.replica, row.seq)
-            run.request_log.setdefault(row.seq, {'admits': [], 't_tokens': []}).update(t_done=stamp, finish_step=run.step)
+            if row.replica in run.local_replicas:
+                run.request_log.setdefault(row.seq, {'admits': [], 't_tokens': []}).update(t_done=stamp, finish_step=run.step)
         local_done = sum(1 for row in done if row.replica in run.local_replicas)  # this process's replicas only
         run.completed += local_done
         run.timeline.step(**self.timeline_row(decision, timing, local_done, tokens))

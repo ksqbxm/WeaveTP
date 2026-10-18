@@ -9,7 +9,9 @@ SCHEMA_VERSION = 'e2e-serving-v1'
 def merge_request_logs(logs):
     """One record per seq from several domains' request_log dicts (a replayed request is admitted on more than one).
 
-    admits and t_tokens are unions in time order; t_admit/t_first/layout_at_admit come from the earliest admit,
+    Admits are logged domain-wide (every process of a domain sees the decision), so the same admit may arrive from
+    several logs: one per (step, replica) is kept. Token/first/done times are logged only by the process that served
+    the request, so their union has no duplicates. t_admit/t_first/layout_at_admit come from the earliest admit,
     replica from the latest, t_done from whichever domain completed it.
     """
     merged = {}
@@ -17,7 +19,9 @@ def merge_request_logs(logs):
         for seq, entry in log.items():
             seq = int(seq)
             record = merged.setdefault(seq, {'admits': [], 't_tokens': []})
-            record['admits'] = sorted(record['admits'] + list(entry['admits']), key=lambda a: (a['t'], a['step']))
+            seen = {(a['step'], a['replica']) for a in record['admits']}
+            record['admits'] = sorted(record['admits'] + [a for a in entry['admits'] if (a['step'], a['replica']) not in seen],
+                                      key=lambda a: (a['step'], a['t']))
             record['t_tokens'] = sorted(record['t_tokens'] + list(entry['t_tokens']))
             for key in ('t_first', 't_done', 'finish_step'):
                 if key in entry:

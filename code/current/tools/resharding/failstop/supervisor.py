@@ -215,7 +215,7 @@ class Supervisor:
         self.transition("preflight", "running")
         self.start_workers(slots, 0)
         self.verify_contexts(slots, 0)
-        if not self.config.get('profile_only'):
+        if not self.config.get('profile_only') and self.config['scenario'] == 'failstop':
             if node == "SL3061":
                 self.wait(["kill"], timeout=self.config["launch_timeout_s"])
                 self.kill_and_reclaim(baselines, mps["servers"])

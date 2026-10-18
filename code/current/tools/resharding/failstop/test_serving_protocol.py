@@ -93,15 +93,18 @@ class Simulation(model_test.Simulation):
         reference = self.root / 'reference'
         model_test.reference_hashes(reference)
         (self.root / 'profile.json').write_text(json.dumps(model_test.profile([model_worker.identity(r) for r in self.rows])))
-        inputs = write_toy_inputs(self.root / 'inputs', count=12, failstop=True)
+        settings = {**common.DEFAULTS, **self.extra_config}
+        inputs = write_toy_inputs(self.root / 'inputs', count=12, failstop=settings['scenario'] == 'failstop')
         self.config = {**common.DEFAULTS, 'output': str(self.root), 'launch': 'cpu_serving', 'commit': 'cpu',
                        'mode': self.mode, 'rounds': 1, 'quick_mode': True, 'correctness_only': True,
                        'shared_gpu_mode': True, 'port': 1, 'stage_timeout_s': 8, 'launch_timeout_s': 60, 'reclaim_timeout_s': 8,
                        'probe': common.SERVING_PROBE, 'profile_file': str(self.root / 'profile.json'), 'reference_root': str(reference),
-                       'deterministic_mode': True, 'kv_heads': HEADS, 'memory_margin_bytes': 0, 'memory_limit_bytes': None,
+                       'deterministic_mode': settings['run_mode'] == 'correctness', 'kv_heads': HEADS, 'memory_margin_bytes': 0,
+                       'memory_limit_bytes': None,
                        'serving': {'requests': str(inputs['requests']), 'workload': str(inputs['workload']), 'plan': str(inputs['plan']),
                                    'b_max': 2, 'decode_policy': 'greedy', 'block_tokens': 4, 'segment_tokens': 16, 'max_delta_steps': 2,
-                                   'attention': 'auto', 'growth': {'shrink': 0, 'expand': 1}, 'geometry': GEOMETRY, 'capacity_tokens': 40}}
+                                   'attention': 'auto', 'growth': {'shrink': 0, 'expand': 1}, 'geometry': GEOMETRY, 'capacity_tokens': 40},
+                       **self.extra_config}
         sim = self
 
         class Journal(common.Journal):
@@ -119,7 +122,8 @@ class Simulation(model_test.Simulation):
             stack.enter_context(patch.multiple(model_worker, parent_death_signal=lambda: None, verify_worker_context=lambda *_: {},
                                                connect=lambda _: (None, self), Journal=Journal, make_copy_service=self.copy_service))
             stack.enter_context(patch.object(model_worker, 'os', SimpleNamespace(
-                environ={'CUDA_MPS_PIPE_DIRECTORY': str(self.root / 'absent'), **common.DETERMINISTIC_ENVIRONMENT},
+                environ={'CUDA_MPS_PIPE_DIRECTORY': str(self.root / 'absent'),
+                         **(common.DETERMINISTIC_ENVIRONMENT if self.config['deterministic_mode'] else {})},
                 getpid=lambda: self.local.pid)))
             stack.enter_context(patch.multiple(torch.cuda, set_device=lambda *_: None, device_count=lambda: 1,
                 get_device_properties=lambda _: SimpleNamespace(uuid=self.rows[self.local.identity[0]]['gpu_uuid']),
@@ -157,24 +161,60 @@ class Simulation(model_test.Simulation):
 
 
 class ServingProtocolTests(unittest.TestCase):
-    def run_mode(self, mode):
+    @contextlib.contextmanager
+    def simulate(self, mode, extra):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            torch.use_deterministic_algorithms(extra.get('run_mode', 'correctness') == 'correctness')
+            try:
+                result = Simulation(mode, root, 1, extra).run()
+            finally:
+                torch.use_deterministic_algorithms(False)
+            yield result, json.loads((root / 'result.json').read_text()), json.loads((root / 'events_actual.json').read_text()), root
+
+    def test_nofault_serving_has_no_events_and_no_fault_fields(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             torch.use_deterministic_algorithms(True)
             try:
-                result = Simulation(mode, root, 1).run()
+                result = Simulation('emulate', root, 1, {'scenario': 'nofault'}).run()
             finally:
                 torch.use_deterministic_algorithms(False)
+        metrics = result['metrics']
+        self.assertEqual((metrics['requests_completed'], metrics['scenario'], metrics['stats_valid']), (12, 'nofault', True))
+        self.assertTrue(metrics['check_passed'] and 'kv_check_passed' not in metrics and 'replay_prefill_tokens' not in metrics)
+
+    def test_timing_run_mode_skips_audits_and_snapshots(self):
+        with self.simulate('emulate', {'run_mode': 'timing', 'method': 'anchortp'}) as (result, result_json, events, root):
+            self.check_timing(result, result_json, root)
+
+    def check_timing(self, result, result_json, root):
+        metrics = result['metrics']
+        self.assertEqual((metrics['requests_completed'], metrics['run_mode'], metrics['kv_check_passed']), (12, 'timing', None))
+        self.assertTrue(metrics['check_passed'] and metrics['replay_prefill_tokens'] > 0)
+        self.assertFalse((root / 'kv').exists())
+        self.assertEqual(result_json['failstop']['kv_check_note'], 'skipped: timing run')
+        self.assertEqual((result_json['config']['run_mode'], result_json['config']['validate_cutover']), ('timing', False))
+        checks = json.loads(next(root.glob('serving_checks_1*.json')).read_text())
+        self.assertEqual(checks['step_times'], 'not recorded (timing)')
+        self.assertTrue(all(s['audit'].get('skipped') == 'timing' for s in result_json['switches'] if s['domain'] == 'EDP0'))
+        self.assertEqual(result_json['time_base'].split(' ')[0], 'seconds')
+        self.assertTrue(all(r['t_tokens'] == sorted(r['t_tokens']) and len(r['t_tokens']) == r['output_len'] for r in result_json['requests']))
+        # serving_start is the gate's phase-0 validation; the first decisions are already out, so the earliest
+        # admit may precede it by the report round trip (milliseconds), never by seconds.
+        self.assertGreaterEqual(min(r['t_admit'] for r in result_json['requests']), -1.0)
+        self.assertLess(max(r['t_done'] for r in result_json['requests']), result_json['serving_wall_s'] + 1.0)
+
+    def run_mode(self, mode, method='weavetp'):
+        with self.simulate(mode, {'method': method}) as (result, result_json, events, root):
             metrics = result['metrics']
             self.assertEqual(metrics['requests_completed'], 12)
             self.assertTrue(metrics['check_passed'] and metrics['kv_check_passed'])
             self.assertGreater(metrics['replay_prefill_tokens'], 0)
-            result_json = json.loads((root / 'result.json').read_text())
             self.assertEqual([s['direction'] for s in result_json['switches'] if s['domain'] == 'EDP0'], ['shrink', 'expand'])
             self.assertTrue(all(s['validation']['passed'] for s in result_json['switches']))
             self.assertEqual(result_json['totals']['generated_tokens'], sum(r['output_len'] for r in result_json['requests']))
             self.assertTrue(all(r['t_admit'] <= r['t_first'] <= r['t_done'] for r in result_json['requests']))
-            events = json.loads((root / 'events_actual.json').read_text())
             self.assertEqual(events['actual_trigger']['threshold'], 3)
             self.assertGreaterEqual(events['recovery_s']['expand_done'], events['recovery_s']['shrink_done'])
             self.assertEqual(sorted(events['plan']['coords']), [(0, 0), (0, 1), (1, 0), (1, 1)] if False else sorted(map(list, events['plan']['coords'])))
@@ -184,6 +224,22 @@ class ServingProtocolTests(unittest.TestCase):
                 record = json.loads(path.read_text())
                 self.assertEqual(record['attention_impl']['decode'], 'torch_splitkv')
             self.assertEqual((root / 'kv' / 'r0' / 'expand').exists(), True)
+            # The method is named in the result and the EDP0 switches carry its semantics.
+            self.assertEqual((result_json['method'], metrics['method'], result_json['failstop']['method']['name']), (method,) * 3)
+            edp0 = {s['direction']: s for s in result_json['failstop']['edp0_switches']}
+            plans = {label: json.loads((root / f'source_plan_0_{label}.json').read_text()) for label in ('shrink', 'expand', 'delta')}
+            self.assertTrue(all(plan['method'] == method and plan['planner'] == method for plan in plans.values()))
+            if method == 'anchortp':
+                self.assertEqual([(s['overlap_steps'], s['kv_delta_bytes']) for s in edp0.values()], [(0, 0), (0, 0)])
+                self.assertEqual(result_json['failstop']['method']['kv_semantics_status'], '未与论文核对')
+                self.assertEqual(plans['delta']['tasks'], [])
+                self.assertTrue(all(plan['implementation_ref'].startswith('codex/anchortp-faithful@eba3bc8') for plan in plans.values()))
+                self.assertGreater(plans['shrink']['paths']['network']['bytes'], 0)  # shards 0/1 only exist on EDP1
+                self.assertEqual(plans['expand']['paths']['network']['bytes'], 0)  # TP2 survivors cover every TP4 slice
+                self.assertTrue(all(s['overlap_steps'] == 0 for s in result_json['switches']))
+            else:
+                self.assertEqual(edp0['expand']['overlap_steps'], 1)
+                self.assertIn('loads', plans['delta'])
             return result
 
     def test_emulate_cycle(self):
@@ -191,6 +247,12 @@ class ServingProtocolTests(unittest.TestCase):
 
     def test_real_cycle_with_replacement_victims(self):
         self.run_mode('real')
+
+    def test_anchortp_emulate_cycle(self):
+        self.run_mode('emulate', 'anchortp')
+
+    def test_anchortp_real_cycle(self):
+        self.run_mode('real', 'anchortp')
 
 
 if __name__ == '__main__':

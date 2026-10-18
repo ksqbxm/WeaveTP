@@ -48,6 +48,23 @@ from megatron.core.resharding.mixed_sources import Shard, build_mixed_plan, dige
 from megatron.core.resharding.mixed_transport import execute
 
 
+def weavetp_plan(sources, targets, profile, *, membership, epoch, rank_map):
+    tasks, key, loads = build_mixed_plan(sources, targets, profile, membership=membership, epoch=epoch, rank_map=rank_map)
+    return tasks, key, {'planner': 'weavetp', 'loads': [{'resource': k, 'seconds': v} for k, v in loads.items()]}
+
+
+def anchortp_plan(sources, targets, profile, *, membership, epoch, rank_map):
+    from anchortp_plan import build_fixed_plan
+
+    return build_fixed_plan(sources, targets, profile, membership=membership, epoch=epoch, rank_map=rank_map)
+
+
+# plan(sources, targets, profile, *, membership, epoch, rank_map) -> (tasks, cache_key, record). Sources and
+# targets are flat shard lists in global coordinates: how many replicas sit on either side is not part of the
+# interface (a split or a merge of replicas supplies the same lists).
+PLANNERS = {'weavetp': weavetp_plan, 'anchortp': anchortp_plan}
+
+
 class Fence:
     """Transfers complete synchronously before the cutover; the driver's handle contract is already satisfied."""
 
@@ -96,6 +113,7 @@ class Worker:
         self.runs, self.transfers, self.memory, self.pauses, self.events = [], [], [], [], []
         self.last_end = None
         self.prebuilt = {}
+        self.planner = PLANNERS[config['method']]
 
     # ---- world and groups -------------------------------------------------------------------------------------
     def initialize(self):
@@ -340,16 +358,16 @@ class Worker:
             return [Shard(**{**row, 'shape': tuple(row['shape']), 'start': tuple(row['start']), 'stop': tuple(row['stop'])})
                     for entry in published for row in entry[key]]
         sources, targets = shards('sources'), shards('targets')
-        tasks, cache_key, loads = build_mixed_plan(sources, targets, self.profile, membership=list(rank_map),
-                                                  epoch=self.session.epoch, rank_map=rank_map)
+        tasks, cache_key, record = self.planner(sources, targets, self.profile, membership=list(rank_map),
+                                                epoch=self.session.epoch, rank_map=rank_map)
         self.session.resources.plans[cache_key] = tasks
         if writer:
             write_json(self.root / f'source_plan_{round_id}_{label}.json', {
+                'method': self.config['method'], **record,
                 'tasks': [asdict(t) for t in tasks], 'cache_key': cache_key, 'profile_sha256': digest(self.profile),
                 'profile_source': 'frozen_file', 'membership': list(rank_map), 'epoch': self.session.epoch, 'rank_map': rank_map,
                 'sources': [asdict(s) for s in sources], 'targets': [asdict(t) for t in targets],
                 'environment': {k: os.environ.get(k) for k in DETERMINISTIC_ENVIRONMENT},
-                'loads': [{'resource': k, 'seconds': v} for k, v in loads.items()],
                 'bytes_by_source_kind': {kind: sum(t.payload_bytes for t in tasks if t.source_kind == kind)
                                          for kind in sorted({t.source_kind for t in tasks})}})
         actual = dist.get_process_group_ranks(self.pack['data'])

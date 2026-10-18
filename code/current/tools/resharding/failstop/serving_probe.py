@@ -25,8 +25,10 @@ from megatron.core.failstop import FaultBackend, replica_group_specs
 from tools.resharding.e2e import controller as ctl
 from tools.resharding.e2e import remote_control, requests_io, results
 from tools.resharding.e2e.failstop_adapter import rank_map_from_rows
+from tools.resharding.e2e.methods import describe
 
-PROBE_KEYS = ('profile_file', 'reference_root', 'deterministic_mode', 'kv_heads', 'memory_margin_bytes', 'memory_limit_bytes', 'serving')
+PROBE_KEYS = ('method', 'profile_file', 'reference_root', 'deterministic_mode', 'kv_heads', 'memory_margin_bytes', 'memory_limit_bytes',
+              'serving')
 DOMAINS = {'EDP0': (0, 1), 'EDP1': (2, 3)}
 
 
@@ -45,7 +47,13 @@ def control(config, bus, journal, check):
     workload = requests_io.load_workload(serving['workload'], requests)
     instances = requests_io.expand_instances(workload, requests)
     plan = requests_io.load_plan(serving['plan'], requests_io.sha256_file(serving['requests']))
-    fail_count, rejoin_seconds, fail_spec, rejoin_spec = anchors(plan, len(instances))
+    failstop = plan['version'] == 'v2-failstop'
+    require(failstop == (config['scenario'] == 'failstop'), 'the plan does not match the configured scenario')
+    if failstop:
+        fail_count, rejoin_seconds, fail_spec, rejoin_spec = anchors(plan, len(instances))
+    else:
+        require(not plan['switches'], 'a serving run takes no scale switches')
+        fail_spec = rejoin_spec = None
     times = {}
 
     def wait(keys, timeout=None):
@@ -132,6 +140,47 @@ def control(config, bus, journal, check):
         return time.monotonic()
 
     times['serving_start'] = validate(0)
+    trigger, reclaim, drained_before_rejoin = None, None, False
+    if failstop:
+        trigger, reclaim, drained_before_rejoin = fault_cycle(config, bus, journal, service, session, times, validate, wait, wait_until,
+                                                              publish, fail_count, rejoin_seconds, victims, members_of(session),
+                                                              initial, rows, pauses, len(instances))
+    # ---- drain ----------------------------------------------------------------------------------------------------
+    wait_until(lambda: all(service.finished.values()), config['launch_timeout_s'], 'every request to complete')
+    keys = [(domain, replica) for domain, replicas in DOMAINS.items() for replica in replicas]
+    summaries = dict(zip(keys, wait([f'summary/{d}/{r}' for d, r in keys])))
+    times['serving_done'] = time.monotonic()
+    service.stop()
+    thread.join(timeout=5)
+    require(service.error is None, f'control service failed: {service.error!r}')
+    require(controller.idle() and len(controller.done) == len(instances), 'requests left unfinished')
+    publish('finish')
+    wait([f'done/{s}' for s in range(16)])
+    wait([f'clean/{n}' for n in NODES], config['reclaim_timeout_s'] + config['stage_timeout_s'])
+    outputs = write_outputs(root, config, instances, workload, summaries, times, trigger, fail_spec, rejoin_spec, reports, maps, initial,
+                            pauses, reclaim, controller, drained_before_rejoin)
+    metrics = {'requests_completed': len(controller.done), 'check_passed': outputs['check']['passed'], 'method': config['method'],
+               'scenario': config['scenario'], 'run_mode': config['run_mode'], 'serving_wall_s': times['serving_done'] - times['serving_start'],
+               'stats_valid': not drained_before_rejoin}
+    if failstop:
+        metrics.update({'edp1_rejoin_pause_s': max((p['edp1_rejoin_pause_s'] for p in pauses), default=None),
+                        'replay_prefill_tokens': outputs['result']['failstop']['replay_prefill_tokens'],
+                        'kv_check_passed': outputs['result']['failstop']['expand_kv_check_passed'],
+                        'shrink_wall_s': times['shrink_done'] - times['fail'], 'expand_wall_s': times['expand_done'] - times['rejoin_request'],
+                        'edp0_switches': outputs['result']['failstop']['edp0_switches']})
+    return {'status': 'passed', 'mode': mode, 'rounds': 1, 'epochs': reports, 'rank_maps': maps, 'shared_gpu_mode': config['shared_gpu_mode'],
+            'quick_mode': config['quick_mode'], 'commit': config['commit'], 'metrics': metrics, 'rejoin_pauses': pauses,
+            'events_actual': str(root / 'events_actual.json')}
+
+
+def members_of(session):
+    return lambda: session.current_world()['membership']
+
+
+def fault_cycle(config, bus, journal, service, session, times, validate, wait, wait_until, publish, fail_count, rejoin_seconds, victims,
+                members_of, initial, rows, pauses, total):
+    """fail anchor -> shrink -> kill/release -> 12-world -> rejoin due -> reclaim/spawn -> expand -> 16-world (both methods)."""
+    mode = config['mode']
     # ---- fault: the completed_count anchor --------------------------------------------------------------------
     wait_until(lambda: service.completed() >= fail_count, config['launch_timeout_s'], f'{fail_count} completions')
     times['fail'] = time.monotonic()
@@ -158,7 +207,7 @@ def control(config, bus, journal, check):
     event = session.event('fail')
     session.fail(victims, event)
     publish('transition/0/1', asdict(event))
-    members = session.current_world()['membership']
+    members = members_of()
     wait([f'aborted/0/1/{s}' for s in members])
     times['aborted_1'] = time.monotonic()
     publish('build/0/1')
@@ -193,35 +242,26 @@ def control(config, bus, journal, check):
     times['world16_ready'] = times['build/0/2']
     times['expand_done'] = validate(2)
     session.complete()
-    drained_before_rejoin = service.completed() == len(instances)
+    drained_before_rejoin = service.completed() == total
     service.hold.clear()
-    # ---- drain ----------------------------------------------------------------------------------------------------
-    wait_until(lambda: all(service.finished.values()), config['launch_timeout_s'], 'every request to complete')
-    keys = [(domain, replica) for domain, replicas in DOMAINS.items() for replica in replicas]
-    summaries = dict(zip(keys, wait([f'summary/{d}/{r}' for d, r in keys])))
-    times['serving_done'] = time.monotonic()
-    service.stop()
-    thread.join(timeout=5)
-    require(service.error is None, f'control service failed: {service.error!r}')
-    require(controller.idle() and len(controller.done) == len(instances), 'requests left unfinished')
-    publish('finish')
-    wait([f'done/{s}' for s in range(16)])
-    wait([f'clean/{n}' for n in NODES], config['reclaim_timeout_s'] + config['stage_timeout_s'])
-    outputs = write_outputs(root, config, instances, workload, summaries, times, trigger, fail_spec, rejoin_spec, reports, maps, initial,
-                            pauses, reclaim, controller, drained_before_rejoin)
-    metrics = {'edp1_rejoin_pause_s': max((p['edp1_rejoin_pause_s'] for p in pauses), default=None),
-               'requests_completed': len(controller.done), 'check_passed': outputs['check']['passed'],
-               'replay_prefill_tokens': outputs['result']['failstop']['replay_prefill_tokens'],
-               'kv_check_passed': outputs['result']['failstop']['expand_kv_check_passed'], 'stats_valid': not drained_before_rejoin,
-               'shrink_wall_s': times['shrink_done'] - times['fail'], 'expand_wall_s': times['expand_done'] - times['rejoin_request']}
-    return {'status': 'passed', 'mode': mode, 'rounds': 1, 'epochs': reports, 'rank_maps': maps, 'shared_gpu_mode': config['shared_gpu_mode'],
-            'quick_mode': config['quick_mode'], 'commit': config['commit'], 'metrics': metrics, 'rejoin_pauses': pauses,
-            'events_actual': str(root / 'events_actual.json')}
+    return trigger, reclaim, drained_before_rejoin
 
 
 def write_outputs(root, config, instances, workload, summaries, times, trigger, fail_spec, rejoin_spec, reports, maps, initial, pauses,
                   reclaim, controller, drained_before_rejoin):
-    """result.json / check.json (W4) and events_actual.json (06_Step6 §4) from the domain summaries and the gate's times."""
+    """result.json / check.json (W4) and events_actual.json (06_Step6 §4) from the domain summaries and the gate's times.
+
+    Every time in result.json is in seconds since serving_start on the gate's clock: worker records (run clock,
+    per-node origin) are shifted by their summary's clock calibration before the domains are merged."""
+    clocks = {}
+    for (domain, replica), summary in summaries.items():
+        clock = summary['clock']
+        shift = clock['origin_local'] + clock['offset_to_gate'] - times['serving_start']
+        clocks[f'{domain}/{replica}'] = {**clock, 'shift_to_gate_s': shift, 'gate_origin_monotonic': times['serving_start']}
+        summary['request_log'] = {seq: shifted_log(entry, shift) for seq, entry in summary['request_log'].items()}
+        summary['failstop_events'] = {k: v + shift for k, v in summary['failstop_events'].items()}
+        for switch in summary['switches']:
+            switch['milestones'] = {k: v + shift for k, v in switch['milestones'].items()}
     logs = results.merge_request_logs(summary['request_log'] for summary in summaries.values())
     rows = [results.request_row(instance, logs[instance.seq]) for instance in instances]
     timeline_rows = [r for s in summaries.values() for r in s['timeline']]  # one timeline per dense replica
@@ -232,55 +272,83 @@ def write_outputs(root, config, instances, workload, summaries, times, trigger, 
     leaders = {domain: summaries[domain, min(replicas)] for domain, replicas in DOMAINS.items()}
     switches = [dict(s, domain=domain) for domain, summary in leaders.items() for s in summary['switches']]
     edp0 = leaders['EDP0']
+    method = describe(config['method'])
     duration = sum(phases.values())
-    events_s = {**edp0['failstop_events'], **{k: v - times['serving_start'] for k, v in times.items() if isinstance(v, float)}}
+    gate_s = {k: v - times['serving_start'] for k, v in times.items() if isinstance(v, float)}
+    events_s = {**edp0['failstop_events'], **gate_s}
     kv_checks = [c for s in summaries.values() for c in s['kv_checks']]  # every EDP0 rank that received KV
-    failstop = {'events_s': events_s, 'replay_prefill_tokens': edp0['replayed_tokens'],
+    timing = config['run_mode'] == 'timing'
+    failstop = None if fail_spec is None else {
+                'events_s': events_s, 'replay_prefill_tokens': edp0['replayed_tokens'],
                 'peak_eviction': [e for s in switches for e in s['evictions']],
-                'expand_kv_check_passed': bool(kv_checks) and all(c['passed'] for c in kv_checks),
+                'expand_kv_check_passed': None if timing else bool(kv_checks) and all(c['passed'] for c in kv_checks),
+                'kv_check_note': 'skipped: timing run' if timing else "head mapping of the survivors' saved TP2 snapshots",
                 'tfs_breakdown': {'fault_to_transition_s': times['transition/0/1'] - times['fail'],
                                   'world_rebuild_s': times['build/0/1'] - times['transition/0/1'],
                                   'weights_and_cutover_s': times['shrink_done'] - times['build/0/1'],
                                   'shrink_wall_s': times['shrink_done'] - times['fail'],
                                   'expand_wall_s': times['expand_done'] - times['rejoin_request']},
-                'advantage_sources': ['weights via P2P from residual TP4 + EDP1, no checkpoint reload', 'EDP1 keeps serving between the waves',
-                                      'emulate: no process rebuild; real: four processes rebuilt', 'replay only EDP0 in-flight requests'],
+                'advantage_sources': method['advantage_sources'],
+                'method': {k: method[k] for k in ('name', 'source_policy', 'kv_semantics', 'kv_semantics_status', 'implementation_ref')},
+                'edp0_switches': [{'direction': s['direction'], 'overlap_steps': s['overlap_steps'], 'kv_delta_bytes': s['bytes']['kv_delta'],
+                                   'kv_prefix_bytes': s['bytes']['kv_prefix'], 'weights_bytes': s['bytes']['weights']}
+                                  for s in switches if s['domain'] == 'EDP0'],
                 'serving_wall_s': times['serving_done'] - times['serving_start'],
                 'duration_note': 'totals.duration_s accumulates the step time of every dense replica timeline; serving_wall_s is wall time',
                 'stats_valid': not drained_before_rejoin,
                 'stats_invalid_reason': 'every request completed before the rejoin; recovery throughput is not measurable' if drained_before_rejoin else None}
-    result = results.build_result(method='weavetp', workload_id=workload['workload_id'], segments_run=sorted({i.segment for i in instances}),
+    result = results.build_result(method=config['method'], workload_id=workload['workload_id'], segments_run=sorted({i.segment for i in instances}),
                                   request_rows=rows, switches=switches, phase_durations_s=phases,
                                   attention_impl=edp0['attention_impl'],
-                                  config={'run_mode': 'correctness' if config['deterministic_mode'] else 'timing', 'experiment': 'failstop',
-                                          'backend': 'block', 'control': 'remote', 'mode': config['mode'], 'validate_cutover': True,
-                                          'timing_valid': False, 'decode_policy': config['serving']['decode_policy'],
-                                          'b_max': config['serving']['b_max'], 'commit': config['commit']},
+                                  config={'run_mode': config['run_mode'], 'experiment': config['scenario'], 'method': config['method'],
+                                          'backend': 'block', 'control': 'remote', 'mode': config['mode'], 'validate_cutover': not timing,
+                                          'timing_valid': config['timing_valid'], 'shared_gpu_mode': config['shared_gpu_mode'],
+                                          'decode_policy': config['serving']['decode_policy'],
+                                          'b_max': config['serving']['b_max'], 'commit': config['commit'], 'launch': config['launch']},
                                   duration_s=duration, logical_steps=sum(s['steps'] for s in summaries.values()), failstop=failstop)
+    result['clocks'] = clocks
+    result['serving_wall_s'] = times['serving_done'] - times['serving_start']
+    result['time_base'] = 'seconds since serving_start on the SL3060 gate clock (worker records shifted by clocks[*].shift_to_gate_s)'
     results.write_result(root / 'result.json', result)
     report = results.check(result, timeline_rows)
     write_json(root / 'check.json', report)
-    due = times['rejoin_due']
-    cards = reclaim['cards'] if isinstance(reclaim, dict) else None  # the supervisor's gpu_reclaim record (real mode)
     events = {
-        'schema_version': 'events_actual_v1', 'mode': config['mode'], 'launch': config['launch'], 'round': 0, 'commit': config['commit'],
+        'schema_version': 'events_actual_v1', 'mode': config['mode'], 'scenario': config['scenario'], 'method': config['method'],
+        'run_mode': config['run_mode'], 'launch': config['launch'], 'round': 0, 'commit': config['commit'],
         'sha256': {'requests': requests_io.sha256_file(config['serving']['requests']), 'plan': requests_io.sha256_file(config['serving']['plan']),
                    'workload': requests_io.sha256_file(config['serving']['workload']), 'profile': requests_io.sha256_file(config['profile_file'])},
-        'plan': {'fail': fail_spec, 'rejoin': rejoin_spec, 'replica': 'EDP0', 'coords': sorted(((r['ep'], r['etp']) for r in maps['0/0'] if r['slot'] in failed_slots(maps['0/0']))),
-                 'rejoin_due_s': due - times['serving_start'], 'dependency': 'shrink_done'},
-        'actual_trigger': {**trigger, 't_controller_s': times['fail'] - times['serving_start']},
         'memory_snapshots': {phase: [{'slot': r['slot'], 'layout': r['layout'], 'memory': r['memory'], 'sampled_at_step': r['step'],
                                       'source': 'phase report of the latest committed step'} for r in values]
                              for phase, values in reports.items()},
-        'recovery_s': {k: v - times['serving_start'] for k, v in times.items() if isinstance(v, float)},
+        'recovery_s': gate_s, 'clocks': clocks,
         'state_mapping': {'rank_maps': maps, 'initial_pids': {str(s): r['pid'] for s, r in initial.items()}},
-        'delays': {'rejoin_delay_s': times['spawn'] - due, 'rejoin_join_s': times['world16_ready'] - times['rejoin_request'],
-                   'reclaim_wait_s': None if reclaim is None else max(0.0, times['reclaim_done'] - times['rejoin_request']),
-                   'gpu_reclaim_s': None if cards is None else {uuid: card['gpu_reclaim_s'] for uuid, card in cards.items()},
-                   'abort_s': {phase: times[f'aborted_{phase}'] - times[f'transition/0/{phase}'] for phase in (1, 2)},
-                   'rebuild_s': {phase: times[f'build/0/{phase}'] - times[f'aborted_{phase}'] for phase in (1, 2)},
-                   'edp1_pause_s': max((p['edp1_rejoin_pause_s'] for p in pauses), default=None),
-                   'null_reason': None if reclaim is not None else 'emulate mode has no GPU reclaim or EDP1 abort pause'},
         'controller': {'queue': len(controller.queue), 'done': len(controller.done)}}
+    if fail_spec is not None:
+        due = times['rejoin_due']
+        cards = reclaim['cards'] if isinstance(reclaim, dict) else None  # the supervisor's gpu_reclaim record (real mode)
+        events.update({
+            'plan': {'fail': fail_spec, 'rejoin': rejoin_spec, 'replica': 'EDP0',
+                     'coords': sorted(((r['ep'], r['etp']) for r in maps['0/0'] if r['slot'] in failed_slots(maps['0/0']))),
+                     'rejoin_due_s': due - times['serving_start'], 'dependency': 'shrink_done'},
+            'actual_trigger': {**trigger, 't_controller_s': times['fail'] - times['serving_start']},
+            'worker_events_s': edp0['failstop_events'],
+            'delays': {'rejoin_delay_s': times['spawn'] - due, 'rejoin_join_s': times['world16_ready'] - times['rejoin_request'],
+                       'reclaim_wait_s': None if reclaim is None else max(0.0, times['reclaim_done'] - times['rejoin_request']),
+                       'gpu_reclaim_s': None if cards is None else {uuid: card['gpu_reclaim_s'] for uuid, card in cards.items()},
+                       'abort_s': {phase: times[f'aborted_{phase}'] - times[f'transition/0/{phase}'] for phase in (1, 2)},
+                       'rebuild_s': {phase: times[f'build/0/{phase}'] - times[f'aborted_{phase}'] for phase in (1, 2)},
+                       'edp1_pause_s': max((p['edp1_rejoin_pause_s'] for p in pauses), default=None),
+                       'null_reason': None if reclaim is not None else 'emulate mode has no GPU reclaim or EDP1 abort pause'}})
     write_json(root / 'events_actual.json', events)
     return {'result': result, 'check': report, 'events': events}
+
+
+def shifted_log(entry, shift):
+    """A worker's request_log entry on the gate time base."""
+    moved = dict(entry)
+    moved['admits'] = [{**a, 't': a['t'] + shift} for a in entry['admits']]
+    moved['t_tokens'] = [t + shift for t in entry['t_tokens']]
+    for key in ('t_first', 't_done'):
+        if key in entry:
+            moved[key] = entry[key] + shift
+    return moved

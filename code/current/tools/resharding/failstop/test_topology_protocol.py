@@ -155,7 +155,9 @@ class Simulation:
             self.wait([f'cuda/0/{s}' for s in slots])
             self.put(f'verified/0/{node}', True)
             victims = common.failed_slots(self.rows)
-            if node == 'SL3061':
+            if self.config['scenario'] != 'failstop':
+                victims = []
+            if node == 'SL3061' and victims:
                 self.wait(['kill'])
                 if self.mode == 'emulate':
                     self.put('emulate_release/0', True)
@@ -166,13 +168,14 @@ class Simulation:
                     self.put('kill_sent', True)
                     self.put('kill_exited', [{'slot': s, 'pid': 10000 + s, 'exit': {'returncode': -9}} for s in victims])
                     self.put('reclaimed', True)
-            self.wait(['spawn'])
-            if node == 'SL3061' and self.mode == 'real':
-                for slot in victims:
-                    self.spawn(slot, 2)
-            if node == 'SL3061':
-                self.wait([f'cuda/2/{s}' for s in victims])
-            self.put(f'verified/2/{node}', True)
+            if victims:
+                self.wait(['spawn'])
+                if node == 'SL3061' and self.mode == 'real':
+                    for slot in victims:
+                        self.spawn(slot, 2)
+                if node == 'SL3061':
+                    self.wait([f'cuda/2/{s}' for s in victims])
+                self.put(f'verified/2/{node}', True)
             self.wait(['finish'])
             self.wait([f'done/{s}' for s in slots])
             self.put(f'clean/{node}', True)

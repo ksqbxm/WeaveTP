@@ -21,8 +21,12 @@ DETERMINISTIC_ENVIRONMENT = {"NCCL_ALGO": "Ring", "CUBLAS_WORKSPACE_CONFIG": ":4
 SHARED_GPU_NOTE = "与其他任务共享 GPU，仅用于正确性和可行性判断，各阶段耗时不作为正式数据"
 FAIL_COORDS = {(0, 0), (0, 1), (1, 0), (1, 1)}  # (ep, etp)
 DEFAULTS = {
+    "method": "weavetp",  # recovery method of a serving run: weavetp | anchortp (tools/resharding/e2e/methods.py)
+    "scenario": "failstop",  # failstop (fault + rejoin cycle) | nofault (fixed layout; serving runs only)
+    "run_mode": "correctness",  # correctness (deterministic, audited) | timing (default mode, no audits; serving runs)
     "shared_gpu_mode": False,
     "quick_mode": False,
+    "timing_valid": False,  # only a non-shared timing serving run sets it (serving_config)
     "repeats": 10,
     "sample_s": 0.1,
     "stable_samples": 3,

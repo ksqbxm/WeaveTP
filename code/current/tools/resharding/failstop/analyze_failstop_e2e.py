@@ -1,0 +1,62 @@
+"""Recovery metrics and summary.csv for formal fail-stop launches (tools/resharding/e2e/metrics.py).
+
+  python analyze_failstop_e2e.py --out DIR <launch directory or run_failstop_e2e output root>... [--degraded-reference TOK_S]
+
+A launch directory holds result.json and events_actual.json (the SL3060 gate's output); a root is searched for
+them. Per launch: `metrics_<launch>.json` and `per_second_<launch>.csv`; over all launches: `launch_metrics.csv`
+(one row per launch) and `summary.csv` (mean / sample std / n per method x scenario x mode and metric). A launch
+whose request rows do not reconcile is reported and left out.
+"""
+
+import argparse
+import json
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+from tools.resharding.e2e import metrics as m  # noqa: E402
+
+
+def launch_directories(paths):
+    found = []
+    for path in paths:
+        path = Path(path)
+        if (path / 'result.json').is_file() and (path / 'events_actual.json').is_file():
+            found.append(path)
+        else:
+            found.extend(sorted(p.parent for p in path.rglob('events_actual.json') if (p.parent / 'result.json').is_file()))
+    return found
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument('paths', nargs='+')
+    parser.add_argument('--out', type=Path, required=True)
+    parser.add_argument('--degraded-reference', type=float, default=None,
+                        help='tokens/s reference for the shrink TTP (default: the second half of the degraded window)')
+    args = parser.parse_args(argv)
+    args.out.mkdir(parents=True, exist_ok=True)
+    collected, rejected = [], []
+    for directory in launch_directories(args.paths):
+        try:
+            launch = m.load_launch(directory)
+            metrics, series = m.analyze(launch, args.degraded_reference)
+        except (ValueError, KeyError) as error:
+            rejected.append({'directory': str(directory), 'error': f'{type(error).__name__}: {error}'})
+            continue
+        (args.out / f"metrics_{metrics['launch']}.json").write_text(json.dumps(metrics, indent=1, ensure_ascii=False) + '\n', encoding='utf-8')
+        m.write_series(args.out / f"per_second_{metrics['launch']}.csv", series)
+        collected.append(metrics)
+    flat = [m.flatten(x) for x in collected]
+    fields = sorted({k for row in flat for k in row}, key=lambda k: (k not in ('launch', 'method', 'scenario', 'mode', 'run_mode'), k))
+    m.write_csv(args.out / 'launch_metrics.csv', flat, fields)
+    rows = m.summarize(collected)
+    m.write_csv(args.out / 'summary.csv', rows, ('method', 'scenario', 'mode', 'metric', 'mean', 'sample_std', 'n_valid',
+                                                 'n_censored_or_missing', 'n_launches'))
+    (args.out / 'rejected.json').write_text(json.dumps(rejected, indent=1) + '\n', encoding='utf-8')
+    print(json.dumps({'launches': len(collected), 'rejected': rejected, 'summary_rows': len(rows), 'out': str(args.out)}, indent=1))
+    return 0 if collected and not rejected else 1
+
+
+if __name__ == '__main__':
+    sys.exit(main())

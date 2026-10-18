@@ -17,7 +17,7 @@ import run_topology
 
 class QuickTests(unittest.TestCase):
     def run_driver(self, *, failure=None, peer='PASS', step=2, child_output=b'', min_free=None, node='SL3060',
-                   single_node=False, layer='a'):
+                   single_node=False, layer='a', method='weavetp'):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             logs = root / 'kickoff' / 'local'
@@ -33,7 +33,10 @@ class QuickTests(unittest.TestCase):
                              'attention_impl': {'decode': 'torch_splitkv', 'reason': 'requested'}, 'memory': {'physical_vs_segment_accounting_error': 0.0}},
                       'b2': {'passed': failure != 'metric', 'in_process_bitwise': {'tp2_a': True, 'tp2_b': True, 'tp4': True},
                              'cross_process_tp2_bitwise': failure != 'metric', 'forwards': {'tp4': 140}, 'crossed_block_boundary': True},
-                      'b3': {'passed': failure != 'metric', 'mode': 'emulate', 'metrics': {'requests_completed': 24, 'check_passed': True},
+                      'b3': {'passed': failure != 'metric', 'mode': 'emulate', 'method': method,
+                             'metrics': {'requests_completed': 24, 'check_passed': True, 'method': method,
+                                         'edp0_switches': [{'direction': 'shrink', 'overlap_steps': 0, 'kv_delta_bytes': 0},
+                                                           {'direction': 'expand', 'overlap_steps': 0 if method == 'anchortp' else 2, 'kv_delta_bytes': 0}]},
                              'files': {'result.json': '/data/x/result.json'}}}
             summary = ({**flags, 'all_checks_passed': True, 'layouts_requested': layouts,
                         'deterministic_step_time_ratio': {} if failure == 'metric' else {l: {'median_ratio': 1.25} for l in layouts}}
@@ -80,6 +83,7 @@ class QuickTests(unittest.TestCase):
                 stack.enter_context(patch.object(sys, 'argv', ['quick_driver', '--node', node, '--sha', 'a' * 40,
                                                               '--repo', str(root), '--log-dir', str(logs), '--step', str(step)] +
                                                  (['--layer', layer] if step == 6 else []) +
+                                                 (['--method', method] if step == 6 and layer == 'b3' else []) +
                                                  ([] if min_free is None else ['--min-free-disk-gb', str(min_free)]) +
                                                  (['--single-node'] if single_node else [])))
                 stack.enter_context(patch.object(subprocess, 'check_output', side_effect=git))
@@ -103,6 +107,7 @@ class QuickTests(unittest.TestCase):
                                                                       3: 'run_sources.py', 2: 'run_topology.py'}[step])),
                                  (step < 5 or (step == 6 and layer == 'b3'), True))
                 self.assertEqual('--layer' in argv and argv[argv.index('--layer') + 1] == layer, step == 6)
+                self.assertEqual('--method' in argv and argv[argv.index('--method') + 1] == method, step == 6 and layer == 'b3')
                 self.assertEqual('--layouts' in argv and argv[argv.index('--layouts') + 1] == 'tp2,tp4', single_node and step == 5)
                 self.assertEqual((logs / 'runner.log').read_bytes(), child_output)
             else:
@@ -224,6 +229,11 @@ class QuickTests(unittest.TestCase):
         b3 = self.run_driver(step=6, layer='b3')  # two nodes: the rendezvous assigns the suite
         self.assertEqual((b3['result'], b3['single_node'], b3['layer']), ('PASS', False, 'b3'))
         self.assertIn('single_node=false', b3['output'])
+        self.assertIn('QUICK CHECK step=6 layer=b3 method=weavetp result=PASS', b3['output'])
+        anchortp = self.run_driver(step=6, layer='b3', method='anchortp')
+        self.assertEqual(anchortp['result'], 'PASS')
+        self.assertIn('QUICK CHECK step=6 layer=b3 method=anchortp result=PASS', anchortp['output'])
+        self.assertIn('"method": "anchortp"', anchortp['output'])
         with self.assertRaises(SystemExit):
             self.run_driver(step=6, layer='b3', single_node=True)
         with self.assertRaises(SystemExit):

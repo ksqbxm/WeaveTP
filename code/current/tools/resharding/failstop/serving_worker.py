@@ -16,13 +16,14 @@ import os
 import sys
 import time
 import traceback
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from datetime import timedelta
 from pathlib import Path
 
 import torch
 import torch.distributed as dist
 from common import Journal, connect, require, write_json
+from determinism import require_default
 from model_shards import identity
 from model_worker import Worker as ModelWorker
 from torch.distributed import distributed_c10d as c10d
@@ -41,6 +42,20 @@ from tools.resharding.e2e.plan_executor import BitwiseValidation
 from tools.resharding.e2e.timeline import SwitchEventWriter, TimelineWriter, read_jsonl
 
 ROUND = 0  # the serving run is one fault/rejoin cycle
+
+
+@dataclass(frozen=True)
+class SwitchSpec:
+    """What a switcher is asked to do.
+
+    `assignment` maps seq -> (source replica, target replica) for the KV moves; None means every request
+    stays on its replica, which is all the fail-stop shrink/expand needs. A layout change that splits one
+    replica into two or merges two into one supplies an explicit assignment here (the planner's shard lists
+    are already layout-free); nothing else in the switch protocol assumes one source replica per target.
+    """
+
+    direction: str
+    assignment: dict | None = None
 
 
 def kv_shard_views(pool, shards, rank):
@@ -74,6 +89,11 @@ class ServingWorker(ModelWorker):
                                               v_dim=serving['geometry']['v_dim'])
         self.backend = self.driver = None
         self.kv_checks = []
+        self.switcher_class = SWITCHERS[config['method']]  # the only place a method differs: switcher + its planner
+        # correctness: reference hash audits, KV snapshots and bitwise checks; timing: none of them (default mode).
+        self.audits = config['run_mode'] == 'correctness'
+        if not self.audits:
+            require_default(self.manifest, 'serving worker')
 
     # ---- world, groups, maps ---------------------------------------------------------------------------------
     def build(self, session, phase):
@@ -149,7 +169,7 @@ class ServingWorker(ModelWorker):
                 self.backend.bind(tp, context=context)
         else:
             self.backend.bind(tp, context=context)
-        self.backend.switcher_factory = lambda run, direction: ServingSwitcher(self, run, direction)
+        self.backend.switcher_factory = lambda run, direction: self.switcher_class(self, run, SwitchSpec(direction))
         return self.backend
 
     def start_serving(self, model, tp, *, context=None, step=0, rows=(), histories=None, last=None):
@@ -172,7 +192,7 @@ class ServingWorker(ModelWorker):
         run = DomainRun(self.domain, self.replicas, comm, backend, policy, None,
                         TimelineWriter(self.root / f'timeline_{self.domain}_{self.slot}.jsonl'),
                         SwitchEventWriter(self.root / f'switch_events_{self.domain}_{self.slot}.jsonl'), control, validation,
-                        dict(self.serving['growth']), {'mode': 'evict', 'budget': ctl.SWITCH_BUDGET_BYTES}, WallClock(), step=step,
+                        self.switcher_class.growth(self.serving), {'mode': 'evict', 'budget': ctl.SWITCH_BUDGET_BYTES}, WallClock(), step=step,
                         layout=tp, hooks=hooks, local_replicas=(self.replica_id,), domain_replicas=lambda ledger, ids=self.replicas: ids)
         self.driver = Driver(run)
         return self.driver
@@ -268,12 +288,14 @@ class ServingWorker(ModelWorker):
         for seq, table in meta['tables'].items():
             context.tables[int(seq)] = block_kv.BlockTable(int(seq), list(table), meta['lengths'][seq])
 
-    def kv_moves(self, meta, zone):
+    def kv_moves(self, meta, zones, assignment=None):
+        """KV moves of the given zones ('A' = full blocks, 'B' = open blocks) for the request assignment
+        (default: every request stays on this rank's replica)."""
         tables = {int(seq): block_kv.BlockTable(int(seq), list(t), meta['lengths'][seq]) for seq, t in meta['tables'].items()}
-        assignment = {seq: (self.replica_id, self.replica_id) for seq in tables}
-        zones = self.builder.zone_tokens_from_tables(tables, assignment, self.serving['block_tokens'], self.serving['max_delta_steps'])
-        moves = self.builder.kv_moves(self.tp2_map(), self.current_map(), assignment, zones)
-        return [m for m in moves if m.zone == zone]
+        assignment = assignment or {seq: (self.replica_id, self.replica_id) for seq in tables}
+        tokens = self.builder.zone_tokens_from_tables(tables, assignment, self.serving['block_tokens'], self.serving['max_delta_steps'])
+        moves = self.builder.kv_moves(self.tp2_map(), self.current_map(), assignment, tokens)
+        return [m for m in moves if m.zone in zones]
 
     def kv_shards(self, moves, source_pool, target_pool):
         dtype = self.runtime.args.params_dtype
@@ -282,8 +304,8 @@ class ServingWorker(ModelWorker):
         return (kv_shard_views(source_pool, sources, self.rank) if source_pool is not None else [],
                 kv_shard_views(target_pool, targets, self.rank))
 
-    def expand_prefix(self, meta, source_context):
-        """Survivor or victim: the TP4 target (weights + A-zone KV) from the TP2 survivors and EDP1."""
+    def expand_prefix(self, meta, source_context, zones, assignment=None):
+        """Survivor or victim: the TP4 target (weights + the base-wave KV zones) from the TP2 survivors and EDP1."""
         tokens = sum(meta['lengths'].values())
         budget = self.admission(4, tokens + self.serving['max_delta_steps'])
         target = self.runtime.build(4, self.pack['target'], load=False)
@@ -291,7 +313,7 @@ class ServingWorker(ModelWorker):
         # bound to an empty TP4 context, which is its target.
         target_context = self.backend.new_context(4) if source_context is not None else self.backend.context
         self.clone_tables(target_context, meta)
-        moves = self.kv_moves(meta, 'A')
+        moves = self.kv_moves(meta, zones, assignment)
         kv_sources, kv_targets = self.kv_shards(moves, None if source_context is None else source_context.pool, target_context.pool)
         sources = ([] if source_context is None else self.weight_sources(self.model, 2, self.tp2_coord)) + kv_sources
         targets = self.weight_sources(target, 4, self.coord) + kv_targets
@@ -305,9 +327,10 @@ class ServingWorker(ModelWorker):
         self.events.append({'event': 'expand', 'budget': budget, 'transfer': stats, 'kv_prefix_moves': len(moves), 'kv_prefix_bytes': kv_bytes})
         return target, target_context, stats, kv_bytes
 
-    def expand_delta(self, meta, source_context, target_context):
-        """B-zone KV (the open blocks, including tokens written during the base wave) in the compaction layout, which the
-        source pool keeps intact until the cutover (releases are deferred); the source snapshot feeds the check.
+    def expand_delta(self, meta, source_context, target_context, zones, assignment=None):
+        """The delta-wave KV zones (WeaveTP: the open blocks, including tokens written during the base wave; AnchorTP:
+        none) in the compaction layout, which the source pool keeps intact until the cutover (releases are deferred);
+        the source snapshot feeds the check and the live lengths/releases are handed to the target either way.
 
         Requests that completed during the base wave are still copied (the layout is fixed) and released on the
         target afterwards; the survivors publish which requests live on and their current lengths."""
@@ -318,10 +341,10 @@ class ServingWorker(ModelWorker):
                 self.bus.put(f'tables/{ROUND}/delta/{self.replica_id}', live)
         else:
             live = self.bus.wait([f'tables/{ROUND}/delta/{self.replica_id}'])[0]
-        moves = self.kv_moves(meta, 'B')
+        moves = self.kv_moves(meta, zones, assignment)
         kv_sources, kv_targets = self.kv_shards(moves, None if source_context is None else source_context.pool, target_context.pool)
         self.publish(ROUND, 'delta', kv_sources, kv_targets)
-        if source_context is not None:
+        if source_context is not None and self.audits:
             self.save_pool_snapshot(source_context)
         leader = self.slot == min(self.survivors)
         if leader:
@@ -380,11 +403,13 @@ class ServingWorker(ModelWorker):
     def join_expand(self):
         """A victim (epoch 2, or an emulate victim after its wait) builds its TP4 target and receives weights + KV."""
         meta = self.bus.wait([f'tables/{ROUND}/{self.replica_id}'])[0]
-        target, target_context, stats, kv_bytes = self.expand_prefix(meta, None)
-        audit = self.validate_weights(target, 4)
-        delta = self.expand_delta(meta, None, target_context)
-        check = self.check_kv(target_context, 'bitwise')
-        require(check['passed'], f'migrated KV differs from the mapped source snapshots: {check["mismatches"]}')
+        zones = self.switcher_class.zones
+        target, target_context, stats, kv_bytes = self.expand_prefix(meta, None, zones['base'])
+        audit = self.validate_weights(target, 4) if self.audits else {'skipped': 'timing'}
+        delta = self.expand_delta(meta, None, target_context, zones['delta'])
+        check = self.check_kv(target_context, 'bitwise') if self.audits else {'mode': 'bitwise', 'passed': None, 'skipped': 'timing'}
+        if self.audits:
+            require(check['passed'], f'migrated KV differs from the mapped source snapshots: {check["mismatches"]}')
         handoff = self.bus.wait([f'handoff/{ROUND}/{self.replica_id}'])[0]
         for seq, length in handoff['lengths'].items():
             target_context.tables[int(seq)].length = length
@@ -416,7 +441,11 @@ class ServingWorker(ModelWorker):
                              for s in run.switches],
                 'timeline': read_jsonl(run.timeline.path), 'failstop_events': run.failstop_events, 'generated': run.generated,
                 'completed': run.completed, 'steps': run.step, 'attention_impl': self.backend.attention_impl, 'kv_checks': self.kv_checks,
-                'layout': run.layout, 'replayed_tokens': run.hooks.replayed_tokens if run.hooks is not None else 0})
+                'layout': run.layout, 'replayed_tokens': run.hooks.replayed_tokens if run.hooks is not None else 0,
+                # Worker times are run-clock seconds (origin_local on this node's monotonic clock); gate time =
+                # t + origin_local + offset_to_gate (the supervisor's ping/pong calibration against SL3060).
+                'clock': {'origin_local': run.clock.start, 'offset_to_gate': self.config['clock']['offset'],
+                          'error_s': self.config['clock']['error']}})
 
     def run_worker(self):
         self.initialize()
@@ -432,14 +461,14 @@ class ServingWorker(ModelWorker):
             self.adopt(0)
             self.runtime.start()
             model = self.runtime.build(4, self.pack['target'], load=True)
-            self.events.append({'event': 'load', 'weights': self.validate_weights(model, 4)})
+            self.events.append({'event': 'load', 'weights': self.validate_weights(model, 4) if self.audits else {'skipped': 'timing'}})
             self.start_serving(model, 4)
             self.phase_report(ROUND, 0)
         self.loop()
         write_json(self.root / f'serving_checks_{self.slot}.json', {
             'slot': self.slot, 'replica': self.row['replica'], 'events': self.events, 'transfers': self.transfers, 'memory': self.memory,
             'pauses': self.pauses, 'kv_checks': self.kv_checks, 'manifest': self.manifest, 'attention_impl': self.backend.attention_impl,
-            'step_times': {k: v[:200] for k, v in self.backend.step_times.items()},
+            'step_times': {k: v[:200] for k, v in self.backend.step_times.items()} if self.audits else 'not recorded (timing)',
             'transport': 'synchronous mixed-plan waves with every active member; Step 4 overlap is not measured here'})
         self.bus.wait(['finish'])
         if self.real:
@@ -450,14 +479,24 @@ class ServingWorker(ModelWorker):
 
 
 class ServingSwitcher:
-    """The perform_switch protocol on the real worker; the role decides what each phase does."""
+    """The perform_switch protocol on the real worker; the role decides what each phase does (WeaveTP).
 
-    def __init__(self, worker, run, direction):
-        self.w, self.run, self.direction = worker, run, direction
-        self.phase = 1 if direction == 'shrink' else 2
+    Class attributes are the method's switch semantics: `zones` = which KV zones the expand moves in the base
+    wave and in the delta, `growth` = foreground steps per direction while a migration is in flight.
+    """
+
+    zones = {'base': ('A',), 'delta': ('B',)}
+
+    @staticmethod
+    def growth(serving):
+        return dict(serving['growth'])
+
+    def __init__(self, worker, run, spec):
+        self.w, self.run, self.spec, self.direction = worker, run, spec, spec.direction
+        self.phase = 1 if self.direction == 'shrink' else 2
         self.role = 'healthy' if worker.healthy else ('victim' if worker.victim else 'survivor')
         self.source, self.target, self.target_context, self.meta, self.handoff = worker.model, None, None, None, None
-        worker.bus.put(f'switch_ack/{direction}/{worker.slot}', True)
+        worker.bus.put(f'switch_ack/{self.direction}/{worker.slot}', True)
 
     def compact(self, direction):
         if self.role == 'survivor' and direction == 'expand':
@@ -485,7 +524,8 @@ class ServingSwitcher:
                 stats = w.sender_transfer('shrink')
             return {'overlap_steps': 0, 'bytes': {'weights': stats['payload_bytes'], 'kv_prefix': 0}, 'transfer': stats, 'role': self.role}
         if self.role == 'survivor':
-            self.target, self.target_context, stats, kv_bytes = w.expand_prefix(self.meta, w.backend.context)
+            self.target, self.target_context, stats, kv_bytes = w.expand_prefix(self.meta, w.backend.context, self.zones['base'],
+                                                                                self.spec.assignment)
             growth = self.run.growth.get('expand', 0)
             for _ in range(growth):
                 decode_fn(phase='switching')
@@ -513,19 +553,19 @@ class ServingSwitcher:
         return {'overlap_steps': 0, 'bytes': {'weights': 0, 'kv_prefix': 0}, 'role': 'victim'}
 
     def audit(self, direction):
-        if self.role == 'survivor':
+        if self.role == 'survivor' and self.w.audits:
             return self.w.validate_weights(self.target, 2 if direction == 'shrink' else 4)
-        return {'role': self.role}
+        return {'role': self.role, **({} if self.w.audits else {'skipped': 'timing'})}
 
     def delta(self, direction):
         if self.role == 'survivor' and direction == 'expand':
-            stats = self.w.expand_delta(self.meta, self.w.backend.context, self.target_context)
+            stats = self.w.expand_delta(self.meta, self.w.backend.context, self.target_context, self.zones['delta'], self.spec.assignment)
             return {'bytes': {'kv_delta': stats['payload_bytes']}, 'transfer': stats}
         return {'bytes': {'kv_delta': 0}}
 
     def compare_logits(self, direction, mode):
         if self.role == 'survivor' and direction == 'expand':
-            return self.w.check_kv(self.target_context, mode)
+            return self.w.check_kv(self.target_context, mode) if self.w.audits else {'mode': mode, 'passed': True, 'skipped': 'timing'}
         if self.role == 'victim' and direction == 'shrink':
             return {'mode': mode, 'passed': True, 'note': 'victim: checked by join_expand'}
         return {'mode': mode, 'passed': True, 'note': 'no KV moved on this rank; the A6 replay compares the records offline'}
@@ -580,6 +620,30 @@ class ServingSwitcher:
         # An emulate victim's single switch spans the whole degraded period and ends in the expanded world.
         w.phase_report(ROUND, 2 if self.role == 'victim' else self.phase, empty_receiver=self.role == 'victim')
         w.session.complete()  # after the report (the gate compares rank maps in the transition state); forwards may run again
+
+
+class AnchorTPSwitcher(ServingSwitcher):
+    """AnchorTP semantics on the same protocol (anchortp_schedule.IMPLEMENTATION_REF): the planner takes fixed
+    sources (model_worker.PLANNERS['anchortp']), EDP0 runs no foreground step while a migration is in flight
+    (overlap_steps=0), the expand moves the A and B zones together at the lengths the compaction froze and has no
+    delta, and the cutover checks the target tables still have those lengths. EDP1 serves between the waves and
+    is a source, as for WeaveTP; the fault replay is the shared FailstopHooks."""
+
+    zones = {'base': ('A', 'B'), 'delta': ()}
+
+    @staticmethod
+    def growth(serving):
+        return {'shrink': 0, 'expand': 0}
+
+    def cutover(self, direction):
+        if self.role == 'survivor' and direction == 'expand':
+            frozen = {int(seq): length for seq, length in self.meta['lengths'].items()}
+            changed = [seq for seq, table in self.target_context.tables.items() if table.length != frozen[seq]]
+            require(not changed, f'AnchorTP: target KV lengths changed during the paused migration: {changed[:3]}')
+        super().cutover(direction)
+
+
+SWITCHERS = {'weavetp': ServingSwitcher, 'anchortp': AnchorTPSwitcher}
 
 
 def main():
