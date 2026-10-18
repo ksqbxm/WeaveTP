@@ -21,6 +21,7 @@ NODE=
 ARGS=("$@")
 for ((i = 0; i < ${#ARGS[@]}; i++)); do [[ "${ARGS[$i]}" == --node ]] && NODE="${ARGS[$((i + 1))]}"; done
 [[ -n "$NODE" ]] || { echo "run_failstop_e2e.sh: --node is required" >&2; exit 2; }
+mkdir -p /data/ubuntu/lxh/weavetp/acceptance/step07_e2e_acceptance
 LOGDIR=$(mktemp -d "/data/ubuntu/lxh/weavetp/acceptance/step07_e2e_acceptance/kickoff_${NODE}_$(date -u +%Y%m%dT%H%M%SZ)_XXXXXX")
 nohup "$PYTHON" -B "$HERE/run_failstop_e2e.py" "$@" > "$LOGDIR/nohup.log" 2>&1 < /dev/null &
 printf '%s\n' "$!" > "$LOGDIR/runner.pid"
