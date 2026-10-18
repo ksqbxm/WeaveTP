@@ -26,8 +26,10 @@ from common import (
     DETERMINISTIC_ENVIRONMENT,
     MODEL_PROBE,
     NODES,
+    PYTHON_FIRST_PATH,
     SHARED_GPU_NOTE,
     require,
+    require_megatron_helpers,
     write_json,
 )
 from model_checks import compare, write_specs
@@ -111,7 +113,8 @@ def replay(args):
     args.output.mkdir(parents=True, exist_ok=True)
     env = {k: v for k, v in os.environ.items() if k not in ('PYTORCH_ALLOC_CONF', 'PYTORCH_CUDA_ALLOC_CONF')}
     env.update(DETERMINISTIC_ENVIRONMENT, NCCL_DEBUG='WARN', TORCH_NCCL_ASYNC_ERROR_HANDLING='1', CUDA_DEVICE_MAX_CONNECTIONS='8',
-               CUDA_MPS_PIPE_DIRECTORY=str(args.output / 'absent_mps_pipe'), PYTHONDONTWRITEBYTECODE='1')
+               CUDA_MPS_PIPE_DIRECTORY=str(args.output / 'absent_mps_pipe'), PYTHONDONTWRITEBYTECODE='1', PATH=PYTHON_FIRST_PATH)
+    require_megatron_helpers()
     for layout in sorted(specs):
         gpus = list(range(LAYOUTS[layout]['gpus']))
         argv = [sys.executable, '-m', 'torch.distributed.run', '--standalone', f'--nproc_per_node={len(gpus)}',

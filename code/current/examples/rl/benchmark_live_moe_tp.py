@@ -1064,6 +1064,7 @@ def _run_async_waves(
     max_wave_tasks: int | None = None,
     hybrid_fast_path: bool = False,
     hybrid_fast_path_reason: dict[str, object] | None = None,
+    decode_fn=None,
 ) -> tuple[dict[str, object], int]:
     effective_scheduler_mode = wave_scheduler_mode or args.live_scheduler_mode
     wave_task_limit = args.live_max_wave_tasks if max_wave_tasks is None else max_wave_tasks
@@ -1144,12 +1145,13 @@ def _run_async_waves(
         copy_stats = dict(transaction.metadata.get("copy_service", {}))
         overlap_steps = 0
         while True:
-            _, step_ms = _decode(
+            # The e2e serving driver supplies its own foreground step; the benchmark keeps its fixed decode.
+            step_ms = decode_fn() if decode_fn is not None else _decode(
                 active_model,
                 active_context,
                 args,
                 token_value=token_counter,
-            )
+            )[1]
             token_counter += 1
             overlap_steps += 1
             step_tpot_ms = _all_max(step_ms, control_group)

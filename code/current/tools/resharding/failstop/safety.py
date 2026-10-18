@@ -13,7 +13,7 @@ import time
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-from common import append_json, require
+from common import PYTHON_FIRST_PATH, append_json, require
 
 
 def pidfd_implementations():
@@ -264,7 +264,7 @@ class Children:
 
     def spawn(self, argv, role, gpu_uuid=None, extra_env=None, replacement_for=None):
         env = {**os.environ, "WEAVETP_PROBE_LAUNCH": self.config["launch"],
-               "WEAVETP_PROBE_ROLE": role, "PYTHONUNBUFFERED": "1", **(extra_env or {})}
+               "WEAVETP_PROBE_ROLE": role, "PYTHONUNBUFFERED": "1", "PATH": PYTHON_FIRST_PATH, **(extra_env or {})}
         with (self.root / f"{role}_{len(self.children)}.log").open("w") as log:
             child = subprocess.Popen(argv, env=env, stdout=log, stderr=subprocess.STDOUT)
         try:

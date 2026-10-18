@@ -23,10 +23,15 @@ class QuickTests(unittest.TestCase):
             logs = root / 'kickoff' / 'local'
             logs.mkdir(parents=True)
             layouts = ['tp2', 'tp4'] if single_node else ['tp2']
-            flags = {'quick_mode': True, 'correctness_only': True, 'shared_gpu_mode': True, 'timing_valid': False, 'accepted': False}
+            flags = {'quick_mode': True, 'correctness_only': True, 'shared_gpu_mode': step != 6, 'timing_valid': False, 'accepted': False}
             summary = ({**flags, 'all_checks_passed': True, 'layouts_requested': layouts,
                         'deterministic_step_time_ratio': {} if failure == 'metric' else {l: {'median_ratio': 1.25} for l in layouts}}
                        if step == 5 else
+                       {**flags, 'all_checks_passed': failure != 'metric', 'backend': 'fake', 'single_node': True, 'gpus_used': 0,
+                        'runs': {'scaling': {'check_passed': True, 'switches': ['2->4', '4->2']},
+                                 'failstop': {'check_passed': failure != 'metric', 'switches': ['shrink', 'expand']}},
+                        'tests': {'passed': True, 'summary_line': '29 passed'}}
+                       if step == 6 else
                        {**flags, 'all_cases_passed': True, 'emulate': 'passed', 'real': 'passed',
                         'edp1_rejoin_pause_s': None if failure == 'metric' else 0.5})
             state, calls = {'head': 'a' * 40}, []
@@ -84,9 +89,9 @@ class QuickTests(unittest.TestCase):
                 self.assertIn(['checkout', '--detach', quick_driver.BASE], calls)
                 argv = popen.call_args.args[0]
                 self.assertEqual(float(argv[argv.index('--min-free-disk-gb') + 1]), 1.0 if min_free is None else min_free)
-                self.assertEqual(('--mode' in argv, argv[2].endswith({5: 'run_model.py', 4: 'run_async.py', 3: 'run_sources.py',
-                                                                      2: 'run_topology.py'}[step])), (step != 5, True))
-                self.assertEqual('--layouts' in argv and argv[argv.index('--layouts') + 1] == 'tp2,tp4', single_node)
+                self.assertEqual(('--mode' in argv, argv[2].endswith({6: 'run_serving.py', 5: 'run_model.py', 4: 'run_async.py',
+                                                                      3: 'run_sources.py', 2: 'run_topology.py'}[step])), (step < 5, True))
+                self.assertEqual('--layouts' in argv and argv[argv.index('--layouts') + 1] == 'tp2,tp4', single_node and step == 5)
                 self.assertEqual((logs / 'runner.log').read_bytes(), child_output)
             else:
                 self.assertFalse(any(c[0] == 'checkout' for c in calls))
@@ -182,5 +187,19 @@ class QuickTests(unittest.TestCase):
             run_topology.cases('emulate', 0, 1, 'bad')
 
 
+    def test_step6_is_the_cpu_fake_backend_check_on_one_node(self):
+        result = self.run_driver(step=6, single_node=True)
+        self.assertEqual((result['result'], result['step'], result['single_node'], result['budget_s'], result['shared_gpu_mode']),
+                         ('PASS', 6, True, 300, False))
+        self.assertTrue(result['suite'].startswith('s6q_') and result['suite'].endswith('_single'))
+        self.assertEqual(result['runs'], {'scaling': ['2->4', '4->2'], 'failstop': ['shrink', 'expand']})
+        self.assertIn('QUICK CHECK step=6 result=PASS', result['output'])
+        self.assertIn('backend=fake single_node=true accepted=false', result['output'])
+        failed = self.run_driver(step=6, single_node=True, failure='metric')
+        self.assertEqual(failed['result'], 'FAIL')
+        self.assertIn('fake-backend', failed['error'])
+        self.assertIn('pytest.log', self.run_driver(step=6, single_node=True, failure='suite')['error'])
+        with self.assertRaises(SystemExit):  # Step 6 has no two-node form
+            self.run_driver(step=6)
 if __name__ == '__main__':
     unittest.main()

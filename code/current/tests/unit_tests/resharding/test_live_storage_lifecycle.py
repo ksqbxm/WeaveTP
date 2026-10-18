@@ -28,7 +28,7 @@ from tools.resharding.standby_weights import (
 
 
 def run_coordinator(tree, *, release=False, bitwise=False, identity=False, repeat=False, fault=False, check_polls=1,
-                    peer_check_polls=0, peer_weight_valid=True, capacity=128):
+                    peer_check_polls=0, peer_weight_valid=True, capacity=128, decode_fn=None):
     names = ["run_live_benchmark", "add_live_args", "StaticKVCacheModule", "LiveStateBundle",
              "_run_async_waves", "_parse_rank_phases", "_pressure_ranks_for_switch",
              "_active_experts_for_switch", "_set_active_experts", "_poison_kv", "_percentile",
@@ -181,6 +181,9 @@ def run_coordinator(tree, *, release=False, bitwise=False, identity=False, repea
         audit_weight_checksums=audit_weight_checksums,
         release_standby=release_hook, cuda_memory=lambda: {"allocated": 0, "reserved": 0},
         _write_results=lambda _, result: written.append(result), json=SimpleNamespace(dumps=lambda *_a, **_kw: ""))
+    if decode_fn is not None:  # the e2e serving driver's foreground step replaces the benchmark's fixed decode
+        waves = ns["_run_async_waves"]
+        ns["_run_async_waves"] = lambda **kw: waves(**kw, decode_fn=decode_fn)
     with patch("torch.cuda.Stream", return_value=Mock()), patch("torch.cuda.Event", Event), \
             patch("torch.cuda.stream", return_value=nullcontext()), patch("torch.cuda.current_stream", return_value=Mock()), \
             patch("tools.resharding.standby_weights.cuda_memory", return_value={"allocated": 0, "reserved": 0}), \
@@ -265,3 +268,16 @@ def test_audit_four_switches_and_disabled_field_absence(bitwise):
     for row in result["standby_weight_storage"]["ranks"][0]["switches"]:
         assert row["weight_check_enqueue_s"] >= 0
         assert ("weight_bitwise_audit_s" in row) == bitwise
+
+
+def test_async_waves_take_the_injected_foreground_step():
+    calls = []
+
+    def decode_fn():
+        calls.append(1)
+        return 5.0
+
+    result, _, releases = run_coordinator(defaults.CURRENT, release=True, decode_fn=decode_fn)
+    assert len(releases) == 5
+    assert calls and len(calls) == sum(row["base"]["overlap_steps"] for row in result["switches"])
+    assert all(row["base"]["tpot_mean_ms"] == 5.0 for row in result["switches"])

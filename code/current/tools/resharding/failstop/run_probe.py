@@ -22,6 +22,7 @@ from common import (
     host_backing,
     prefix,
     require,
+    require_megatron_helpers,
     summarize,
     write_json,
 )
@@ -195,6 +196,7 @@ def main():
                           "output": str(args.output / args.node)}, indent=2))
         return 0
     require(sys.platform == "linux", "GPU runner requires Linux pidfd and /proc")
+    require_megatron_helpers()
     pidfd_impl = pidfd_implementations()
     require(Path("/data").is_mount(), "/data must be mounted before writing experiment output")
     require(args.output.resolve().is_relative_to(Path("/data").resolve()), "output symlink escapes /data")

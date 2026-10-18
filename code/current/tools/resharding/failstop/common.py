@@ -1,9 +1,11 @@
 """CPU-only contracts shared by the standalone Step 1 probe."""
 
+import importlib
 import json
 import os
 import re
 import statistics
+import sys
 import time
 from datetime import timedelta
 from pathlib import Path
@@ -12,6 +14,7 @@ NODES = ("SL3060", "SL3061")
 TOPOLOGY_PROBES = {2: "step02_topology_rebind", 3: "step03_sources_and_transport"}
 ASYNC_PROBE = "step04_async_driver_and_memory"
 MODEL_PROBE = "step05_model_correctness"
+SERVING_PROBE = "step06_batched_serving"  # Step 6 A part: fake backend, CPU only
 STEP_PROBES = {**TOPOLOGY_PROBES, 4: ASYNC_PROBE, 5: MODEL_PROBE}
 # Step 5 §2.1: every bitwise check runs both sides under --deterministic-mode with this environment.
 DETERMINISTIC_ENVIRONMENT = {"NCCL_ALGO": "Ring", "CUBLAS_WORKSPACE_CONFIG": ":4096:8"}
@@ -32,6 +35,19 @@ DEFAULTS = {
     "tensor_elements": 262144,
     "repair_wait_s": 0,
 }
+
+
+# The runner's interpreter directory leads PATH for every child; SL3060 otherwise resolves the base
+# environment's python/torchrun (Python 3.13 without pybind11).
+PYTHON_FIRST_PATH = str(Path(sys.executable).parent) + os.pathsep + os.environ.get("PATH", "")
+
+
+def require_megatron_helpers():
+    """Before any GPU work: the compiled dataset helpers must import (a JIT build fails without pybind11)."""
+    try:
+        importlib.import_module("megatron.core.datasets.helpers_cpp")
+    except Exception as error:
+        raise RuntimeError(f"megatron.core.datasets.helpers_cpp does not import ({error!r}); fix the Python environment before launching") from error
 
 
 def require(condition, message):

@@ -304,7 +304,7 @@ class DriverTests(unittest.TestCase):
         script = Path(__file__).with_name('quick_check.sh').read_text(encoding='utf-8')
         self.assertIn('5) NAME=step05_model_correctness', script)
         self.assertIn('--single-node) SINGLE_NODE=--single-node', script)
-        self.assertIn('[[ -z "$SINGLE_NODE" || "$STEP" == 5 ]]', script)
+        self.assertIn('[[ -z "$SINGLE_NODE" || "$STEP" == 5 || "$STEP" == 6 ]]', script)
 
 
 if __name__ == '__main__':

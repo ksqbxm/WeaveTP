@@ -22,8 +22,10 @@ from common import (
     DETERMINISTIC_ENVIRONMENT,
     MODEL_PROBE,
     NODES,
+    PYTHON_FIRST_PATH,
     SHARED_GPU_NOTE,
     require,
+    require_megatron_helpers,
     write_json,
 )
 from determinism import compare_launch_plans, step_time_ratio
@@ -58,7 +60,7 @@ def environment(role, gpus, mps_pipe):
     stripped = set(DETERMINISTIC_ENVIRONMENT) | {'PYTORCH_ALLOC_CONF', 'PYTORCH_CUDA_ALLOC_CONF'}
     env = {k: v for k, v in os.environ.items() if k not in stripped}
     env.update(CUDA_VISIBLE_DEVICES=','.join(map(str, gpus)), NCCL_DEBUG='WARN', TORCH_NCCL_ASYNC_ERROR_HANDLING='1',
-               CUDA_DEVICE_MAX_CONNECTIONS='8', CUDA_MPS_PIPE_DIRECTORY=mps_pipe, PYTHONDONTWRITEBYTECODE='1')
+               CUDA_DEVICE_MAX_CONNECTIONS='8', CUDA_MPS_PIPE_DIRECTORY=mps_pipe, PYTHONDONTWRITEBYTECODE='1', PATH=PYTHON_FIRST_PATH)
     if role != 'timing':
         env.update(DETERMINISTIC_ENVIRONMENT)
     return env
@@ -140,6 +142,7 @@ def main(argv=None):
                           'output': str(args.output), **mode_flags}, indent=2))
         return 0
     require(sys.platform == 'linux' and Path('/data').is_mount(), 'requires Linux and mounted /data')
+    require_megatron_helpers()
     require(args.output.resolve().is_relative_to(Path('/data').resolve()), 'output escapes /data')
     require(Path(args.checkpoint, 'latest_checkpointed_iteration.txt').is_file(), f'converted checkpoint not found: {args.checkpoint}')
     root = args.output / args.node

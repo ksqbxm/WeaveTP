@@ -92,25 +92,28 @@ def main():
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--node', choices=('SL3060', 'SL3061'), required=True)
-    parser.add_argument('--step', choices=(2, 3, 4, 5), type=int, default=2)
+    parser.add_argument('--step', choices=(2, 3, 4, 5, 6), type=int, default=2)
     parser.add_argument('--min-free-disk-gb', type=float, default=1.0,
                         help='quick correctness threshold for /data; formal acceptance keeps the runner default of 5')
     parser.add_argument('--sha', required=True)
     parser.add_argument('--repo', type=Path, required=True)
     parser.add_argument('--log-dir', type=Path, required=True)
     parser.add_argument('--single-node', action='store_true',
-                        help='Step 5 only: run both layouts on this node without a peer (six checkpoint loads, 600 s budget)')
+                        help='Step 5: both layouts on this node without a peer (six checkpoint loads, 600 s budget); '
+                             'Step 6: the CPU fake-backend check (always single node, no GPU)')
     args = parser.parse_args()
-    if args.single_node and args.step != 5:
-        parser.error('--single-node applies to Step 5 only')
+    if args.single_node and args.step not in (5, 6):
+        parser.error('--single-node applies to Steps 5 and 6 only')
+    if args.step == 6 and not args.single_node:
+        parser.error('Step 6 (fake backend, CPU only) runs with --single-node')
     # Two nodes split the Step 5 layouts within 300 s; one node runs both layouts and needs twice the budget.
-    budget = 600 if args.single_node else 300
+    budget = 600 if args.step == 5 and args.single_node else 300
     started, deadline = time.monotonic(), time.monotonic() + budget
     run = args.log_dir
     conn = stream = child = None
     restore = False
     status = {'step': args.step, 'node': args.node, 'quick_mode': True, 'correctness_only': True,
-              'shared_gpu_mode': True, 'timing_valid': False, 'accepted': False, 'result': 'FAIL',
+              'shared_gpu_mode': args.step != 6, 'timing_valid': False, 'accepted': False, 'result': 'FAIL',
               'single_node': args.single_node, 'budget_s': budget}
     # Steps share a checkout, so all quick steps must hold the same local lock.
     lock = (args.repo / '.failstop_quick.lock').open('w')
@@ -130,7 +133,7 @@ def main():
         if git('rev-parse', 'HEAD') != args.sha:
             raise RuntimeError('checkout identity mismatch')
         if args.single_node:
-            suite = 's5q_' + datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S') + '_' + uuid.uuid4().hex[:8] + '_single'
+            suite = f's{args.step}q_' + datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S') + '_' + uuid.uuid4().hex[:8] + '_single'
         else:
             print(f'Waiting for peer: timeout=60s; total quick budget={budget}s', flush=True)
             status['peer_wait_start'] = time.monotonic()
@@ -140,10 +143,10 @@ def main():
         status['suite'], status['run'] = suite, str(run)
         (args.log_dir / 'run_path.txt').write_text(str(run) + '\n')
         entry = args.repo / 'code/current/tools/resharding/failstop' / {
-            2: 'run_topology.py', 3: 'run_sources.py', 4: 'run_async.py', 5: 'run_model.py'}[args.step]
+            2: 'run_topology.py', 3: 'run_sources.py', 4: 'run_async.py', 5: 'run_model.py', 6: 'run_serving.py'}[args.step]
         # Step 5 runs layouts under the deterministic contract (split across the two nodes, or both on one
-        # node); the fault matrix is Steps 2-4.
-        extra = {5: ['--layouts', 'tp2,tp4'] if args.single_node else []}.get(
+        # node); Step 6 (A part) is the fake backend plus the e2e CPU tests; the fault matrix is Steps 2-4.
+        extra = {5: ['--layouts', 'tp2,tp4'] if args.single_node else [], 6: []}.get(
             args.step, ['--mode', 'both', '--rounds', '1', '--real-launches', '1'])
         argv = [sys.executable, '-B', str(entry), '--node', args.node, '--suite-id', suite, '--output', str(run), *extra,
                 '--quick', '--correctness-only', '--budget-seconds', str(max(1, deadline - time.monotonic() - 45)),
@@ -159,6 +162,8 @@ def main():
             progress = run / args.node / 'progress.json'
             if args.step == 5:
                 hint = f"inspect {run / args.node / 'error.txt'} and the <layout>/<role>/torchrun.log files"
+            elif args.step == 6:
+                hint = f"inspect {run / args.node / 'error.txt'}, summary.json and pytest.log"
             elif progress.exists():
                 status['failed_cases'] = [r for r in json.loads(progress.read_text()) if r['status'] != 'passed']
                 hint = 'inspect per-round worker_error/controller_result logs'
@@ -167,7 +172,7 @@ def main():
             status['runner_error'] = runner_error(tail)
             raise RuntimeError(f"runner exited {code}: {status['runner_error']} ({hint}; full output: {runner_log})")
         summary = json.loads((run / args.node / 'summary.json').read_text())
-        flags = (summary['quick_mode'] and summary['correctness_only'] and summary['shared_gpu_mode'] and
+        flags = (summary['quick_mode'] and summary['correctness_only'] and summary['shared_gpu_mode'] == (args.step != 6) and
                  not summary['timing_valid'] and not summary['accepted'])
         if args.step == 5:
             ratios = summary.get('deterministic_step_time_ratio') or {}
@@ -179,6 +184,14 @@ def main():
                     raise RuntimeError(f'missing or invalid deterministic step-time ratio for {layout}')
             status['layouts'] = summary['layouts_requested']
             status['deterministic_step_time_ratio'] = {layout: ratio['median_ratio'] for layout, ratio in ratios.items()}
+        elif args.step == 6:
+            runs = summary['runs']
+            if not (summary['all_checks_passed'] and flags and summary['backend'] == 'fake' and summary['single_node'] and
+                    summary['gpus_used'] == 0 and summary['tests']['passed'] and set(runs) == {'scaling', 'failstop'} and
+                    all(r['check_passed'] for r in runs.values())):
+                raise RuntimeError('incomplete Step 6 fake-backend checks')
+            status['runs'] = {name: r['switches'] for name, r in runs.items()}
+            status['tests'] = summary['tests']['summary_line']
         else:
             if not (summary['all_cases_passed'] and flags and summary['emulate'] == summary['real'] == 'passed'):
                 raise RuntimeError('incomplete emulate/real correctness matrix')
@@ -242,7 +255,11 @@ def main():
         code = 0 if status['result'] == 'PASS' else 1
         (args.log_dir / 'exit_code').write_text(str(code) + '\n')
         print(json.dumps(status, indent=2), flush=True)
-        if args.step == 5:
+        if args.step == 6:
+            print(f"QUICK CHECK step=6 result={status['result']} (fake backend: controller/kv/anchors/decode/timeline, "
+                  f"failstop cycle; runs={status.get('runs')}; tests={status.get('tests')}) backend=fake single_node=true "
+                  f"accepted=false logs={run}", flush=True)
+        elif args.step == 5:
             print(f"QUICK CHECK step=5 result={status['result']} (memory preflight, deterministic reference/candidate "
                   f"{status.get('layouts')}, step_time_ratio={status.get('deterministic_step_time_ratio')}) "
                   f"shared_gpu_mode=true single_node={str(args.single_node).lower()} fail_stop_integration=pending "

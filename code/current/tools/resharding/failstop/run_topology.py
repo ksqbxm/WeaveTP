@@ -10,7 +10,15 @@ import sys
 import time
 from pathlib import Path
 
-from common import DEFAULTS, NODES, SHARED_GPU_NOTE, STEP_PROBES, require, write_json
+from common import (
+    DEFAULTS,
+    NODES,
+    SHARED_GPU_NOTE,
+    STEP_PROBES,
+    require,
+    require_megatron_helpers,
+    write_json,
+)
 from run_probe import repository_commit, run_case
 from safety import check_data_space, pidfd_implementations
 
@@ -112,6 +120,7 @@ def main(argv=None, *, step=2):
                              if step == 3 else {})}, indent=2))
         return 0
     require(sys.platform == 'linux' and Path('/data').is_mount(), 'requires Linux and mounted /data')
+    require_megatron_helpers()
     require(args.output.resolve().is_relative_to(Path('/data').resolve()), 'output escapes /data')
     root = args.output / args.node
     root.mkdir(parents=True, exist_ok=False)
