@@ -878,6 +878,9 @@ def build_centralized_reshard_plan(
     source_exclude_local: bool = False,
     source_search_config: Mapping | None = None,
     source_search_audit_path: str | None = None,
+    source_accumulate_load: bool = True,
+    source_global_gate: bool = True,
+    source_allowed_ranks: frozenset[int] | None = None,
 ) -> ReshardPlan:
     """
     Centralized planning: Rank 0 builds complete plan for all ranks, then scatters.
@@ -896,6 +899,12 @@ def build_centralized_reshard_plan(
     experiment. An omitted config uses the original greedy/default path,
     regardless of environment variables. source_search_audit_path dumps only
     this call's metadata; audit timings are not benchmark results.
+
+    Ablation switches for the greedy path (defaults keep the original behavior):
+    source_accumulate_load=False scores every candidate and the per-entry gain
+    test without already-assigned load; source_global_gate=False accepts any
+    change without the global gate; source_allowed_ranks restricts candidates
+    to the default source or routes whose actual senders are all allowed.
     """
     # Only the measured forward-plan caller opts in. Refit/reverse/online builds
     # must not inherit a search algorithm from the process environment.
@@ -984,6 +993,12 @@ def build_centralized_reshard_plan(
         link_load_s: dict[tuple[int, int], float] = {}
         source_load_s: dict[int, float] = {}
         destination_load_s: dict[int, float] = {}
+        # Loads used for per-entry decisions; the totals below always accumulate.
+        decision_loads = (
+            (link_load_s, source_load_s, destination_load_s)
+            if source_accumulate_load
+            else (None, None, None)
+        )
         baseline_link_load_s: dict[tuple[int, int], float] = {}
         baseline_source_load_s: dict[int, float] = {}
         baseline_destination_load_s: dict[int, float] = {}
@@ -1104,15 +1119,28 @@ def build_centralized_reshard_plan(
                         dst_rank,
                         source_bandwidth_gbps,
                         source_latency_us,
-                        link_load_s,
-                        source_load_s,
-                        destination_load_s,
+                        *decision_loads,
                     )
+                candidate_meta_list = src_meta_list
+                if source_allowed_ranks is not None:
+                    candidate_meta_list = [
+                        metadata
+                        for metadata in src_meta_list
+                        if metadata is default_src_metadata
+                        or all(
+                            source_rank in source_allowed_ranks
+                            for source_rank, _src_slice, _dst_slice in (
+                                _determine_source_ranks_for_dst_param(
+                                    resolved_name, metadata, dst_metadata, dst_rank
+                                )
+                            )
+                        )
+                    ]
                 if use_search:
                     src_metadata = search_override.get((dst_rank, resolved_name), default_src_metadata)
                 else:
                     src_metadata = select_src_metadata_balanced(
-                        src_meta_list,
+                        candidate_meta_list,
                         dst_metadata,
                         dst_rank,
                         prefer_local_source=prefer_local_source,
@@ -1209,9 +1237,7 @@ def build_centralized_reshard_plan(
                                 dst_rank,
                                 source_bandwidth_gbps,
                                 source_latency_us,
-                                link_load_s,
-                                source_load_s,
-                                destination_load_s,
+                                *decision_loads,
                             )
                             candidate_cost = _estimate_source_metadata_cost(
                                 resolved_name,
@@ -1220,9 +1246,7 @@ def build_centralized_reshard_plan(
                                 dst_rank,
                                 source_bandwidth_gbps,
                                 source_latency_us + source_reroute_penalty_us,
-                                link_load_s,
-                                source_load_s,
-                                destination_load_s,
+                                *decision_loads,
                             )
                             predicted_gain_pct = 100.0 * (
                                 default_cost - candidate_cost
@@ -1390,9 +1414,9 @@ def build_centralized_reshard_plan(
                 baseline_projected_critical_s - projected_critical_s
             ) / max(baseline_projected_critical_s, 1.0e-12)
             tentative_changes = source_route_changes
-            global_gate_accepted = (
-                tentative_changes > 0
-                and projected_global_gain_pct >= source_reroute_min_global_gain_pct
+            global_gate_accepted = tentative_changes > 0 and (
+                not source_global_gate
+                or projected_global_gain_pct >= source_reroute_min_global_gain_pct
             )
             if record_search:
                 search_stats.update(
