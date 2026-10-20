@@ -11,6 +11,8 @@ run_mode:
 scenario:
   failstop     fail at completed_count >= ceil(0.25 N), rejoin after the plan's seconds (both methods).
   nofault      the same request set on the fixed TP4 x 2 layout: the calibration run and the no-fault baseline.
+  failslow     co-runners on the fault GPUs for D seconds after a warmup, detection after detect_s, a wall-clock
+               deadline D + tail after the injection starts (failslow_probe); emulate mechanics, nothing is killed.
 """
 
 import os
@@ -18,7 +20,7 @@ import sys
 from pathlib import Path
 
 import model_memory
-from common import DEFAULTS, DETERMINISTIC_ENVIRONMENT, SERVING_PROBE, require
+from common import DEFAULTS, DETERMINISTIC_ENVIRONMENT, FAIL_COORDS, SERVING_PROBE, require
 from safety import check_gpu_processes, gpu_snapshot, mps_snapshot, pidfd_implementations
 
 CODE_ROOT = Path(__file__).resolve().parents[3]
@@ -30,7 +32,39 @@ from tools.resharding.e2e.methods import METHODS  # noqa: E402
 GIB = 1 << 30
 GEOMETRY = {'layers': 27, 'heads': 16, 'group_heads': 4, 'k_dim': 192, 'v_dim': 128}
 RUN_MODES = ('correctness', 'timing')
-SCENARIOS = ('failstop', 'nofault')
+SCENARIOS = ('failstop', 'nofault', 'failslow')
+FAILSLOW_METHODS = ('weavetp', 'anchortp', 'restart', 'ignore', 'nofault')  # nofault: no injection, the worker runs ignore
+SLOW_LEVELS = {'W': 1, 'M': 2, 'S': 3}  # co-runners per slow GPU (Malleus level-1/2/3)
+# Fail-slow budget on top of warmup + D + tail (seconds): process start and the initial TP4 load, each of restart's two
+# disk reloads, and the teardown margin. The formal D = 600 s launch gets 120 + 600 + 120 + 600 + 2 x 300 + 300 s.
+FAILSLOW_STARTUP_S, FAILSLOW_RELOAD_S, FAILSLOW_MARGIN_S = 600, 300, 300
+
+
+def failslow_settings(*, method, level, fault_gpus, warmup_s, slow_s, tail_s, detect_s, mode):
+    """config['failslow']; refuses what the fixed fail-stop topology cannot run: the switching methods release exactly the
+    GPUs of FAIL_COORDS (EDP0 position 4 * ep + etp), any other fault set runs only with ignore/nofault."""
+    require(method in FAILSLOW_METHODS, f'fail-slow methods are {FAILSLOW_METHODS}')
+    require(mode == 'emulate', 'fail-slow keeps every process alive: --mode emulate')
+    require(method == 'nofault' or level in SLOW_LEVELS, f'--slow-level must be one of {sorted(SLOW_LEVELS)}')
+    require(min(warmup_s, tail_s) >= 0 and 0 < detect_s < slow_s, 'need warmup, tail >= 0 and 0 < detect < slow seconds')
+    fault = sorted(set(fault_gpus))
+    require(fault and len(fault) == len(fault_gpus) and min(fault) >= 0, f'invalid fault GPU set {fault_gpus}')
+    released = sorted(4 * ep + etp for ep, etp in FAIL_COORDS)
+    require(method in ('ignore', 'nofault') or fault == released,
+            f'{method} releases the fail-stop fault coordinates, i.e. GPUs {released}; other sets only with ignore/nofault')
+    return {'label': method, 'level': None if method == 'nofault' else level, 'fault_gpus': fault,
+            'warmup_s': warmup_s, 'slow_s': slow_s, 'tail_s': tail_s, 'detect_s': detect_s}
+
+
+def failslow_launch_seconds(settings):
+    """Budget of one fail-slow launch: the timeline, startup, restart's two disk reloads and the margin."""
+    return (settings['warmup_s'] + settings['slow_s'] + settings['tail_s'] + FAILSLOW_STARTUP_S + 2 * FAILSLOW_RELOAD_S +
+            FAILSLOW_MARGIN_S)
+
+
+def failslow_stage_seconds(settings):
+    """Longest single wait inside a fail-slow launch: an emulate victim waits about D for the spawn, then the reload."""
+    return settings['slow_s'] + settings['tail_s'] + 2 * FAILSLOW_RELOAD_S + FAILSLOW_MARGIN_S
 
 
 def worker_arguments(checkpoint, prompt_tokens, seq_length, run_mode):
@@ -73,21 +107,28 @@ def require_gpu_memory(node, seq_length, b_max):
 
 def serving_config(*, node, launch, mode, output, master, port, commit, remaining, min_free_disk_gb, quick, shared_gpu,
                    run_mode, method, scenario, checkpoint, seq_length, profile_file, reference_root, requests, workload, plan,
-                   b_max, capacity_tokens, rejoin_note=None):
+                   b_max, capacity_tokens, rejoin_note=None, failslow=None):
     require(run_mode in RUN_MODES, f'run_mode must be one of {RUN_MODES}')
     require(method in METHODS, f'method must be one of {sorted(METHODS)}')
     require(scenario in SCENARIOS, f'scenario must be one of {SCENARIOS}')
+    require((scenario == 'failslow') == (failslow is not None), 'fail-slow settings go with the failslow scenario only')
+    require(scenario == 'failslow' or method in ('weavetp', 'anchortp'), f'{method} is a fail-slow method')
     correctness = run_mode == 'correctness'
     require(correctness or not quick, 'timing runs are never quick')
     profile = Path(profile_file)
     require(profile.is_file(), f'frozen Step 3 profile is required; not found: {profile}')
     reference = Path(reference_root or '')
-    if correctness and node == 'SL3061':  # only the EDP0 node audits migrated targets against the reference hashes
+    if correctness and node == 'SL3061' and failslow is None:  # EDP0 audits targets against reference hashes (fail-slow: own TP4)
         for tp in (2, 4):
             require(all((reference / f'tp{tp}' / 'reference' / f'parameters_rank_{r}.json').is_file() for r in range(2 * tp)),
                     f'reference parameter hashes for tp{tp} are missing under {reference} (run_model.py reference role)')
     require(remaining > 90, 'budget exhausted before the launch')
     long = min(600, remaining - 30) if not quick else min(240, remaining - 30)
+    stage = long
+    if failslow is not None:  # never cut a formal D = 600 s launch by a timeout
+        require(remaining >= failslow_launch_seconds(failslow), f'a fail-slow launch needs {failslow_launch_seconds(failslow):.0f} s, '
+                                                                 f'{remaining:.0f} s of budget left')
+        stage = min(max(long, failslow_stage_seconds(failslow)), remaining - 30)
     return {**{k: v for k, v in DEFAULTS.items() if k != 'repeats'},
             'mode': mode, 'rounds': 1, 'launch': launch, 'probe': SERVING_PROBE, 'kind': mode, 'profile_only': False,
             'node': node, 'output': str(output), 'master': master, 'port': port, 'commit': commit, 'mps_pipe': None,
@@ -96,7 +137,7 @@ def serving_config(*, node, launch, mode, output, master, port, commit, remainin
             'mps_owner': None if shared_gpu else os.environ.get('MPS_OWNER'),
             'timing_valid': not correctness, 'deterministic_mode': correctness,
             'min_free_disk_gb': min_free_disk_gb, **pidfd_implementations(),
-            'startup_timeout_s': long, 'stage_timeout_s': long, 'reclaim_timeout_s': min(120, remaining - 30),
+            'startup_timeout_s': long, 'stage_timeout_s': stage, 'reclaim_timeout_s': min(120, remaining - 30),
             'launch_timeout_s': remaining, 'profile_file': str(profile), 'reference_root': str(reference),
             'kv_heads': GEOMETRY['heads'], 'memory_margin_bytes': 2 * GIB, 'memory_limit_bytes': None,
             'model_argv': worker_arguments(checkpoint, 8, seq_length, run_mode),
@@ -104,4 +145,4 @@ def serving_config(*, node, launch, mode, output, master, port, commit, remainin
                         'decode_policy': 'greedy', 'block_tokens': 64, 'segment_tokens': 4096, 'max_delta_steps': 32,
                         'attention': 'torch', 'growth': {'shrink': 0, 'expand': 2}, 'geometry': GEOMETRY,
                         'capacity_tokens': capacity_tokens},
-            'rejoin_note': rejoin_note}
+            'rejoin_note': rejoin_note, 'failslow': failslow}

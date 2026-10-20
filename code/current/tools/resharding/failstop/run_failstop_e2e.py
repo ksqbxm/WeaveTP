@@ -5,6 +5,10 @@ One invocation runs `--launches N` independent launches of one cell of the matri
   --scenario failstop|nofault the fault cycle of the plan, or the fixed TP4 x 2 baseline (calibration, no-fault reference)
   --mode emulate|real         fault mode (real: kill -9 and world rebuild)
   --run-mode timing|correctness
+  --scenario failslow --method weavetp|anchortp|restart|ignore|nofault --slow-level W|M|S [--fault-gpus 0,1,4,5]
+      [--warmup-s 120 --slow-seconds 600 --tail-s 120 --detect-seconds 10]: co-runners on the SL3061 fault GPUs,
+      wall-clock deadline (failslow_probe); --mode emulate; nofault = the same timeline without injection; the budget
+      defaults to launches x serving_config.failslow_launch_seconds and a shorter one is refused
 Both nodes run the same command with the same --suite-id; SL3060 is the control gate. Each launch gets its own
 TCPStore port (--port-base + index) and output directory `<output>/<node>/<suite>_<method>_<scenario>_<mode>_<k>`;
 `matrix_manifest.json` records the request/workload/plan/profile hashes, the commit and the launch order, and
@@ -31,7 +35,10 @@ from safety import check_data_space, foreign_gpu_processes
 from serving_config import (
     RUN_MODES,
     SCENARIOS,
+    SLOW_LEVELS,
     apply_environment,
+    failslow_launch_seconds,
+    failslow_settings,
     require_exclusive_gpus,
     require_gpu_memory,
     serving_config,
@@ -51,7 +58,8 @@ def parse(argv=None):
     parser.add_argument('--node', choices=NODES, required=True)
     parser.add_argument('--suite-id', required=True, help='typed identically on both nodes')
     parser.add_argument('--output', type=Path, required=True)
-    parser.add_argument('--method', choices=sorted(METHODS), default='weavetp')
+    parser.add_argument('--method', choices=sorted({*METHODS, 'nofault'}), default='weavetp',
+                        help='ignore/restart/nofault: --scenario failslow only (nofault = no injection, the baseline)')
     parser.add_argument('--scenario', choices=SCENARIOS, default='failstop')
     parser.add_argument('--mode', choices=('emulate', 'real'), default='emulate')
     parser.add_argument('--run-mode', choices=RUN_MODES, default='timing')
@@ -73,12 +81,31 @@ def parse(argv=None):
     parser.add_argument('--capacity-tokens', type=int, default=None, help='KV reservation capacity per replica (default: layout formula)')
     parser.add_argument('--master', default='10.60.14.1')
     parser.add_argument('--port-base', type=int, default=29860)
-    parser.add_argument('--budget-seconds', type=float, default=3600, help='for the whole invocation')
+    parser.add_argument('--budget-seconds', type=float, default=None,
+                        help='for the whole invocation (default 3600; failslow: launches x the per-launch budget)')
+    parser.add_argument('--slow-level', choices=sorted(SLOW_LEVELS), help='failslow: 1/2/3 co-runners per slow GPU (W/M/S)')
+    parser.add_argument('--fault-gpus', default='0,1,4,5', help='failslow: SL3061 GPU indices that run the co-runners')
+    parser.add_argument('--warmup-s', type=float, default=120.0, help='failslow: serving before the injection')
+    parser.add_argument('--slow-seconds', type=float, default=600.0, help='failslow: injection length D')
+    parser.add_argument('--tail-s', type=float, default=120.0, help='failslow: serving after the injection, to the deadline')
+    parser.add_argument('--detect-seconds', type=float, default=10.0, help='failslow: detection delay after the injection starts')
     parser.add_argument('--min-free-disk-gb', type=float, default=5)
     parser.add_argument('--dry-run', action='store_true', help='print the launch configurations and exit')
     args = parser.parse_args(argv)
     require(bool(re.fullmatch(r'[A-Za-z0-9_-]{1,48}', args.suite_id)), 'invalid suite id')
     require(args.launches > 0, 'launch count must be positive')
+    args.failslow = None
+    if args.scenario == 'failslow':
+        args.failslow = failslow_settings(method=args.method, level=args.slow_level, fault_gpus=[int(g) for g in args.fault_gpus.split(',')],
+                                          warmup_s=args.warmup_s, slow_s=args.slow_seconds, tail_s=args.tail_s,
+                                          detect_s=args.detect_seconds, mode=args.mode)
+        need = args.launches * failslow_launch_seconds(args.failslow) + 60
+        args.budget_seconds = need if args.budget_seconds is None else args.budget_seconds
+        require(args.budget_seconds >= need, f'--budget-seconds {args.budget_seconds:.0f} is short of {need:.0f} s '
+                                             f'for {args.launches} fail-slow launches')
+    else:
+        require(args.method in ('weavetp', 'anchortp'), f'--method {args.method} needs --scenario failslow')
+        args.budget_seconds = 3600 if args.budget_seconds is None else args.budget_seconds
     require(math.isfinite(args.budget_seconds) and args.budget_seconds > 0 and
             1024 <= args.port_base <= 65536 - args.launches, 'invalid budget/port')
     require(not (args.correctness_only and args.run_mode == 'timing'), '--correctness-only is a correctness-run flag')
@@ -135,7 +162,7 @@ def main(argv=None):
     manifest = {'suite': args.suite_id, 'node': args.node, 'method': args.method, 'scenario': args.scenario, 'mode': args.mode,
                 'run_mode': args.run_mode, 'gpu_sharing': 'shared' if args.shared_gpu_ok or args.correctness_only else 'exclusive',
                 'launches': [launch_id(args, i) for i in range(args.launches)],
-                'argv': sys.argv, **check_inputs(args)}
+                'argv': sys.argv, 'failslow': args.failslow, 'budget_seconds': args.budget_seconds, **check_inputs(args)}
     if args.dry_run:
         print(json.dumps(manifest, indent=2, default=str))
         return 0
@@ -171,7 +198,8 @@ def main(argv=None):
         gpu_preflight(args, root, launch)
         config = serving_config(node=args.node, launch=launch, mode=args.mode, output=output, master=args.master,
                                 port=args.port_base + index, commit=commit, remaining=remaining, min_free_disk_gb=args.min_free_disk_gb,
-                                quick=False, shared_gpu=args.correctness_only or args.shared_gpu_ok, run_mode=args.run_mode, method=args.method,
+                                quick=False, shared_gpu=args.correctness_only or args.shared_gpu_ok, run_mode=args.run_mode,
+                                method='ignore' if args.method == 'nofault' else args.method, failslow=args.failslow,
                                 scenario=args.scenario, checkpoint=args.checkpoint, seq_length=args.seq_length,
                                 profile_file=args.profile_file, reference_root=args.reference_root, requests=args.requests,
                                 workload=args.workload, plan=args.plan, b_max=args.b_max, capacity_tokens=args.capacity_tokens)

@@ -158,7 +158,7 @@ class ControlService:
         self.finished = {d: False for d in domains}
         self.hold = set()  # domains kept stepping (empty steps) until an ordered switch sequence completes
         self.lock = threading.RLock()
-        self.stopped, self.error, self.log = False, None, []
+        self.stopped, self.closed, self.error, self.log = False, False, None, []
 
     def start(self):
         for domain in self.domains:
@@ -167,6 +167,12 @@ class ControlService:
 
     def push(self, domain, step):
         with self.lock:
+            if self.closed and self.switch[domain] is None and domain not in self.hold:
+                # Wall-clock deadline (fail-slow): admit nothing more, end the domain with requests still running.
+                self.finished[domain] = True
+                decision = ctl.Decision(for_step=step, phase='done')
+                self.channel.put(f'decision/{domain}/{step}', encode_decision(decision))
+                return decision
             decision = self.controller.decide(step, self.clock(), replicas=self.domains[domain], frozen=self.frozen[domain],
                                               phase=self.phase[domain])
             decision.switch, self.switch[domain] = self.switch[domain], None
@@ -180,6 +186,11 @@ class ControlService:
         with self.lock:
             require(self.switch[domain] is None, f'{domain} already has a pending switch')
             self.switch[domain] = direction
+
+    def close(self):
+        """The run's wall-clock deadline: each domain's next decision outside a switch sequence is 'done'."""
+        with self.lock:
+            self.closed = True
 
     def completed(self):
         with self.lock:

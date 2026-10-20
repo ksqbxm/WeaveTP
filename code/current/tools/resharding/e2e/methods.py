@@ -30,6 +30,23 @@ METHODS = {
                               'EDP1 keeps serving between the waves',
                               'replay only EDP0 in-flight requests'],
     },
+    # Fail-slow only (run_failstop_e2e --scenario failslow): the slow GPUs stay in service, or EDP0 restarts from disk.
+    'ignore': {
+        'name': 'ignore',
+        'source_policy': 'none: EDP0 keeps serving TP4 on the slow GPUs',
+        'kv_semantics': 'unchanged',
+        'kv_semantics_status': 'n/a',
+        'implementation_ref': None,
+        'advantage_sources': ['no switch, no replay'],
+    },
+    'restart': {
+        'name': 'restart',
+        'source_policy': 'checkpoint reload from disk in the same processes (TP2 on the healthy ranks, then TP4 on all eight)',
+        'kv_semantics': 'both switches: EDP0 stops, in-flight requests replay from prompt + committed history after the reload',
+        'kv_semantics_status': 'process start and NCCL init not counted (optimistic for restart)',
+        'implementation_ref': None,
+        'advantage_sources': ['EDP1 keeps serving and moves nothing', 'no migration plan'],
+    },
 }
 
 

@@ -105,13 +105,37 @@ class MegatronRuntime:
                                          pg_collection=groups, config=config).cuda().eval()
         for p in model.parameters():
             p.requires_grad_(False)
-        if load:
+        if load == 'local':
+            self.load_local(model)
+        elif load:
             require(tp == 4, 'only the initial TP4 layout is checkpoint-loaded; targets are migrated')
             load_checkpoint([model], None, None)
         else:
             for p in model.parameters():
                 p.data.fill_(float('nan'))  # a poisoned empty target: every byte must arrive through the plan
         return model
+
+    def load_local(self, model):
+        """Fail-slow restart: this rank's shards of any layout from the same checkpoint, with no collective, so EDP0
+        reloads while EDP1 keeps serving. load_checkpoint all-reduces the tracker iteration and barriers over the whole
+        world; the torch_dist strategy itself reads with no_dist=True, and the model's sharded state dict takes its
+        offsets from its own process groups."""
+        from megatron.core import dist_checkpointing, parallel_state
+        from megatron.core.dist_checkpointing.strategies.torch import TorchDistLoadShardedStrategy
+        from megatron.training.checkpointing import get_checkpoint_name, get_checkpoint_tracker_filename
+
+        with open(get_checkpoint_tracker_filename(self.args.load)) as f:
+            marker = f.read().strip()
+        release = marker == 'release'
+        directory = get_checkpoint_name(self.args.load, 0 if release else int(marker), release, return_base_dir=True)
+        metadata = dict(dist_checkpointing.load_content_metadata(directory) or {},
+                        dp_cp_group=parallel_state.get_data_parallel_group(with_context_parallel=True))
+        state = dist_checkpointing.load({'model': model.sharded_state_dict(metadata=metadata)}, directory, TorchDistLoadShardedStrategy(),
+                                        validate_access_integrity=False, strict='assume_ok_unexpected')
+        try:  # as load_checkpoint's load_model_state_dict: strict, with the non-strict fallback
+            model.load_state_dict(state['model'], strict=True)
+        except Exception:
+            model.load_state_dict(state['model'], strict=False)
 
     def context(self):
         from megatron.core.inference.contexts import StaticInferenceContext

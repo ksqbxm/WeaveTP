@@ -62,7 +62,8 @@ def anchortp_plan(sources, targets, profile, *, membership, epoch, rank_map):
 # plan(sources, targets, profile, *, membership, epoch, rank_map) -> (tasks, cache_key, record). Sources and
 # targets are flat shard lists in global coordinates: how many replicas sit on either side is not part of the
 # interface (a split or a merge of replicas supplies the same lists).
-PLANNERS = {'weavetp': weavetp_plan, 'anchortp': anchortp_plan}
+PLANNERS = {'weavetp': weavetp_plan, 'anchortp': anchortp_plan,
+            'ignore': weavetp_plan, 'restart': weavetp_plan}  # fail-slow: ignore never switches, restart migrates nothing
 
 
 class Fence:

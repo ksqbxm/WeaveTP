@@ -23,6 +23,7 @@ from common import (
     baseline_ranges,
     connect,
     failed_slots,
+    releases_fault_set,
     require,
     write_json,
 )
@@ -47,6 +48,7 @@ class Supervisor:
         self.foreign = {}
         self.state = "preflight"
         self.host_owner = None
+        self.injector = None  # fail-slow co-runners (SL3061 only)
 
     def transition(self, expected, target):
         require(self.state == expected, f"invalid supervisor transition {self.state} -> {target}")
@@ -184,6 +186,11 @@ class Supervisor:
                 require(gpu["used_mib"] <= baselines[gpu["uuid"]]["threshold_mib"],
                         "reclaimed GPU memory rose before spawn")
 
+    def stop_injection(self):
+        if self.injector is not None and not self.bus.has("slow_stopped"):
+            self.wait(["slow_stop"], timeout=self.config["launch_timeout_s"])
+            self.bus.put("slow_stopped", self.journal.event("slow_stopped", **self.injector.stop()))
+
     def run(self):
         node = self.config["node"]
         # Controller midpoint clock calibration, all on CPU TCPStore.
@@ -215,10 +222,23 @@ class Supervisor:
         self.transition("preflight", "running")
         self.start_workers(slots, 0)
         self.verify_contexts(slots, 0)
-        if not self.config.get('profile_only') and self.config['scenario'] == 'failstop':
+        failslow = self.config.get("failslow") or {}
+        if failslow.get("level") and node == "SL3061":  # the gate orders the co-runners on and off the slow GPUs
+            from failslow_inject import Injector
+
+            uuids = [r["gpu_uuid"] for r in self.config["topology"] if r["node"] == node and r["gpu_index"] in failslow["fault_gpus"]]
+            require(len(uuids) == len(failslow["fault_gpus"]) and (not releases_fault_set(self.config) or set(uuids) == {
+                self.config["topology"][s]["gpu_uuid"] for s in failed_slots(self.config["topology"])}),
+                f"fault GPUs {failslow['fault_gpus']} are not on {node} or not the GPUs the switch releases")
+            self.injector = Injector(self.config["launch"], uuids, failslow["level"], self.root,
+                                     {"CUDA_MPS_PIPE_DIRECTORY": str(self.root / f"absent_mps_pipe_{self.config['launch']}_{node}")})
+            self.wait(["slow_start"], timeout=self.config["launch_timeout_s"])
+            self.bus.put("slow_started", self.journal.event("slow_started", **self.injector.start()))
+        if not self.config.get('profile_only') and releases_fault_set(self.config):
             if node == "SL3061":
                 self.wait(["kill"], timeout=self.config["launch_timeout_s"])
                 self.kill_and_reclaim(baselines, mps["servers"])
+            self.stop_injection()
             self.wait(["spawn"], timeout=self.config["launch_timeout_s"])
             if node == "SL3061":
                 victims = failed_slots(self.config["topology"])
@@ -231,6 +251,7 @@ class Supervisor:
                 self.inspect("mps_after_cuda_epoch2", expected)
                 self.bus.put(f"verified/2/{node}", self.journal.event("mps_verified", epoch=2))
             self.bus.put(f"spawned/{node}", [r for _, r in self.workers.values()])
+        self.stop_injection()
         self.wait(["finish"], timeout=self.config["launch_timeout_s"])
         for child, record in self.workers.values():
             require(child.wait(timeout=self.config["stage_timeout_s"]) == 0,
@@ -296,6 +317,8 @@ def main():
         raise
     finally:
         try:
+            if supervisor.injector is not None:
+                supervisor.injector.stop()
             supervisor.children.cleanup()
         finally:
             write_json(root / "process_lifecycle.json", [r for _, r in supervisor.children.children])

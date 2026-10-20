@@ -1,0 +1,126 @@
+"""Step 9 quick check (quick_check.sh --step 9): three short fail-slow launches, shared GPUs, correctness mode.
+
+weavetp, anchortp and restart in turn, level W on SL3061 GPUs 0,1,4,5, warmup 20 s, D 30 s, tail 20 s, detection
+after 10 s, a toy request pool the deadline cuts. Per launch: the launch passed and no failslow_hog.py process is left
+on this node; on SL3060 also the event order, requests left unfinished at the deadline (the wall-clock cut), every
+co-runner ready before the injection start, and the TP4 hash check of all eight EDP0 ranks (after the expand, or
+restart's TP4 reload, equal to the same rank's hashes before the injection). Writes `<output>/<node>/summary.json`.
+"""
+
+import argparse
+import json
+import os
+import sys
+import time
+import traceback
+from pathlib import Path
+
+from common import NODES, require, require_megatron_helpers, write_json
+from failslow_inject import hog_pids
+from run_probe import repository_commit, run_case
+from safety import check_data_space
+from serving_config import apply_environment, failslow_launch_seconds, failslow_settings, serving_config
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+from tools.resharding.e2e.requests_io import sha256_file  # noqa: E402
+
+QUICK = {'warmup_s': 20.0, 'slow_s': 30.0, 'tail_s': 20.0, 'detect_s': 10.0}
+METHODS, LEVEL, FAULT_GPUS, REQUESTS = ('weavetp', 'anchortp', 'restart'), 'W', (0, 1, 4, 5), 2000
+
+
+def settings(method):
+    return failslow_settings(method=method, level=LEVEL, fault_gpus=list(FAULT_GPUS), mode='emulate', **QUICK)
+
+
+def budget_seconds():
+    return sum(failslow_launch_seconds(settings(method)) for method in METHODS) + 120
+
+
+def toy_inputs(directory, count=REQUESTS):
+    """Deterministic requests long enough to keep every replica busy across the timeline (prompts 16-48, outputs 32-128)."""
+    directory.mkdir(parents=True, exist_ok=True)
+    rows = [{'id': f'q{i}', 'source': 'toy', 'src_index': i, 'prompt_token_ids': [100 + (i * 7 + k) % 1000 for k in range(16 + i % 33)],
+             'output_token_ids': [0] * (32 + (i * 13) % 97), 'tokenizer': 'toy', 'sha256_text': 'x'} for i in range(count)]
+    for row in rows:
+        row.update(input_len=len(row['prompt_token_ids']), output_len=len(row['output_token_ids']))
+    requests = directory / 'requests.jsonl'
+    requests.write_text(''.join(json.dumps(r) + '\n' for r in rows), encoding='utf-8')
+    workload = {'workload_id': 'failslow_quick', 'arrival': 'continuous', 'seed': 1,
+                'segments': [{'index': 0, 'kind': 'short', 'request_ids': [r['id'] for r in rows]}]}
+    (directory / 'workload.json').write_text(json.dumps(workload), encoding='utf-8')
+    (directory / 'plan.json').write_text(json.dumps({'version': 'v2', 'request_file_sha256': sha256_file(requests), 'switches': []}))
+    return {'requests': requests, 'workload': directory / 'workload.json', 'plan': directory / 'plan.json'}
+
+
+def gate_checks(path):
+    """SL3060: the gate's failslow_result.json of one launch."""
+    result = json.loads(path.read_text(encoding='utf-8'))
+    started = result['injection']['started'] or {}
+    checks = {'event_order': result['check']['event_order'], 'cut_by_deadline': result['requests_unfinished'] > 0,
+              'co_runners_ready': len(started.get('pids', [])) == len(FAULT_GPUS),
+              'tp4_hash_ranks': len(result['tp4_hash']), 'tp4_hash_passed': result['check']['tp4_hash_passed'] is True,
+              'requests_completed': result['requests_completed'], 'deadline_overrun_s': result['deadline_overrun_s']}
+    checks['passed'] = all(checks[k] for k in ('event_order', 'cut_by_deadline', 'co_runners_ready', 'tp4_hash_passed')) and \
+        checks['tp4_hash_ranks'] == 8
+    return checks
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument('--node', choices=NODES, required=True)
+    parser.add_argument('--suite-id', required=True)
+    parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--quick', action='store_true')
+    parser.add_argument('--correctness-only', action='store_true')
+    parser.add_argument('--budget-seconds', type=float, default=budget_seconds())
+    parser.add_argument('--min-free-disk-gb', type=float, default=1)
+    parser.add_argument('--profile-file', required=True, help='frozen Step 3 profile.json, same path on both nodes')
+    parser.add_argument('--checkpoint', default=os.environ.get('CHECKPOINT', '/data/models/DeepSeek-V2-Lite-megatron-v2'))
+    parser.add_argument('--seq-length', type=int, default=512)
+    parser.add_argument('--master', default='10.60.14.1')
+    parser.add_argument('--port-base', type=int, default=29890)
+    args = parser.parse_args(argv)
+    require(args.quick and args.correctness_only, 'Step 9 runs only as the quick correctness check')
+    started = time.monotonic()
+    deadline = started + args.budget_seconds
+    root = args.output / args.node
+    root.mkdir(parents=True, exist_ok=False)
+    summary = {'step': 9, 'node': args.node, 'suite_id': args.suite_id, 'methods': list(METHODS), 'level': LEVEL, 'settings': QUICK,
+               'quick_mode': True, 'correctness_only': True, 'shared_gpu_mode': True, 'timing_valid': False, 'accepted': False,
+               'all_checks_passed': False, 'budget_s': args.budget_seconds, 'launches': {}}
+    try:
+        require_megatron_helpers()
+        check_data_space(args.min_free_disk_gb, root / 'disk_space.jsonl')
+        inputs = toy_inputs(root / 'inputs')
+        apply_environment('correctness')
+        for index, method in enumerate(METHODS):
+            launch = f'{args.suite_id}_{method}_failslow'
+            config = serving_config(node=args.node, launch=launch, mode='emulate', output=root / launch, master=args.master,
+                                    port=args.port_base + index, commit=repository_commit(), remaining=deadline - time.monotonic(),
+                                    min_free_disk_gb=args.min_free_disk_gb, quick=True, shared_gpu=True, run_mode='correctness',
+                                    method=method, scenario='failslow', checkpoint=args.checkpoint, seq_length=args.seq_length,
+                                    profile_file=args.profile_file, reference_root=None, requests=inputs['requests'],
+                                    workload=inputs['workload'], plan=inputs['plan'], b_max=8, capacity_tokens=None,
+                                    failslow=settings(method))
+            print(f'Starting {launch} (fail-slow {LEVEL}, {REQUESTS} toy requests, deadline-cut)', flush=True)
+            outcome = run_case(config)
+            record = {'status': outcome['status'], 'leftover_hogs': hog_pids(), 'output': str(root / launch)}
+            if args.node == NODES[0] and outcome['status'] == 'passed':
+                record['gate'] = gate_checks(root / launch / 'failslow_result.json')
+            record['passed'] = outcome['status'] == 'passed' and not record['leftover_hogs'] and record.get('gate', {}).get('passed', True)
+            summary['launches'][method] = record
+            require(record['passed'], f'{method} launch failed its checks: {record}')
+        summary['all_checks_passed'] = True
+    except BaseException:
+        summary['error'] = traceback.format_exc()
+        (root / 'error.txt').write_text(summary['error'], encoding='utf-8')
+        raise
+    finally:
+        summary['elapsed_s'] = time.monotonic() - started
+        write_json(root / 'summary.json', summary)
+    print(json.dumps({k: summary[k] for k in ('launches', 'all_checks_passed', 'elapsed_s')}, indent=2, default=str), flush=True)
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main())

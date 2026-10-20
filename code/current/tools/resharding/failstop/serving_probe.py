@@ -14,6 +14,7 @@ import time
 from dataclasses import asdict
 from pathlib import Path
 
+import failslow_probe
 from async_state import audit_sequence
 from common import NODES, failed_slots, require, topology, write_json
 from model_shards import model_local_orders
@@ -28,7 +29,7 @@ from tools.resharding.e2e.failstop_adapter import rank_map_from_rows
 from tools.resharding.e2e.methods import describe
 
 PROBE_KEYS = ('method', 'profile_file', 'reference_root', 'deterministic_mode', 'kv_heads', 'memory_margin_bytes', 'memory_limit_bytes',
-              'serving')
+              'serving', 'failslow')
 DOMAINS = {'EDP0': (0, 1), 'EDP1': (2, 3)}
 
 
@@ -47,7 +48,7 @@ def control(config, bus, journal, check):
     workload = requests_io.load_workload(serving['workload'], requests)
     instances = requests_io.expand_instances(workload, requests)
     plan = requests_io.load_plan(serving['plan'], requests_io.sha256_file(serving['requests']))
-    failstop = plan['version'] == 'v2-failstop'
+    failstop, failslow = plan['version'] == 'v2-failstop', config['scenario'] == 'failslow'
     require(failstop == (config['scenario'] == 'failstop'), 'the plan does not match the configured scenario')
     if failstop:
         fail_count, rejoin_seconds, fail_spec, rejoin_spec = anchors(plan, len(instances))
@@ -145,6 +146,10 @@ def control(config, bus, journal, check):
         trigger, reclaim, drained_before_rejoin = fault_cycle(config, bus, journal, service, session, times, validate, wait, wait_until,
                                                               publish, fail_count, rejoin_seconds, victims, members_of(session),
                                                               initial, rows, pauses, len(instances))
+    elif failslow:  # detection is the fault, the end of the injection the rejoin; the deadline closes the service
+        record = failslow_probe.run(config, bus, journal, service, times, publish, wait, wait_until, lambda fire, rejoin: fault_cycle(
+            config, bus, journal, service, session, times, validate, wait, wait_until, publish, None, 0.0, victims, members_of(session),
+            initial, rows, pauses, len(instances), fire=fire, rejoin=rejoin))
     # ---- drain ----------------------------------------------------------------------------------------------------
     wait_until(lambda: all(service.finished.values()), config['launch_timeout_s'], 'every request to complete')
     keys = [(domain, replica) for domain, replicas in DOMAINS.items() for replica in replicas]
@@ -153,15 +158,22 @@ def control(config, bus, journal, check):
     service.stop()
     thread.join(timeout=5)
     require(service.error is None, f'control service failed: {service.error!r}')
-    require(controller.idle() and len(controller.done) == len(instances), 'requests left unfinished')
+    require(failslow or (controller.idle() and len(controller.done) == len(instances)), 'requests left unfinished')
+    if failslow:  # before finish: the workers are still up and their hash/load keys are all posted
+        outputs = failslow_probe.write_outputs(root, config, merge_summaries(summaries, instances, times, admitted_only=True), summaries,
+                                               times, record, [s for s in range(16) if rows[s]['replica'] == 'EDP0'], victims, wait)
     publish('finish')
     wait([f'done/{s}' for s in range(16)])
     wait([f'clean/{n}' for n in NODES], config['reclaim_timeout_s'] + config['stage_timeout_s'])
-    outputs = write_outputs(root, config, instances, workload, summaries, times, trigger, fail_spec, rejoin_spec, reports, maps, initial,
-                            pauses, reclaim, controller, drained_before_rejoin)
+    if not failslow:
+        outputs = write_outputs(root, config, instances, workload, summaries, times, trigger, fail_spec, rejoin_spec, reports, maps,
+                                initial, pauses, reclaim, controller, drained_before_rejoin)
     metrics = {'requests_completed': len(controller.done), 'check_passed': outputs['check']['passed'], 'method': config['method'],
                'scenario': config['scenario'], 'run_mode': config['run_mode'], 'serving_wall_s': times['serving_done'] - times['serving_start'],
                'stats_valid': not drained_before_rejoin}
+    if failslow:
+        metrics.update({k: outputs['result'][k] for k in ('requests_admitted', 'requests_unfinished', 'deadline_overrun_s', 'events_s')},
+                       failslow_check=outputs['check'], failslow_result=str(root / 'failslow_result.json'))
     if failstop:
         metrics.update({'edp1_rejoin_pause_s': max((p['edp1_rejoin_pause_s'] for p in pauses), default=None),
                         'replay_prefill_tokens': outputs['result']['failstop']['replay_prefill_tokens'],
@@ -178,14 +190,17 @@ def members_of(session):
 
 
 def fault_cycle(config, bus, journal, service, session, times, validate, wait, wait_until, publish, fail_count, rejoin_seconds, victims,
-                members_of, initial, rows, pauses, total):
-    """fail anchor -> shrink -> kill/release -> 12-world -> rejoin due -> reclaim/spawn -> expand -> 16-world (both methods)."""
+                members_of, initial, rows, pauses, total, fire=None, rejoin=None):
+    """fail anchor -> shrink -> kill/release -> 12-world -> rejoin due -> reclaim/spawn -> expand -> 16-world (every method).
+    fire() / rejoin() replace the completed_count anchor and the rejoin delay (fail-slow: detection, end of the injection)."""
     mode = config['mode']
     # ---- fault: the completed_count anchor --------------------------------------------------------------------
-    wait_until(lambda: service.completed() >= fail_count, config['launch_timeout_s'], f'{fail_count} completions')
+    if fire is None:
+        wait_until(lambda: service.completed() >= fail_count, config['launch_timeout_s'], f'{fail_count} completions')
     times['fail'] = time.monotonic()
-    trigger = {'completed_count': service.completed(), 'threshold': fail_count, 'overshoot': service.completed() - fail_count,
-               'event_id': f"{config['launch']}/fail", 'kind': 'completed_count'}
+    trigger = fire() if fire is not None else {
+        'completed_count': service.completed(), 'threshold': fail_count, 'overshoot': service.completed() - fail_count,
+        'event_id': f"{config['launch']}/fail", 'kind': 'completed_count'}
     journal.event('anchor_fail', **trigger)
     service.hold.update(DOMAINS)  # the cycle must complete even if the workload drains first (then stats are invalid)
     for domain in DOMAINS:
@@ -214,7 +229,7 @@ def fault_cycle(config, bus, journal, service, session, times, validate, wait, w
     times['shrink_done'] = validate(1)
     session.complete()
     # ---- rejoin: due time, reclaim, spawn, expand -------------------------------------------------------------
-    due = times['fail'] + rejoin_seconds
+    due = times['fail'] + rejoin_seconds if rejoin is None else rejoin()
     wait_until(lambda: time.monotonic() >= due, max(1.0, rejoin_seconds + 5), 'rejoin due')
     times['rejoin_due'], times['rejoin_request'] = due, max(due, times['shrink_done'])
     reclaim = None
@@ -251,30 +266,17 @@ def write_outputs(root, config, instances, workload, summaries, times, trigger, 
                   reclaim, controller, drained_before_rejoin):
     """result.json / check.json (W4) and events_actual.json (06_Step6 §4) from the domain summaries and the gate's times.
 
-    Every time in result.json is in seconds since serving_start on the gate's clock: worker records (run clock,
-    per-node origin) are shifted by their summary's clock calibration before the domains are merged."""
-    clocks = {}
-    for (domain, replica), summary in summaries.items():
-        clock = summary['clock']
-        shift = clock['origin_local'] + clock['offset_to_gate'] - times['serving_start']
-        clocks[f'{domain}/{replica}'] = {**clock, 'shift_to_gate_s': shift, 'gate_origin_monotonic': times['serving_start']}
-        summary['request_log'] = {seq: shifted_log(entry, shift) for seq, entry in summary['request_log'].items()}
-        summary['failstop_events'] = {k: v + shift for k, v in summary['failstop_events'].items()}
-        for switch in summary['switches']:
-            switch['milestones'] = {k: v + shift for k, v in switch['milestones'].items()}
-    logs = results.merge_request_logs(summary['request_log'] for summary in summaries.values())
-    rows = [results.request_row(instance, logs[instance.seq]) for instance in instances]
+    Every time in result.json is in seconds since serving_start on the gate's clock (shift_to_gate)."""
+    merged = merge_summaries(summaries, instances, times)
+    clocks, rows, leaders, switches, gate_s = (merged[k] for k in ('clocks', 'rows', 'leaders', 'switches', 'gate_s'))
     timeline_rows = [r for s in summaries.values() for r in s['timeline']]  # one timeline per dense replica
     phases = {}
     for row in timeline_rows:
         key = row['phase'] if row['kind'] == 'step' else 'switching'
         phases[key] = phases.get(key, 0.0) + (row['step_time'] if row['kind'] == 'step' else row['seconds'])
-    leaders = {domain: summaries[domain, min(replicas)] for domain, replicas in DOMAINS.items()}
-    switches = [dict(s, domain=domain) for domain, summary in leaders.items() for s in summary['switches']]
     edp0 = leaders['EDP0']
     method = describe(config['method'])
     duration = sum(phases.values())
-    gate_s = {k: v - times['serving_start'] for k, v in times.items() if isinstance(v, float)}
     events_s = {**edp0['failstop_events'], **gate_s}
     kv_checks = [c for s in summaries.values() for c in s['kv_checks']]  # every EDP0 rank that received KV
     timing = config['run_mode'] == 'timing'
@@ -342,6 +344,32 @@ def write_outputs(root, config, instances, workload, summaries, times, trigger, 
                        'null_reason': None if reclaim is not None else 'emulate mode has no GPU reclaim or EDP1 abort pause'}})
     write_json(root / 'events_actual.json', events)
     return {'result': result, 'check': report, 'events': events}
+
+
+def merge_summaries(summaries, instances, times, admitted_only=False):
+    """The domain summaries on the gate clock, merged: request rows (only admitted requests for a deadline-cut run),
+    each domain's leader summary, the leaders' switches and the gate times since serving_start."""
+    clocks = shift_to_gate(summaries, times)
+    logs = results.merge_request_logs(summary['request_log'] for summary in summaries.values())
+    leaders = {domain: summaries[domain, min(replicas)] for domain, replicas in DOMAINS.items()}
+    return {'clocks': clocks, 'leaders': leaders,
+            'rows': [results.request_row(i, logs[i.seq]) for i in instances if not admitted_only or i.seq in logs],
+            'switches': [dict(s, domain=domain) for domain, summary in leaders.items() for s in summary['switches']],
+            'gate_s': {k: v - times['serving_start'] for k, v in times.items() if isinstance(v, float)}}
+
+
+def shift_to_gate(summaries, times):
+    """Worker records (run clock, per-node origin) shifted in place by their summary's clock calibration."""
+    clocks = {}
+    for (domain, replica), summary in summaries.items():
+        clock = summary['clock']
+        shift = clock['origin_local'] + clock['offset_to_gate'] - times['serving_start']
+        clocks[f'{domain}/{replica}'] = {**clock, 'shift_to_gate_s': shift, 'gate_origin_monotonic': times['serving_start']}
+        summary['request_log'] = {seq: shifted_log(entry, shift) for seq, entry in summary['request_log'].items()}
+        summary['failstop_events'] = {k: v + shift for k, v in summary['failstop_events'].items()}
+        for switch in summary['switches']:
+            switch['milestones'] = {k: v + shift for k, v in switch['milestones'].items()}
+    return clocks
 
 
 def shifted_log(entry, shift):

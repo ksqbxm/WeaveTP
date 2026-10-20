@@ -7,6 +7,9 @@ launch_result.json); a root is searched for them. Per launch: `metrics_<launch>.
 over all launches: `launch_metrics.csv` (one row per launch) and `summary.csv` (mean / sample std / n per method x
 scenario x mode x gpu_sharing and metric; shared-GPU timing launches, --shared-gpu-ok, are their own groups). A
 launch whose request rows do not reconcile is reported and left out.
+
+Fail-slow: when the paths hold failslow_result.json files (run_failstop_e2e --scenario failslow, SL3060 output), the
+output is `<launch>/timeline.csv` + `<launch>/metrics.json` per launch and `fig1.csv` (e2e/failslow_metrics.py); a launch whose event-order or TP4 hash check failed is rejected.
 """
 
 import argparse
@@ -15,6 +18,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+from tools.resharding.e2e import failslow_metrics as fs  # noqa: E402
 from tools.resharding.e2e import metrics as m  # noqa: E402
 
 
@@ -29,6 +33,27 @@ def launch_directories(paths):
     return found
 
 
+def analyze_failslow(paths, out):
+    launches, rejected = [], []
+    for path in sorted({p for path in map(Path, paths) for p in ([path] if path.is_file() else path.rglob('failslow_result.json'))}):
+        try:
+            metrics, series = fs.analyze(fs.load(path))
+            if not metrics['check_passed']:
+                raise ValueError('the launch failed its event-order or TP4 hash check')
+        except (ValueError, KeyError, TypeError) as error:
+            rejected.append({'file': str(path), 'error': f'{type(error).__name__}: {error}'})
+            continue
+        directory = out / metrics['launch']
+        directory.mkdir(parents=True, exist_ok=True)
+        m.write_series(directory / 'timeline.csv', series)
+        (directory / 'metrics.json').write_text(json.dumps(metrics, indent=1, ensure_ascii=False) + '\n', encoding='utf-8')
+        launches.append(metrics)
+    rows = fs.write_fig1(out, launches)
+    (out / 'rejected.json').write_text(json.dumps(rejected, indent=1) + '\n', encoding='utf-8')
+    print(json.dumps({'failslow_launches': len(launches), 'rejected': rejected, 'fig1_rows': len(rows), 'out': str(out)}, indent=1))
+    return 0 if launches and not rejected else 1
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('paths', nargs='+')
@@ -37,6 +62,8 @@ def main(argv=None):
                         help='tokens/s reference for the shrink TTP (default: the second half of the degraded window)')
     args = parser.parse_args(argv)
     args.out.mkdir(parents=True, exist_ok=True)
+    if any(Path(p).name == 'failslow_result.json' or any(Path(p).rglob('failslow_result.json')) for p in args.paths):
+        return analyze_failslow(args.paths, args.out)
     collected, rejected = [], []
     for directory in launch_directories(args.paths):
         try:

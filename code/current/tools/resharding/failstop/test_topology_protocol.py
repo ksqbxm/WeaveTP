@@ -155,8 +155,12 @@ class Simulation:
             self.wait([f'cuda/0/{s}' for s in slots])
             self.put(f'verified/0/{node}', True)
             victims = common.failed_slots(self.rows)
-            if self.config['scenario'] != 'failstop':
+            if not common.releases_fault_set(self.config):
                 victims = []
+            slow = node == 'SL3061' and (self.config.get('failslow') or {}).get('level')  # fail-slow: co-runner handshake only
+            if slow:
+                self.wait(['slow_start'])
+                self.put('slow_started', {'pids': [1, 2, 3, 4], 'gpus': [], 'per_gpu': 1})
             if node == 'SL3061' and victims:
                 self.wait(['kill'])
                 if self.mode == 'emulate':
@@ -168,6 +172,9 @@ class Simulation:
                     self.put('kill_sent', True)
                     self.put('kill_exited', [{'slot': s, 'pid': 10000 + s, 'exit': {'returncode': -9}} for s in victims])
                     self.put('reclaimed', True)
+            if slow:
+                self.wait(['slow_stop'])
+                self.put('slow_stopped', {'leftover': []})
             if victims:
                 self.wait(['spawn'])
                 if node == 'SL3061' and self.mode == 'real':

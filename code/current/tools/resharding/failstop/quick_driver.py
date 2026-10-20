@@ -93,7 +93,7 @@ def main():
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--node', choices=('SL3060', 'SL3061'), required=True)
-    parser.add_argument('--step', choices=(2, 3, 4, 5, 6), type=int, default=2)
+    parser.add_argument('--step', choices=(2, 3, 4, 5, 6, 9), type=int, default=2)
     parser.add_argument('--min-free-disk-gb', type=float, default=1.0,
                         help='quick correctness threshold for /data; formal acceptance keeps the runner default of 5')
     parser.add_argument('--sha', required=True)
@@ -104,7 +104,7 @@ def main():
                              'inflight = b3 with requests in flight at the expand (600 s budget)')
     parser.add_argument('--mode', choices=('emulate', 'real'), default='emulate', help='Step 6 b3/inflight: fault mode')
     parser.add_argument('--method', choices=('weavetp', 'anchortp'), default='weavetp', help='Step 6 b3/inflight: recovery method')
-    parser.add_argument('--profile-file', help='Step 6 b3/inflight: frozen Step 3 profile.json')
+    parser.add_argument('--profile-file', help='Step 6 b3/inflight and Step 9: frozen Step 3 profile.json')
     parser.add_argument('--reference-root', help='Step 6 b3/inflight: run_model.py output root with tp2/ and tp4/ reference hashes')
     parser.add_argument('--single-node', action='store_true',
                         help='Step 5: both layouts on this node without a peer (six checkpoint loads, 600 s budget); '
@@ -116,9 +116,15 @@ def main():
         parser.error('Step 6 layers a/b1/b2 run on one node: pass --single-node')
     if args.step == 6 and args.layer in TWO_NODE_LAYERS and args.single_node:
         parser.error(f'Step 6 layer {args.layer} is a two-node fail-stop run: start both nodes without --single-node')
+    if args.step == 9 and not args.profile_file:
+        parser.error('Step 9 needs --profile-file')
     # Two nodes split the Step 5 layouts within 300 s; one node runs both layouts and needs twice the budget, and so
     # does the inflight layer's long workload.
     budget = 600 if (args.step == 5 and args.single_node) or (args.step == 6 and args.layer == 'inflight') else 300
+    if args.step == 9:  # three fail-slow launches, each with its timeline + startup + two reloads + margin
+        from run_failslow_quick import budget_seconds
+
+        budget = budget_seconds() + 120
     started, deadline = time.monotonic(), time.monotonic() + budget
     run = args.log_dir
     conn = stream = child = None
@@ -155,13 +161,15 @@ def main():
         status['suite'], status['run'] = suite, str(run)
         (args.log_dir / 'run_path.txt').write_text(str(run) + '\n')
         entry = args.repo / 'code/current/tools/resharding/failstop' / {
-            2: 'run_topology.py', 3: 'run_sources.py', 4: 'run_async.py', 5: 'run_model.py', 6: 'run_serving.py'}[args.step]
+            2: 'run_topology.py', 3: 'run_sources.py', 4: 'run_async.py', 5: 'run_model.py', 6: 'run_serving.py',
+            9: 'run_failslow_quick.py'}[args.step]
         # Step 5 runs layouts under the deterministic contract (split across the two nodes, or both on one
         # node); Step 6 (A part) is the fake backend plus the e2e CPU tests; the fault matrix is Steps 2-4.
         b3 = ['--mode', args.mode, '--method', args.method] + (['--profile-file', args.profile_file] if args.profile_file else []) + \
             (['--reference-root', args.reference_root] if args.reference_root else [])
         extra = {5: ['--layouts', 'tp2,tp4'] if args.single_node else [],
-                 6: ['--layer', args.layer] + (b3 if args.layer in TWO_NODE_LAYERS else [])}.get(
+                 6: ['--layer', args.layer] + (b3 if args.layer in TWO_NODE_LAYERS else []),
+                 9: ['--profile-file', args.profile_file or '']}.get(
             args.step, ['--mode', 'both', '--rounds', '1', '--real-launches', '1'])
         argv = [sys.executable, '-B', str(entry), '--node', args.node, '--suite-id', suite, '--output', str(run), *extra,
                 '--quick', '--correctness-only', '--budget-seconds', str(max(1, deadline - time.monotonic() - 45)),
@@ -177,7 +185,7 @@ def main():
             progress = run / args.node / 'progress.json'
             if args.step == 5:
                 hint = f"inspect {run / args.node / 'error.txt'} and the <layout>/<role>/torchrun.log files"
-            elif args.step == 6:
+            elif args.step in (6, 9):
                 hint = f"inspect {run / args.node / 'error.txt'}, summary.json and pytest.log"
             elif progress.exists():
                 status['failed_cases'] = [r for r in json.loads(progress.read_text()) if r['status'] != 'passed']
@@ -223,6 +231,12 @@ def main():
                 status[args.layer] = {'mode': layer['mode'], 'method': layer['method'], 'metrics': layer['metrics'], 'files': layer['files']}
                 if args.layer == 'inflight' and layer['metrics'] is not None:  # the gate's record (SL3060)
                     status['inflight'].update(inflight_at_expand=layer['inflight_at_expand'], analysis=layer['analysis'])
+        elif args.step == 9:
+            launches = summary['launches']
+            if not (summary['all_checks_passed'] and flags and set(launches) == {'weavetp', 'anchortp', 'restart'} and
+                    all(r['passed'] for r in launches.values())):
+                raise RuntimeError('incomplete Step 9 fail-slow checks')
+            status['step9'] = {m: {k: r[k] for k in ('status', 'leftover_hogs', 'gate') if k in r} for m, r in launches.items()}
         else:
             if not (summary['all_cases_passed'] and flags and summary['emulate'] == summary['real'] == 'passed'):
                 raise RuntimeError('incomplete emulate/real correctness matrix')
@@ -295,6 +309,10 @@ def main():
                   f"({json.dumps(status.get(args.layer), default=str)}) "
                   f"backend=block attention=torch_splitkv shared_gpu_mode=true single_node={str(args.single_node).lower()} "
                   f"accepted=false logs={run}", flush=True)
+        elif args.step == 9:
+            print(f"QUICK CHECK step=9 result={status['result']} (fail-slow W: weavetp/anchortp/restart, deadline cut, event order, "
+                  f"no co-runner left, EDP0 TP4 hashes equal the pre-injection ones; {json.dumps(status.get('step9'), default=str)}) "
+                  f"shared_gpu_mode=true accepted=false logs={run}", flush=True)
         elif args.step == 5:
             print(f"QUICK CHECK step=5 result={status['result']} (memory preflight, deterministic reference/candidate "
                   f"{status.get('layouts')}, step_time_ratio={status.get('deterministic_step_time_ratio')}) "

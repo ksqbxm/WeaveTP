@@ -94,6 +94,24 @@ class ServingWorker(ModelWorker):
         self.audits = config['run_mode'] == 'correctness'
         if not self.audits:
             require_default(self.manifest, 'serving worker')
+        self.tp4_hashes = None  # fail-slow: this rank's TP4 parameter hashes after the initial load
+
+    def validate_weights(self, target, tp):
+        """Fail-slow has no reference hashes on the server: a TP4 target after the expand (or the restart reload) must
+        equal this rank's own TP4 load before the injection, bit for bit; TP2 targets have no baseline."""
+        if self.config['scenario'] != 'failslow':
+            return super().validate_weights(target, tp)
+        if tp != 4:
+            return {'skipped': 'fail-slow: no TP2 baseline'}
+        actual = self.runtime.parameter_hashes(target)
+        if self.tp4_hashes is None:
+            self.tp4_hashes = actual
+            return {'parameters': len(actual), 'reference': 'pre-injection baseline recorded'}
+        differing = sorted(n for n in set(actual) | set(self.tp4_hashes) if actual.get(n) != self.tp4_hashes.get(n))
+        check = {'slot': self.slot, 'parameters': len(actual), 'passed': not differing, 'differing': differing[:3],
+                 'reference': "this rank's TP4 parameters before the injection"}
+        self.bus.put(f'tp4_hash/{self.slot}', check)
+        return check
 
     # ---- world, groups, maps ---------------------------------------------------------------------------------
     def build(self, session, phase):
@@ -549,8 +567,11 @@ class ServingSwitcher:
         w.bus.put(f'cuda/2/{w.slot}', w.journal.event('empty_target_ready', gpu_uuid=w.row['gpu_uuid'], empty_receiver=True))
         w.bus.wait(['cuda_verified/2'])
         w.world_transition(2, ROUND)
-        self.target, self.target_context, self.handoff = w.join_expand()
+        self.target, self.target_context, self.handoff = self.join()
         return {'overlap_steps': 0, 'bytes': {'weights': 0, 'kv_prefix': 0}, 'role': 'victim'}
+
+    def join(self):
+        return self.w.join_expand()
 
     def audit(self, direction):
         if self.role == 'survivor' and self.w.audits:
@@ -643,7 +664,69 @@ class AnchorTPSwitcher(ServingSwitcher):
         super().cutover(direction)
 
 
-SWITCHERS = {'weavetp': ServingSwitcher, 'anchortp': AnchorTPSwitcher}
+class RestartSwitcher(ServingSwitcher):
+    """Fail-slow restart inside the same processes (process start and NCCL init are not counted: optimistic for restart).
+    Both switches stop EDP0 and replay its in-flight requests (shrink: the shared FailstopHooks; expand: requeued at the
+    compaction), then reload the target layout from disk with the collective-free loader: TP2 on the healthy ranks,
+    TP4 on all eight. Nothing migrates; EDP1 only follows the world transitions and keeps serving."""
+
+    zones = {'base': (), 'delta': ()}
+
+    @staticmethod
+    def growth(serving):
+        return {'shrink': 0, 'expand': 0}
+
+    def compact(self, direction):
+        run, hooks = self.run, self.run.hooks
+        if self.role == 'survivor' and direction == 'expand':
+            rows = [row for r in hooks.edp0 for row in run.ledger.replica(r).running.values()]
+            hooks.replayed_tokens += sum(row.generated(run.step) + row.input_len for row in rows)
+            run.control.requeue(rows, run.step)
+            hooks.down.update(hooks.edp0)
+            run.control.set_down(hooks.down)
+        return {'moved_blocks': 0}
+
+    def load(self, tp, direction):
+        target = self.w.runtime.build(tp, self.w.pack['target'], load='local')
+        self.w.bus.put(f'restart_loaded/{direction}/{self.w.slot}', time.monotonic() + self.w.config['clock']['offset'])
+        return target
+
+    def base_wave(self, direction, decode_fn):
+        w = self.w
+        if self.role == 'victim':
+            return self.emulate_victim()
+        w.world_transition(self.phase, ROUND)
+        if self.role == 'survivor' and direction == 'shrink':
+            w.tp2_coord = w.coord
+            self.target = self.load(2, direction)
+        elif self.role == 'survivor':
+            w.binding.close()
+            w.runtime.release(w.model, [], [])
+            w.model = w.binding = self.source = None
+            self.target_context = w.backend.new_context(4)
+            self.target = self.load(4, direction)
+        return {'overlap_steps': 0, 'bytes': {'weights': 0, 'kv_prefix': 0}, 'role': self.role}
+
+    def join(self):
+        target = self.load(4, 'expand')
+        audit = self.w.validate_weights(target, 4) if self.w.audits else {'skipped': 'timing'}
+        self.w.events.append({'event': 'join', 'weights': audit, 'restart': 'reloaded from disk'})
+        return target, self.w.backend.context, self.w.bus.wait([f'handoff/{ROUND}/{self.w.replica_id}'])[0]
+
+    def delta(self, direction):
+        return {'bytes': {'kv_delta': 0}}
+
+    def compare_logits(self, direction, mode):
+        return {'mode': mode, 'passed': True, 'note': 'restart: no KV moved, EDP0 requests replay'}
+
+    def regroup(self, direction):
+        if self.role == 'survivor' and direction == 'expand':
+            self.run.hooks.down.clear()
+            self.run.control.set_down(self.run.hooks.down)
+        super().regroup(direction)
+
+
+SWITCHERS = {'weavetp': ServingSwitcher, 'anchortp': AnchorTPSwitcher, 'ignore': ServingSwitcher, 'restart': RestartSwitcher}
 
 
 def main():

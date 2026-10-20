@@ -23,7 +23,8 @@ SHARED_TIMING_NOTE = "与其他任务共享 GPU 的 timing 运行（--shared-gpu
 FAIL_COORDS = {(0, 0), (0, 1), (1, 0), (1, 1)}  # (ep, etp)
 DEFAULTS = {
     "method": "weavetp",  # recovery method of a serving run: weavetp | anchortp (tools/resharding/e2e/methods.py)
-    "scenario": "failstop",  # failstop (fault + rejoin cycle) | nofault (fixed layout; serving runs only)
+    "scenario": "failstop",  # failstop (fault + rejoin cycle) | nofault (fixed layout) | failslow (serving runs only)
+    "failslow": None,  # fail-slow runs: level, fault GPUs and the timeline (serving_config.failslow_settings)
     "run_mode": "correctness",  # correctness (deterministic, audited) | timing (default mode, no audits; serving runs)
     "shared_gpu_mode": False,
     "mps_owner": None,  # exclusive runs: the one user whose resident nvidia-cuda-mps-server may stay (MPS_OWNER)
@@ -95,6 +96,11 @@ def topology(inventory):
 def host_backing(config):
     """The one shared host-library file a launch creates on this node."""
     return Path("/dev/shm") / f"weavetp_{config['launch']}_{config['node']}"
+
+
+def releases_fault_set(config):
+    """The launch releases the fault set and rejoins it: fail-stop, or a fail-slow method that acts on the detection."""
+    return config['scenario'] == 'failstop' or (config['scenario'] == 'failslow' and config['method'] != 'ignore')
 
 
 def failed_slots(rows):
