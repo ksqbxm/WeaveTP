@@ -190,7 +190,24 @@ def failstop_metrics(launch, degraded_reference=None):
         'latency_all': latency(result),
         'latency_fail_to_recovery': latency(result, (t_fail, full if full is not None else horizon)),
     }
+    if result['method'] == 'restart':
+        downtime = restart_downtime(events['worker_events_s'], fs['restart_loaded_s'], tokens)
+        metrics.update(restart_downtime=downtime, restart_downtime_s=downtime['total_s'])
     return metrics, series
+
+
+def restart_downtime(worker, loaded, events):
+    """restart, per switch: the stop (worker fail / rejoin_start), the reload done (`loaded`), the first EDP0 token after
+    the switch (resume) and the downtime stop -> resume; total_s = both switches (fail-stop and fail-slow alike)."""
+    edp0 = [t for t, replica, _ in events if replica in EDP0]
+    out = {}
+    for direction, stop, done in (('shrink', 'fail', 'shrink_done'), ('expand', 'rejoin_start', 'expand_done')):
+        resume = next((t for t in edp0 if t >= worker[done]), None)
+        out[direction] = {'stop_s': worker[stop], 'loaded_s': loaded[direction], 'resume_s': resume,
+                          'downtime_s': None if resume is None else resume - worker[stop]}
+    parts = [out[d]['downtime_s'] for d in out]
+    out['total_s'] = None if None in parts else sum(parts)
+    return out
 
 
 def nofault_metrics(launch):
@@ -216,7 +233,8 @@ def analyze(launch, degraded_reference=None):
 
 SUMMARY_FIELDS = ('serving_wall_s', 'throughput_tok_s', 'shrink_tfs_s', 'shrink_ttp_s', 'expand_time_s', 'expand_ttp_s', 'full_recovery_s',
                   'edp0_downtime_shrink_s', 'edp0_downtime_expand_s', 'edp1_pause_s', 'rejoin_delay_s', 'replay_prefill_tokens',
-                  'replay_requests', 'ttft_p50_s', 'ttft_p99_s', 'tpot_p50_s', 'tpot_p99_s', 'window_ttft_p99_s', 'window_tpot_p99_s')
+                  'replay_requests', 'ttft_p50_s', 'ttft_p99_s', 'tpot_p50_s', 'tpot_p99_s', 'window_ttft_p99_s', 'window_tpot_p99_s',
+                  'restart_downtime_s')
 
 
 def flatten(metrics):

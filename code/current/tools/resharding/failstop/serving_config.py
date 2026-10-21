@@ -9,7 +9,8 @@ run_mode:
                With shared_gpu (run_failstop_e2e --shared-gpu-ok) the exclusive precheck is replaced by a free-memory
                check, shared_gpu_mode=true, timing_valid stays true and result.json says gpu_sharing='shared'.
 scenario:
-  failstop     fail at completed_count >= ceil(0.25 N), rejoin after the plan's seconds (both methods).
+  failstop     fail at completed_count >= ceil(0.25 N), rejoin after the plan's seconds (weavetp, anchortp; restart in
+               emulate: EDP0 reloads TP2 / TP4 from disk in the same processes).
   nofault      the same request set on the fixed TP4 x 2 layout: the calibration run and the no-fault baseline.
   failslow     co-runners on the fault GPUs for D seconds after a warmup, detection after detect_s, a wall-clock
                deadline D + tail after the injection starts (failslow_probe); emulate mechanics, nothing is killed.
@@ -67,6 +68,12 @@ def failslow_stage_seconds(settings):
     return settings['slow_s'] + settings['tail_s'] + 2 * FAILSLOW_RELOAD_S + FAILSLOW_MARGIN_S
 
 
+def require_method(method, scenario, mode):
+    """weavetp/anchortp run every scenario, restart also the emulate fail-stop cycle, ignore/nofault only fail-slow."""
+    require(scenario == 'failslow' or method in ('weavetp', 'anchortp') or (method, scenario, mode) == ('restart', 'failstop', 'emulate'),
+            f'{method} runs only with --scenario failslow (restart also with --scenario failstop --mode emulate)')
+
+
 def worker_arguments(checkpoint, prompt_tokens, seq_length, run_mode):
     argv = model_arguments('tp4', checkpoint, prompt_tokens, seq_length)
     argv[argv.index('--global-batch-size') + 1] = '4'
@@ -112,7 +119,7 @@ def serving_config(*, node, launch, mode, output, master, port, commit, remainin
     require(method in METHODS, f'method must be one of {sorted(METHODS)}')
     require(scenario in SCENARIOS, f'scenario must be one of {SCENARIOS}')
     require((scenario == 'failslow') == (failslow is not None), 'fail-slow settings go with the failslow scenario only')
-    require(scenario == 'failslow' or method in ('weavetp', 'anchortp'), f'{method} is a fail-slow method')
+    require_method(method, scenario, mode)
     correctness = run_mode == 'correctness'
     require(correctness or not quick, 'timing runs are never quick')
     profile = Path(profile_file)
@@ -129,6 +136,8 @@ def serving_config(*, node, launch, mode, output, master, port, commit, remainin
         require(remaining >= failslow_launch_seconds(failslow), f'a fail-slow launch needs {failslow_launch_seconds(failslow):.0f} s, '
                                                                  f'{remaining:.0f} s of budget left')
         stage = min(max(long, failslow_stage_seconds(failslow)), remaining - 30)
+    elif method == 'restart':  # fail-stop restart: the peers wait through a disk reload (and the rejoin delay)
+        stage = min(max(long, FAILSLOW_RELOAD_S + FAILSLOW_MARGIN_S), remaining - 30)
     return {**{k: v for k, v in DEFAULTS.items() if k != 'repeats'},
             'mode': mode, 'rounds': 1, 'launch': launch, 'probe': SERVING_PROBE, 'kind': mode, 'profile_only': False,
             'node': node, 'output': str(output), 'master': master, 'port': port, 'commit': commit, 'mps_pipe': None,

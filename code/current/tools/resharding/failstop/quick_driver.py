@@ -1,4 +1,8 @@
-"""Five-minute opt-in correctness launcher, fixed commit, peer handshake and restore."""
+"""Five-minute opt-in correctness launcher, fixed commit, peer handshake and restore.
+
+quick_check.sh runs a copy of this file taken from the implementation commit: it imports nothing from the checkout
+until it has checked that commit out itself (Step 9 reads its budget from the checked-out run_failslow_quick).
+"""
 
 import argparse
 import json
@@ -105,7 +109,7 @@ def main():
     parser.add_argument('--mode', choices=('emulate', 'real'), default='emulate', help='Step 6 b3/inflight: fault mode')
     parser.add_argument('--method', choices=('weavetp', 'anchortp'), default='weavetp', help='Step 6 b3/inflight: recovery method')
     parser.add_argument('--profile-file', help='Step 6 b3/inflight and Step 9: frozen Step 3 profile.json')
-    parser.add_argument('--reference-root', help='Step 6 b3/inflight: run_model.py output root with tp2/ and tp4/ reference hashes')
+    parser.add_argument('--reference-root', help='Step 6 b3/inflight and Step 9: run_model.py output root with tp2/ and tp4/ reference hashes')
     parser.add_argument('--single-node', action='store_true',
                         help='Step 5: both layouts on this node without a peer (six checkpoint loads, 600 s budget); '
                              'Step 6: the CPU fake-backend check (always single node, no GPU)')
@@ -116,15 +120,11 @@ def main():
         parser.error('Step 6 layers a/b1/b2 run on one node: pass --single-node')
     if args.step == 6 and args.layer in TWO_NODE_LAYERS and args.single_node:
         parser.error(f'Step 6 layer {args.layer} is a two-node fail-stop run: start both nodes without --single-node')
-    if args.step == 9 and not args.profile_file:
-        parser.error('Step 9 needs --profile-file')
+    if args.step == 9 and not (args.profile_file and args.reference_root):
+        parser.error('Step 9 needs --profile-file and --reference-root')
     # Two nodes split the Step 5 layouts within 300 s; one node runs both layouts and needs twice the budget, and so
     # does the inflight layer's long workload.
     budget = 600 if (args.step == 5 and args.single_node) or (args.step == 6 and args.layer == 'inflight') else 300
-    if args.step == 9:  # three fail-slow launches, each with its timeline + startup + two reloads + margin
-        from run_failslow_quick import budget_seconds
-
-        budget = budget_seconds() + 120
     started, deadline = time.monotonic(), time.monotonic() + budget
     run = args.log_dir
     conn = stream = child = None
@@ -150,6 +150,12 @@ def main():
         git('checkout', '--detach', args.sha)
         if git('rev-parse', 'HEAD') != args.sha:
             raise RuntimeError('checkout identity mismatch')
+        if args.step == 9:  # the fail-slow + fail-stop restart launches: timelines, startups, reloads and margins
+            sys.path.insert(0, str(args.repo / 'code/current/tools/resharding/failstop'))
+            import run_failslow_quick
+
+            budget = run_failslow_quick.budget_seconds() + 120
+            deadline, status['budget_s'] = started + budget, budget
         if args.single_node:
             suite = f's{args.step}q_' + datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S') + '_' + uuid.uuid4().hex[:8] + '_single'
         else:
@@ -169,7 +175,7 @@ def main():
             (['--reference-root', args.reference_root] if args.reference_root else [])
         extra = {5: ['--layouts', 'tp2,tp4'] if args.single_node else [],
                  6: ['--layer', args.layer] + (b3 if args.layer in TWO_NODE_LAYERS else []),
-                 9: ['--profile-file', args.profile_file or '']}.get(
+                 9: ['--profile-file', args.profile_file, '--reference-root', args.reference_root]}.get(
             args.step, ['--mode', 'both', '--rounds', '1', '--real-launches', '1'])
         argv = [sys.executable, '-B', str(entry), '--node', args.node, '--suite-id', suite, '--output', str(run), *extra,
                 '--quick', '--correctness-only', '--budget-seconds', str(max(1, deadline - time.monotonic() - 45)),
@@ -233,7 +239,7 @@ def main():
                     status['inflight'].update(inflight_at_expand=layer['inflight_at_expand'], analysis=layer['analysis'])
         elif args.step == 9:
             launches = summary['launches']
-            if not (summary['all_checks_passed'] and flags and set(launches) == {'weavetp', 'anchortp', 'restart'} and
+            if not (summary['all_checks_passed'] and flags and set(launches) == set(run_failslow_quick.LAUNCHES) and
                     all(r['passed'] for r in launches.values())):
                 raise RuntimeError('incomplete Step 9 fail-slow checks')
             status['step9'] = {m: {k: r[k] for k in ('status', 'leftover_hogs', 'gate') if k in r} for m, r in launches.items()}
@@ -311,7 +317,8 @@ def main():
                   f"accepted=false logs={run}", flush=True)
         elif args.step == 9:
             print(f"QUICK CHECK step=9 result={status['result']} (fail-slow W: weavetp/anchortp/restart, deadline cut, event order, "
-                  f"no co-runner left, EDP0 TP4 hashes equal the pre-injection ones; {json.dumps(status.get('step9'), default=str)}) "
+                  f"no co-runner left, EDP0 TP4 hashes equal the pre-injection ones; fail-stop restart: TP2/TP4 reloads audited "
+                  f"against the reference, nothing migrated; {json.dumps(status.get('step9'), default=str)}) "
                   f"shared_gpu_mode=true accepted=false logs={run}", flush=True)
         elif args.step == 5:
             print(f"QUICK CHECK step=5 result={status['result']} (memory preflight, deterministic reference/candidate "

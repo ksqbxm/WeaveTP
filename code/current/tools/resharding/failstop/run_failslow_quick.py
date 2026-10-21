@@ -1,10 +1,15 @@
-"""Step 9 quick check (quick_check.sh --step 9): three short fail-slow launches, shared GPUs, correctness mode.
+"""Step 9 quick check (quick_check.sh --step 9): three short fail-slow launches and one fail-stop restart launch,
+shared GPUs, correctness mode.
 
 weavetp, anchortp and restart in turn, level W on SL3061 GPUs 0,1,4,5, warmup 20 s, D 30 s, tail 20 s, detection
-after 10 s, a toy request pool the deadline cuts. Per launch: the launch passed and no failslow_hog.py process is left
-on this node; on SL3060 also the event order, requests left unfinished at the deadline (the wall-clock cut), every
-co-runner ready before the injection start, and the TP4 hash check of all eight EDP0 ranks (after the expand, or
-restart's TP4 reload, equal to the same rank's hashes before the injection). Writes `<output>/<node>/summary.json`.
+after 10 s, a toy request pool the deadline cuts; then restart in the emulate fail-stop cycle (toy requests that all
+complete: EDP0 reloads TP2 and then TP4 from disk, both audited against the reference hashes). Per launch: the launch
+passed and no failslow_hog.py process is left on this node; on SL3060 also, for fail-slow, the event order, requests
+left unfinished at the deadline (the wall-clock cut), every co-runner ready before the injection start, and the TP4
+hash check of all eight EDP0 ranks (after the expand, or restart's TP4 reload, equal to the same rank's hashes before
+the injection); for the fail-stop restart, the result self-audit, both reloads timed and nothing migrated. The toy
+inputs sit in `<output>/inputs_<scenario>` (the gate compares both nodes' serving configs, paths included). Writes
+`<output>/<node>/summary.json`.
 """
 
 import argparse
@@ -19,13 +24,24 @@ from common import NODES, require, require_megatron_helpers, write_json
 from failslow_inject import hog_pids
 from run_probe import repository_commit, run_case
 from safety import check_data_space
-from serving_config import apply_environment, failslow_launch_seconds, failslow_settings, serving_config
+from serving_config import (
+    FAILSLOW_MARGIN_S,
+    FAILSLOW_RELOAD_S,
+    FAILSLOW_STARTUP_S,
+    apply_environment,
+    failslow_launch_seconds,
+    failslow_settings,
+    serving_config,
+)
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 from tools.resharding.e2e.requests_io import sha256_file  # noqa: E402
+from tools.resharding.e2e.toy_inputs import write_toy_inputs  # noqa: E402
 
 QUICK = {'warmup_s': 20.0, 'slow_s': 30.0, 'tail_s': 20.0, 'detect_s': 10.0}
 METHODS, LEVEL, FAULT_GPUS, REQUESTS = ('weavetp', 'anchortp', 'restart'), 'W', (0, 1, 4, 5), 2000
+FAILSTOP = {'count': 64, 'output_scale': 8, 'rejoin_seconds': 5.0}  # the fail-stop restart launch: outputs 24-72 tokens
+LAUNCHES = METHODS + ('failstop_restart',)
 
 
 def settings(method):
@@ -33,7 +49,9 @@ def settings(method):
 
 
 def budget_seconds():
-    return sum(failslow_launch_seconds(settings(method)) for method in METHODS) + 120
+    """The fail-slow launches, then the fail-stop restart launch (startup, two reloads, margin), plus 120 s."""
+    failstop = FAILSLOW_STARTUP_S + 2 * FAILSLOW_RELOAD_S + FAILSLOW_MARGIN_S
+    return sum(failslow_launch_seconds(settings(method)) for method in METHODS) + failstop + 120
 
 
 def toy_inputs(directory, count=REQUESTS):
@@ -65,6 +83,19 @@ def gate_checks(path):
     return checks
 
 
+def failstop_gate_checks(output):
+    """SL3060: the gate's result.json / check.json of the fail-stop restart launch."""
+    failstop = json.loads((output / 'result.json').read_text(encoding='utf-8'))['failstop']
+    switches = failstop['edp0_switches']
+    checks = {'check_passed': json.loads((output / 'check.json').read_text(encoding='utf-8'))['passed'],
+              'switches': [s['direction'] for s in switches], 'restart_loaded_s': failstop['restart_loaded_s'],
+              'migrated_bytes': sum(s['weights_bytes'] + s['kv_prefix_bytes'] + s['kv_delta_bytes'] for s in switches),
+              'replay_prefill_tokens': failstop['replay_prefill_tokens']}
+    checks['passed'] = checks['check_passed'] and checks['switches'] == ['shrink', 'expand'] and \
+        set(checks['restart_loaded_s']) == {'shrink', 'expand'} and checks['migrated_bytes'] == 0
+    return checks
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--node', choices=NODES, required=True)
@@ -75,6 +106,7 @@ def main(argv=None):
     parser.add_argument('--budget-seconds', type=float, default=budget_seconds())
     parser.add_argument('--min-free-disk-gb', type=float, default=1)
     parser.add_argument('--profile-file', required=True, help='frozen Step 3 profile.json, same path on both nodes')
+    parser.add_argument('--reference-root', required=True, help='the fail-stop launch: run_model.py tp2/tp4 reference hashes (SL3061)')
     parser.add_argument('--checkpoint', default=os.environ.get('CHECKPOINT', '/data/models/DeepSeek-V2-Lite-megatron-v2'))
     parser.add_argument('--seq-length', type=int, default=512)
     parser.add_argument('--master', default='10.60.14.1')
@@ -91,25 +123,29 @@ def main(argv=None):
     try:
         require_megatron_helpers()
         check_data_space(args.min_free_disk_gb, root / 'disk_space.jsonl')
-        inputs = toy_inputs(root / 'inputs')
+        inputs = {'failslow': toy_inputs(args.output / 'inputs_failslow'),
+                  'failstop': write_toy_inputs(args.output / 'inputs_failstop', failstop=True, **FAILSTOP)}
         apply_environment('correctness')
-        for index, method in enumerate(METHODS):
-            launch = f'{args.suite_id}_{method}_failslow'
+        for index, name in enumerate(LAUNCHES):
+            method, scenario = ('restart', 'failstop') if name == 'failstop_restart' else (name, 'failslow')
+            launch = f'{args.suite_id}_{method}_{scenario}'
+            failslow = scenario == 'failslow'
             config = serving_config(node=args.node, launch=launch, mode='emulate', output=root / launch, master=args.master,
                                     port=args.port_base + index, commit=repository_commit(), remaining=deadline - time.monotonic(),
                                     min_free_disk_gb=args.min_free_disk_gb, quick=True, shared_gpu=True, run_mode='correctness',
-                                    method=method, scenario='failslow', checkpoint=args.checkpoint, seq_length=args.seq_length,
-                                    profile_file=args.profile_file, reference_root=None, requests=inputs['requests'],
-                                    workload=inputs['workload'], plan=inputs['plan'], b_max=8, capacity_tokens=None,
-                                    failslow=settings(method))
-            print(f'Starting {launch} (fail-slow {LEVEL}, {REQUESTS} toy requests, deadline-cut)', flush=True)
+                                    method=method, scenario=scenario, checkpoint=args.checkpoint, seq_length=args.seq_length,
+                                    profile_file=args.profile_file, reference_root=None if failslow else args.reference_root,
+                                    requests=inputs[scenario]['requests'], workload=inputs[scenario]['workload'],
+                                    plan=inputs[scenario]['plan'], b_max=8, capacity_tokens=None, failslow=settings(method) if failslow else None)
+            print(f'Starting {launch} ' + (f'(fail-slow {LEVEL}, {REQUESTS} toy requests, deadline-cut)' if failslow else
+                                           f"(emulate fail-stop, {FAILSTOP['count']} toy requests)"), flush=True)
             outcome = run_case(config)
             record = {'status': outcome['status'], 'leftover_hogs': hog_pids(), 'output': str(root / launch)}
             if args.node == NODES[0] and outcome['status'] == 'passed':
-                record['gate'] = gate_checks(root / launch / 'failslow_result.json')
+                record['gate'] = gate_checks(root / launch / 'failslow_result.json') if failslow else failstop_gate_checks(root / launch)
             record['passed'] = outcome['status'] == 'passed' and not record['leftover_hogs'] and record.get('gate', {}).get('passed', True)
-            summary['launches'][method] = record
-            require(record['passed'], f'{method} launch failed its checks: {record}')
+            summary['launches'][name] = record
+            require(record['passed'], f'{name} launch failed its checks: {record}')
         summary['all_checks_passed'] = True
     except BaseException:
         summary['error'] = traceback.format_exc()

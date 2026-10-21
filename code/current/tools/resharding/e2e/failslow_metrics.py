@@ -5,7 +5,8 @@ length for every method. Throughput = committed output tokens in the window / it
 it to the mean of the nofault launches of the same timeline. TTFT runs from the first admission (every request is
 submitted at t = 0, so the arrival-based TTFT is the queue position); TPOT is metrics.latency's definition.
 slow_rate_measured = median EDP0 decode time in [inject_start, detect) / in the 30 s before the injection.
-restart downtime per switch = first EDP0 token after the switch - the stop (worker fail / rejoin_start).
+restart downtime per switch = first EDP0 token after the switch - the stop (worker fail / rejoin_start), metrics.restart_downtime.
+Launches on shared GPUs (run_failstop_e2e --shared-gpu-ok) are their own fig1 rows and nofault reference.
 """
 
 import json
@@ -17,7 +18,7 @@ from . import metrics as m
 
 BASELINE_S = 30.0
 SEVERITIES, METHODS = ('W', 'M', 'S', '-'), ('ignore', 'restart', 'anchortp', 'weavetp', 'nofault')
-FIG1 = ('severity', 'method', 'n', 'mean', 'std', 'p99_tpot', 'p99_ttft', 'slow_rate_measured_mean', 'restart_downtime_s')
+FIG1 = ('severity', 'method', 'gpu_sharing', 'n', 'mean', 'std', 'p99_tpot', 'p99_ttft', 'slow_rate_measured_mean', 'restart_downtime_s')
 
 
 def load(path):
@@ -52,29 +53,13 @@ def slow_rate(steps, inject_start, detect):
     return statistics.median(during) / statistics.median(before) if during and before else None
 
 
-def restart_downtime(result, events):
-    """Per switch: stop, load done, first EDP0 token after the switch (resume), downtime; None for other methods."""
-    if result['method'] != 'restart':
-        return None
-    worker, loaded = result['worker_events_s'], result['restart_loaded_s'] or {}
-    edp0 = [t for t, replica, _ in events if replica in m.EDP0]
-    out = {}
-    for direction, stop, done in (('shrink', 'fail', 'shrink_done'), ('expand', 'rejoin_start', 'expand_done')):
-        resume = next((t for t in edp0 if t >= worker[done]), None)
-        out[direction] = {'stop_s': worker[stop], 'loaded_s': loaded.get(direction), 'resume_s': resume,
-                          'downtime_s': None if resume is None else resume - worker[stop]}
-    parts = [out[d]['downtime_s'] for d in out]
-    out['total_s'] = None if None in parts else sum(parts)
-    return out
-
-
 def analyze(result):
     """One launch: its metrics and its per-second series (timeline.csv)."""
     start, end = window(result)
     events = m.token_events(result)
     series = m.per_second(events, max([end] + [t for t, _, _ in events]))
-    downtime = restart_downtime(result, events)
-    return {'launch': result['launch'], 'method': result['method'], 'severity': result['level'] or '-',
+    downtime = m.restart_downtime(result['worker_events_s'], result['restart_loaded_s'], events) if result['method'] == 'restart' else None
+    return {'launch': result['launch'], 'method': result['method'], 'severity': result['level'] or '-', 'gpu_sharing': result['gpu_sharing'],
             'settings': result['settings'], 'window_s': [start, end], 'throughput_tok_s': window_throughput(events, start, end),
             **window_latency(result['requests'], start, end),
             'slow_rate_measured': slow_rate(result['edp0_decode_steps'], start, result['events_s']['detect']),
@@ -89,22 +74,23 @@ def mean(values):
 
 
 def fig1(launches):
-    """One row per (severity, method): throughput normalised to the mean nofault throughput of the same timeline."""
-    timeline = lambda x: tuple(sorted(x['settings'].items()))  # noqa: E731
+    """One row per (severity, method, gpu_sharing): throughput normalised to the mean nofault throughput of the same
+    timeline and GPU sharing."""
+    baseline = lambda x: (tuple(sorted(x['settings'].items())), x['gpu_sharing'])  # noqa: E731
     reference = {}
     for x in launches:
         if x['method'] == 'nofault' and x['throughput_tok_s'] is not None:
-            reference.setdefault(timeline(x), []).append(x['throughput_tok_s'])
+            reference.setdefault(baseline(x), []).append(x['throughput_tok_s'])
     groups = {}
     for x in launches:
-        base = mean(reference.get(timeline(x), []))
+        base = mean(reference.get(baseline(x), []))
         x['normalized'] = None if not base or x['throughput_tok_s'] is None else x['throughput_tok_s'] / base
-        groups.setdefault((x['severity'], x['method']), []).append(x)
+        groups.setdefault((x['severity'], x['method'], x['gpu_sharing']), []).append(x)
     rows = []
     for key in sorted(groups, key=lambda k: (SEVERITIES.index(k[0]) if k[0] in SEVERITIES else 9,
-                                             METHODS.index(k[1]) if k[1] in METHODS else 9)):
+                                             METHODS.index(k[1]) if k[1] in METHODS else 9, k[2])):
         group, values = groups[key], [x['normalized'] for x in groups[key] if x['normalized'] is not None]
-        rows.append({'severity': key[0], 'method': key[1], 'n': len(values), 'mean': mean(values),
+        rows.append({'severity': key[0], 'method': key[1], 'gpu_sharing': key[2], 'n': len(values), 'mean': mean(values),
                      'std': statistics.stdev(values) if len(values) > 1 else None,
                      'p99_tpot': mean(x['tpot_s']['p99'] for x in group), 'p99_ttft': mean(x['ttft_s']['p99'] for x in group),
                      'slow_rate_measured_mean': mean(x['slow_rate_measured'] for x in group),

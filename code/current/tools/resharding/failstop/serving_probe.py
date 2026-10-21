@@ -77,8 +77,7 @@ def control(config, bus, journal, check):
     preflight = wait([f'preflight/{n}' for n in NODES])
     for node, report in zip(NODES, preflight):
         require(report['host'].split('.')[0].upper() == node, 'wrong physical host')
-        for key in ('commit', 'launch', 'mode', 'rounds', 'port', 'shared_gpu_mode', 'quick_mode', 'correctness_only', 'probe') + PROBE_KEYS:
-            require(report['config'][key] == config[key], f'node config mismatch: {key}')
+        require_same_config(config, report['config'])
     rows = topology(dict(zip(NODES, [r['gpus'] for r in preflight])))
     victims = failed_slots(rows)
     publish('topology', rows)
@@ -159,15 +158,17 @@ def control(config, bus, journal, check):
     thread.join(timeout=5)
     require(service.error is None, f'control service failed: {service.error!r}')
     require(failslow or (controller.idle() and len(controller.done) == len(instances)), 'requests left unfinished')
-    if failslow:  # before finish: the workers are still up and their hash/load keys are all posted
+    edp0_slots = [s for s in range(16) if rows[s]['replica'] == 'EDP0']
+    loaded = restart_loaded(wait, edp0_slots, victims, times['serving_start']) if config['method'] == 'restart' else None
+    if failslow:  # before finish: the workers are still up and their hash keys are all posted
         outputs = failslow_probe.write_outputs(root, config, merge_summaries(summaries, instances, times, admitted_only=True), summaries,
-                                               times, record, [s for s in range(16) if rows[s]['replica'] == 'EDP0'], victims, wait)
+                                               times, record, edp0_slots, loaded, wait)
     publish('finish')
     wait([f'done/{s}' for s in range(16)])
     wait([f'clean/{n}' for n in NODES], config['reclaim_timeout_s'] + config['stage_timeout_s'])
     if not failslow:
         outputs = write_outputs(root, config, instances, workload, summaries, times, trigger, fail_spec, rejoin_spec, reports, maps,
-                                initial, pauses, reclaim, controller, drained_before_rejoin)
+                                initial, pauses, reclaim, controller, drained_before_rejoin, loaded)
     metrics = {'requests_completed': len(controller.done), 'check_passed': outputs['check']['passed'], 'method': config['method'],
                'scenario': config['scenario'], 'run_mode': config['run_mode'], 'serving_wall_s': times['serving_done'] - times['serving_start'],
                'stats_valid': not drained_before_rejoin}
@@ -183,6 +184,20 @@ def control(config, bus, journal, check):
     return {'status': 'passed', 'mode': mode, 'rounds': 1, 'epochs': reports, 'rank_maps': maps, 'shared_gpu_mode': config['shared_gpu_mode'],
             'quick_mode': config['quick_mode'], 'commit': config['commit'], 'metrics': metrics, 'rejoin_pauses': pauses,
             'events_actual': str(root / 'events_actual.json')}
+
+
+def require_same_config(config, peer):
+    """The gate refuses a node whose launch configuration differs from its own in a key both nodes must share."""
+    for key in ('commit', 'launch', 'mode', 'rounds', 'port', 'shared_gpu_mode', 'quick_mode', 'correctness_only', 'probe') + PROBE_KEYS:
+        require(peer[key] == config[key], f'node config mismatch: {key}')
+
+
+def restart_loaded(wait, edp0_slots, victims, origin):
+    """restart: when each reload finished (the slowest rank, seconds since serving_start): shrink = TP2 on the survivors,
+    expand = TP4 on all eight EDP0 ranks."""
+    survivors = [s for s in edp0_slots if s not in victims]
+    return {direction: max(wait([f'restart_loaded/{direction}/{s}' for s in slots])) - origin
+            for direction, slots in (('shrink', survivors), ('expand', edp0_slots))}
 
 
 def members_of(session):
@@ -263,8 +278,9 @@ def fault_cycle(config, bus, journal, service, session, times, validate, wait, w
 
 
 def write_outputs(root, config, instances, workload, summaries, times, trigger, fail_spec, rejoin_spec, reports, maps, initial, pauses,
-                  reclaim, controller, drained_before_rejoin):
-    """result.json / check.json (W4) and events_actual.json (06_Step6 §4) from the domain summaries and the gate's times.
+                  reclaim, controller, drained_before_rejoin, loaded):
+    """result.json / check.json (W4) and events_actual.json (06_Step6 §4) from the domain summaries and the gate's times;
+    `loaded` = restart's reload times (restart_loaded), None for the migrating methods.
 
     Every time in result.json is in seconds since serving_start on the gate's clock (shift_to_gate)."""
     merged = merge_summaries(summaries, instances, times)
@@ -283,8 +299,10 @@ def write_outputs(root, config, instances, workload, summaries, times, trigger, 
     failstop = None if fail_spec is None else {
                 'events_s': events_s, 'replay_prefill_tokens': edp0['replayed_tokens'],
                 'peak_eviction': [e for s in switches for e in s['evictions']],
-                'expand_kv_check_passed': None if timing else bool(kv_checks) and all(c['passed'] for c in kv_checks),
-                'kv_check_note': 'skipped: timing run' if timing else "head mapping of the survivors' saved TP2 snapshots",
+                'expand_kv_check_passed': None if timing or loaded else bool(kv_checks) and all(c['passed'] for c in kv_checks),
+                'kv_check_note': 'skipped: timing run' if timing else 'restart: no KV moves, EDP0 requests replay' if loaded else
+                                 "head mapping of the survivors' saved TP2 snapshots",
+                'restart_loaded_s': loaded,
                 'tfs_breakdown': {'fault_to_transition_s': times['transition/0/1'] - times['fail'],
                                   'world_rebuild_s': times['build/0/1'] - times['transition/0/1'],
                                   'weights_and_cutover_s': times['shrink_done'] - times['build/0/1'],

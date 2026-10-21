@@ -1,6 +1,9 @@
-"""Fail-slow units: the gate timeline's event order, the combination/budget checks of the entry, the control service's
-wall-clock close and the co-runner reaping by script name + tag (Linux only)."""
+"""Fail-slow units: the gate timeline's event order, the combination/budget checks of the entry, the Step 9 configs of
+both nodes, the control service's wall-clock close and the co-runner reaping by script name + tag (Linux only)."""
 
+import contextlib
+import io
+import json
 import os
 import subprocess
 import sys
@@ -11,13 +14,17 @@ from pathlib import Path
 from unittest.mock import patch
 
 import failslow_inject
+import run_failslow_quick
 import run_failstop_e2e
 import serving_config as sc
+import serving_probe
+from common import NODES
 from failslow_probe import Timeline
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 from tools.resharding.e2e import controller as ctl  # noqa: E402
 from tools.resharding.e2e import remote_control  # noqa: E402
+from tools.resharding.e2e.toy_inputs import write_toy_inputs  # noqa: E402
 
 TIMELINE = {'warmup_s': 120.0, 'slow_s': 600.0, 'tail_s': 120.0, 'detect_s': 10.0}
 SWITCHING = ['serving_start', 'slow_start', 'inject_start', 'detect', 'slow_stop', 'inject_end', 'recovered', 'shrink_done',
@@ -92,14 +99,14 @@ class BudgetTests(unittest.TestCase):
     ARGS = ['--node', 'SL3060', '--suite-id', 'fs', '--output', '/data/x', '--requests', 'r', '--workload', 'w', '--plan', 'p',
             '--profile-file', 'f', '--scenario', 'failslow', '--slow-level', 'M']
 
-    def config(self, remaining, failslow=None, **overrides):
+    def config(self, remaining, **overrides):
         with tempfile.TemporaryDirectory() as directory, patch.object(sc, 'pidfd_implementations', return_value={}):  # Linux-only probe
             profile = Path(directory) / 'profile.json'
             profile.write_text('{}')
             kwargs = dict(node='SL3061', launch='l', mode='emulate', output='/data/x', master='m', port=1, commit='c', remaining=remaining,
                           min_free_disk_gb=1, quick=False, shared_gpu=False, run_mode='timing', method='weavetp', scenario='failslow',
                           checkpoint='ck', seq_length=2048, profile_file=profile, reference_root=None, requests='r', workload='w',
-                          plan='p', b_max=8, capacity_tokens=None, failslow=failslow or settings())
+                          plan='p', b_max=8, capacity_tokens=None, failslow=settings())
             return sc.serving_config(**{**kwargs, **overrides})
 
     def test_formal_launch_budget_and_timeouts_cover_d_600(self):
@@ -118,8 +125,31 @@ class BudgetTests(unittest.TestCase):
     def test_fail_slow_methods_and_settings_stay_in_their_scenario(self):
         with self.assertRaises(RuntimeError):
             self.config(4000, scenario='failstop')
-        with self.assertRaises(RuntimeError):
-            self.config(4000, scenario='failstop', failslow=None, method='restart')
+        for method, mode in (('ignore', 'emulate'), ('restart', 'real')):
+            with self.assertRaisesRegex(RuntimeError, 'runs only with --scenario failslow'):
+                self.config(4000, scenario='failstop', failslow=None, method=method, mode=mode)
+
+    def test_restart_runs_the_emulate_failstop_cycle_with_a_reload_allowance(self):
+        config = self.config(4000, scenario='failstop', failslow=None, method='restart', node='SL3060', run_mode='correctness',
+                             quick=True, shared_gpu=True)
+        self.assertEqual((config['method'], config['failslow'], config['stage_timeout_s']),
+                         ('restart', None, sc.FAILSLOW_RELOAD_S + sc.FAILSLOW_MARGIN_S))  # the quick 240 s would cut a reload
+        args = run_failstop_e2e.parse(self.ARGS[:-4] + ['--method', 'restart'])
+        self.assertEqual((args.scenario, args.failslow, args.budget_seconds), ('failstop', None, 3600))
+        with self.assertRaisesRegex(RuntimeError, 'runs only with --scenario failslow'):
+            run_failstop_e2e.parse(self.ARGS[:-4] + ['--method', 'restart', '--mode', 'real'])
+
+    def test_shared_gpu_fail_slow_launches_are_marked(self):
+        with tempfile.TemporaryDirectory() as directory:
+            inputs = write_toy_inputs(Path(directory), count=8)
+            argv = ['--node', 'SL3060', '--suite-id', 'fs', '--output', '/data/x', '--requests', str(inputs['requests']),
+                    '--workload', str(inputs['workload']), '--plan', str(inputs['plan']), '--profile-file', str(inputs['plan']),
+                    '--scenario', 'failslow', '--slow-level', 'W', '--dry-run']
+            for extra, sharing in (([], 'exclusive'), (['--shared-gpu-ok'], 'shared')):
+                out = io.StringIO()
+                with contextlib.redirect_stdout(out):
+                    self.assertEqual(run_failstop_e2e.main(argv + extra), 0)
+                self.assertEqual(json.loads(out.getvalue())['gpu_sharing'], sharing)
 
     def test_entry_defaults_the_budget_and_refuses_a_short_one(self):
         args = run_failstop_e2e.parse(self.ARGS + ['--launches', '3', '--method', 'restart'])
@@ -131,6 +161,45 @@ class BudgetTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             run_failstop_e2e.parse(self.ARGS[:-4] + ['--method', 'ignore'])  # ignore without --scenario failslow
         self.assertEqual(run_failstop_e2e.parse(self.ARGS[:-4]).budget_seconds, 3600)
+
+
+class QuickStep9Tests(unittest.TestCase):
+    def configs(self, root, node):
+        """run_failslow_quick on one node with run_case replaced: the serving config of every launch."""
+        captured = {}
+
+        def run_case(config):
+            captured[config['launch']] = config
+            return {'status': 'passed'}
+        argv = ['--node', node, '--suite-id', 's9q', '--output', str(root / 'run'), '--quick', '--correctness-only',
+                '--profile-file', str(root / 'profile.json'), '--reference-root', str(root / 'ref')]
+        with patch.multiple(run_failslow_quick, run_case=run_case, hog_pids=lambda: [], require_megatron_helpers=lambda: None,
+                            repository_commit=lambda: 'c' * 40, check_data_space=lambda *_: None,
+                            gate_checks=lambda path: {'passed': True}, failstop_gate_checks=lambda path: {'passed': True}), \
+                patch.object(sc, 'pidfd_implementations', return_value={}), patch.dict(os.environ), \
+                contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(run_failslow_quick.main(argv), 0)
+        return captured
+
+    def test_both_nodes_build_configs_the_gate_accepts(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'profile.json').write_text('{}')
+            for tp in (2, 4):
+                (root / 'ref' / f'tp{tp}' / 'reference').mkdir(parents=True)
+                for rank in range(2 * tp):
+                    (root / 'ref' / f'tp{tp}' / 'reference' / f'parameters_rank_{rank}.json').write_text('{}')
+            configs = {node: self.configs(root, node) for node in NODES}  # each node builds its own, as on the servers
+            self.assertEqual(sorted(configs['SL3060']), sorted([f's9q_{m}_failslow' for m in run_failslow_quick.METHODS] + ['s9q_restart_failstop']))
+            for launch, config in configs['SL3060'].items():
+                serving_probe.require_same_config(config, configs['SL3061'][launch])
+            failstop = configs['SL3060']['s9q_restart_failstop']
+            self.assertEqual((Path(failstop['serving']['requests']).parent, failstop['method'], failstop['scenario']),
+                             (root / 'run' / 'inputs_failstop', 'restart', 'failstop'))
+            peer = configs['SL3061']['s9q_weavetp_failslow']
+            per_node = {**peer, 'serving': {**peer['serving'], 'requests': str(root / 'run' / 'SL3061' / 'inputs' / 'requests.jsonl')}}
+            with self.assertRaisesRegex(RuntimeError, 'node config mismatch: serving'):  # inputs under the node directory
+                serving_probe.require_same_config(configs['SL3060']['s9q_weavetp_failslow'], per_node)
 
 
 class CloseTests(unittest.TestCase):

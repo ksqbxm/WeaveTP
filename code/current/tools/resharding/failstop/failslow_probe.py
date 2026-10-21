@@ -107,20 +107,16 @@ def run(config, bus, journal, service, times, publish, wait, wait_until, fault_c
     return record
 
 
-def write_outputs(root, config, merged, summaries, times, record, edp0_slots, victims, wait):
+def write_outputs(root, config, merged, summaries, times, record, edp0_slots, loaded, wait):
     """failslow_result.json from the fail-stop merge (serving_probe.merge_summaries: admitted request rows, leaders,
-    switches, gate times) plus the timeline, the injection records, the TP4 hash checks and the EDP0 decode steps."""
+    switches, gate times) plus the timeline, the injection records, the TP4 hash checks, the EDP0 decode steps and
+    restart's reload times (serving_probe.restart_loaded; None for the other methods)."""
     settings, origin = config['failslow'], times['serving_start']
     timeline = record['timeline']
     timeline.mark('serving_done', times['serving_done'])
     correctness, switches = config['run_mode'] == 'correctness', releases_fault_set(config)
     hashes = dict(zip(edp0_slots, wait([f'tp4_hash/{s}' for s in edp0_slots]))) if correctness and switches else {}
-    loaded = {}
-    if config['method'] == 'restart':
-        survivors = [s for s in edp0_slots if s not in victims]
-        for direction, slots in (('shrink', survivors), ('expand', edp0_slots)):
-            loaded[direction] = max(wait([f'restart_loaded/{direction}/{s}' for s in slots])) - origin
-    rows = [dict(row, generated_tokens=len(row['t_tokens'])) for row in merged['rows']]  # a request may be cut at the deadline
+    rows =[dict(row, generated_tokens=len(row['t_tokens'])) for row in merged['rows']]  # a request may be cut at the deadline
     steps = sorted([row['t'] + merged['clocks'][f'EDP0/{replica}']['shift_to_gate_s'], row['t_decode']]
                    for (domain, replica), summary in summaries.items() if domain == 'EDP0'
                    for row in summary['timeline'] if row['kind'] == 'step' and row['t_decode'] > 0)
@@ -134,12 +130,13 @@ def write_outputs(root, config, merged, summaries, times, record, edp0_slots, vi
         'worker_method': config['method'], 'level': settings['level'], 'fault_gpus': settings['fault_gpus'],
         'settings': {k: settings[k] for k in ('warmup_s', 'slow_s', 'tail_s', 'detect_s')},
         'config': {k: config[k] for k in ('run_mode', 'mode', 'shared_gpu_mode', 'timing_valid', 'launch_timeout_s', 'stage_timeout_s')},
+        'gpu_sharing': 'shared' if config['shared_gpu_mode'] else 'exclusive',
         'b_max': config['serving']['b_max'], 'time_base': 'seconds since serving_start on the SL3060 gate clock',
         'sha256': {'requests': requests_io.sha256_file(config['serving']['requests'])},
         'events_s': {k: v - origin for k, v in timeline.times.items()},
         'gate_s': merged['gate_s'],
         'deadline_overrun_s': times['deadline'] - (times['inject_start'] + settings['slow_s'] + settings['tail_s']),
-        'worker_events_s': leader['failstop_events'], 'restart_loaded_s': loaded or None,
+        'worker_events_s': leader['failstop_events'], 'restart_loaded_s': loaded,
         'injection': {'started': record['started'], 'stopped': record['stopped']},
         'switches': [{k: s[k] for k in ('domain', 'direction', 'overlap_steps', 'bytes', 'milestones', 'audit')} for s in merged['switches']],
         'tp4_hash': {str(s): h for s, h in hashes.items()}, 'replayed_tokens': leader['replayed_tokens'],

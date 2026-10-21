@@ -1,7 +1,8 @@
 """Formal fail-stop serving runs on DeepSeek-V2-Lite, two nodes (EDP0 = SL3061, EDP1 = SL3060).
 
 One invocation runs `--launches N` independent launches of one cell of the matrix:
-  --method weavetp|anchortp   the recovery method (serving_worker.SWITCHERS / model_worker.PLANNERS)
+  --method weavetp|anchortp   the recovery method (serving_worker.SWITCHERS / model_worker.PLANNERS); restart (--mode
+                              emulate): EDP0 reloads TP2, then TP4, from disk in the same processes
   --scenario failstop|nofault the fault cycle of the plan, or the fixed TP4 x 2 baseline (calibration, no-fault reference)
   --mode emulate|real         fault mode (real: kill -9 and world rebuild)
   --run-mode timing|correctness
@@ -41,6 +42,7 @@ from serving_config import (
     failslow_settings,
     require_exclusive_gpus,
     require_gpu_memory,
+    require_method,
     serving_config,
 )
 
@@ -59,7 +61,8 @@ def parse(argv=None):
     parser.add_argument('--suite-id', required=True, help='typed identically on both nodes')
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--method', choices=sorted({*METHODS, 'nofault'}), default='weavetp',
-                        help='ignore/restart/nofault: --scenario failslow only (nofault = no injection, the baseline)')
+                        help='ignore/nofault: --scenario failslow only (nofault = no injection, the baseline); restart: failslow '
+                             'or emulate failstop')
     parser.add_argument('--scenario', choices=SCENARIOS, default='failstop')
     parser.add_argument('--mode', choices=('emulate', 'real'), default='emulate')
     parser.add_argument('--run-mode', choices=RUN_MODES, default='timing')
@@ -104,7 +107,7 @@ def parse(argv=None):
         require(args.budget_seconds >= need, f'--budget-seconds {args.budget_seconds:.0f} is short of {need:.0f} s '
                                              f'for {args.launches} fail-slow launches')
     else:
-        require(args.method in ('weavetp', 'anchortp'), f'--method {args.method} needs --scenario failslow')
+        require_method(args.method, args.scenario, args.mode)
         args.budget_seconds = 3600 if args.budget_seconds is None else args.budget_seconds
     require(math.isfinite(args.budget_seconds) and args.budget_seconds > 0 and
             1024 <= args.port_base <= 65536 - args.launches, 'invalid budget/port')

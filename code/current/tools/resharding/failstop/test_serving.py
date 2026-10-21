@@ -86,11 +86,11 @@ class ServingQuickRunner(unittest.TestCase):
         return seen['config'], json.loads((root / 'run' / node / 'summary.json').read_text(encoding='utf-8'))
 
     def test_two_node_layers_give_both_nodes_the_same_serving_config(self):
-        # The gate refuses a launch whose nodes disagree on PROBE_KEYS; the toy input paths are part of 'serving'.
+        # The gate refuses a launch whose nodes disagree on a shared key; the toy input paths are part of 'serving'.
         for layer in run_serving.TWO_NODE_LAYERS:
             with self.subTest(layer=layer), tempfile.TemporaryDirectory() as temporary:
                 configs = {node: self.two_node_layer(temporary, node, layer, gate=self.gate)[0] for node in NODES}
-                self.assertEqual(*({key: configs[node][key] for key in serving_probe.PROBE_KEYS} for node in NODES))
+                serving_probe.require_same_config(configs['SL3060'], configs['SL3061'])
                 requests = Path(configs['SL3060']['serving']['requests'])
                 self.assertEqual(requests.parent.name, f'inputs_{layer}')
                 lengths = [json.loads(line)['output_len'] for line in requests.read_text().splitlines()]

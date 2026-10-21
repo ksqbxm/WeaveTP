@@ -18,12 +18,12 @@ def row(seq, replica, admit, tokens, done=True):
             'admits': [{'t': admit, 'step': 0, 'replica': replica, 'layout': 4, 'generated_at_admit': 0}], 't_tokens': tokens}
 
 
-def result(method='weavetp', level='W', rate=1.0, launch='l', restart=False):
+def result(method='weavetp', level='W', rate=1.0, launch='l', restart=False, gpu_sharing='exclusive'):
     """inject_start = 10 s, window [10, 40); EDP0 (replica 0) and EDP1 (replica 2) each commit `rate` tokens/s per request."""
     tokens = [0.25 + i / rate for i in range(int(40 * rate))]
     requests = [row(1, 0, 0.0, tokens, done=False), row(2, 2, 0.0, list(tokens), done=False)]
     worker = {'fail': 12.0, 'shrink_done': 15.0, 'rejoin_start': 30.5, 'expand_done': 33.0}
-    return {'launch': launch, 'method': method, 'level': level, 'settings': SETTINGS, 'requests': requests,
+    return {'launch': launch, 'method': method, 'level': level, 'settings': SETTINGS, 'requests': requests, 'gpu_sharing': gpu_sharing,
             'events_s': {'inject_start': 10.0, 'detect': 12.0, 'deadline': 40.0}, 'worker_events_s': worker,
             'restart_loaded_s': {'shrink': 14.0, 'expand': 32.0} if restart else None, 'requests_unfinished': 2,
             'deadline_overrun_s': 0.0, 'check': {'passed': True},
@@ -66,6 +66,7 @@ class Fig1Tests(unittest.TestCase):
     def test_normalised_to_the_nofault_mean_of_the_same_timeline(self):
         rows = {(r['severity'], r['method']): r for r in fs.fig1(self.launches())}
         self.assertEqual(list(rows), [('W', 'weavetp'), ('S', 'restart'), ('-', 'nofault')])
+        self.assertEqual({r['gpu_sharing'] for r in fs.fig1(self.launches())}, {'exclusive'})
         self.assertAlmostEqual(rows['-', 'nofault']['mean'], 1.0)
         self.assertEqual(rows['W', 'weavetp']['n'], 2)
         self.assertAlmostEqual(rows['W', 'weavetp']['mean'], (0.5 + 1.0) / 2)
@@ -73,6 +74,14 @@ class Fig1Tests(unittest.TestCase):
         self.assertIsNone(rows['S', 'restart']['std'])
         self.assertIsNotNone(rows['S', 'restart']['restart_downtime_s'])
         self.assertIsNone(rows['W', 'weavetp']['restart_downtime_s'])
+
+    def test_shared_gpu_launches_have_their_own_rows_and_nofault_reference(self):
+        shared = [fs.analyze(result('nofault', None, 2.0, 'n3', gpu_sharing='shared'))[0],
+                  fs.analyze(result('weavetp', 'W', 1.0, 'w3', gpu_sharing='shared'))[0]]
+        rows = {(r['severity'], r['method'], r['gpu_sharing']): r for r in fs.fig1(self.launches() + shared)}
+        self.assertAlmostEqual(rows['W', 'weavetp', 'exclusive']['mean'], (0.5 + 1.0) / 2)  # unchanged by the shared launches
+        self.assertAlmostEqual(rows['W', 'weavetp', 'shared']['mean'], 0.5)  # against the shared nofault launch only
+        self.assertEqual((rows['W', 'weavetp', 'shared']['n'], rows['-', 'nofault', 'shared']['n']), (1, 1))
 
     def test_no_nofault_launch_leaves_the_mean_empty(self):
         rows = fs.fig1([fs.analyze(result('weavetp'))[0]])

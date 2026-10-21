@@ -42,7 +42,7 @@ class FailslowProtocolTests(unittest.TestCase):
         events, settings = result['events_s'], result['settings']
         self.assertGreaterEqual(events['detect'] - events['inject_start'], settings['detect_s'] - 1e-6)
         self.assertGreaterEqual(events['deadline'] - events['inject_start'], settings['slow_s'] + settings['tail_s'] - 1e-6)
-        self.assertEqual(result['method'], method)
+        self.assertEqual((result['method'], result['gpu_sharing']), (method, 'shared'))  # the simulation runs shared_gpu_mode
         metrics, series = failslow_metrics.analyze(result)
         self.assertGreater(metrics['throughput_tok_s'], 0)
         self.assertEqual(sum(series['global']), sum(len(r['t_tokens']) for r in result['requests']))

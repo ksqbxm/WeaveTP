@@ -289,6 +289,40 @@ class ServingProtocolTests(unittest.TestCase):
                 self.assertEqual(analyze_failstop_e2e.main([str(root), '--out', str(root / 'analysis')]), 0)
                 self.assertEqual(json.loads((root / 'analysis' / 'rejected.json').read_text()), [])
 
+    def test_restart_cycle_reloads_tp2_then_tp4_from_disk(self):
+        """restart in the emulate fail-stop cycle: the survivors reload TP2 and all eight EDP0 ranks TP4 in the same processes
+        (both audited against the reference hashes), nothing migrates, EDP0's requests replay; the gate times both reloads
+        and the analyzer splits restart's downtime per switch as for fail-slow."""
+        with self.simulate('emulate', {'method': 'restart'}, toy={'count': 40, 'rejoin_seconds': 1.0}) as (result, result_json, events, root):
+            metrics, failstop = result['metrics'], result_json['failstop']
+            self.assertEqual((metrics['requests_completed'], metrics['check_passed'], metrics['kv_check_passed']), (40, True, None))
+            self.assertEqual(failstop['kv_check_note'], 'restart: no KV moves, EDP0 requests replay')
+            self.assertEqual([(s['direction'], s['weights_bytes'], s['kv_prefix_bytes'], s['kv_delta_bytes']) for s in failstop['edp0_switches']],
+                             [('shrink', 0, 0, 0), ('expand', 0, 0, 0)])
+            self.assertEqual(list(root.glob('source_plan_*.json')), [])
+            self.assertGreater(failstop['replay_prefill_tokens'], 0)
+            loaded, worker = failstop['restart_loaded_s'], events['worker_events_s']
+            self.assertTrue(worker['fail'] < loaded['shrink'] <= worker['shrink_done'] < worker['rejoin_start'] < loaded['expand'] <= worker['expand_done'])
+            checks = [json.loads(p.read_text()) for p in root.glob('serving_checks_*.json')]
+            audits = [e['weights'] for c in checks if c['replica'] == 'EDP0' for e in c['events'] if e['event'] == 'join']
+            self.assertEqual(len(audits), 4)  # the victims' TP4 reloads, checked against the reference load
+            self.assertEqual(analyze_failstop_e2e.main([str(root), '--out', str(root / 'analysis')]), 0)
+            downtime = json.loads(next((root / 'analysis').glob('metrics_*.json')).read_text())['restart_downtime']
+            self.assertTrue(downtime['total_s'] > 0 and downtime['shrink']['loaded_s'] == loaded['shrink'])
+
+    def test_restart_reload_that_differs_from_the_reference_fails(self):
+        build = FakeRuntime.build
+
+        def corrupt(runtime, tp, groups, *, load):
+            model = build(runtime, tp, groups, load=load)
+            if load == 'local' and tp == 2:
+                next(model.parameters()).data.add_(1)
+            return model
+        with patch.object(FakeRuntime, 'build', corrupt), self.assertRaises(BaseException) as caught:
+            with self.simulate('emulate', {'method': 'restart'}):
+                pass
+        self.assertIn('differ bitwise from the reference load', str(caught.exception))
+
 
 if __name__ == '__main__':
     unittest.main()

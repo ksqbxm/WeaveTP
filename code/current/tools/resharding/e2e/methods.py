@@ -30,7 +30,8 @@ METHODS = {
                               'EDP1 keeps serving between the waves',
                               'replay only EDP0 in-flight requests'],
     },
-    # Fail-slow only (run_failstop_e2e --scenario failslow): the slow GPUs stay in service, or EDP0 restarts from disk.
+    # ignore: fail-slow only, the slow GPUs stay in service; restart: fail-slow and emulate fail-stop, EDP0 restarts from
+    # disk (run_failstop_e2e --scenario failslow|failstop).
     'ignore': {
         'name': 'ignore',
         'source_policy': 'none: EDP0 keeps serving TP4 on the slow GPUs',

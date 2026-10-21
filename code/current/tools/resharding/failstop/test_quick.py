@@ -12,6 +12,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 import quick_driver
+import run_failslow_quick
 import run_topology
 
 
@@ -39,7 +40,9 @@ class QuickTests(unittest.TestCase):
                                                            {'direction': 'expand', 'overlap_steps': 0 if method == 'anchortp' else 2, 'kv_delta_bytes': 0}]},
                              'files': {'result.json': '/data/x/result.json'}}}
             layers['inflight'] = {**layers['b3'], 'inflight_at_expand': 3, 'analysis': {'exit_code': 0, 'rejected': []}}
-            summary = ({**flags, 'all_checks_passed': True, 'layouts_requested': layouts,
+            launches = {name: {'passed': failure != 'metric', 'status': 'passed', 'leftover_hogs': []} for name in run_failslow_quick.LAUNCHES}
+            summary = {**flags, 'all_checks_passed': failure != 'metric', 'launches': launches} if step == 9 else \
+                      ({**flags, 'all_checks_passed': True, 'layouts_requested': layouts,
                         'deterministic_step_time_ratio': {} if failure == 'metric' else {l: {'median_ratio': 1.25} for l in layouts}}
                        if step == 5 else
                        {**flags, 'all_checks_passed': failure != 'metric', 'layer': layer, 'backend': 'fake' if layer == 'a' else 'block',
@@ -86,6 +89,7 @@ class QuickTests(unittest.TestCase):
                                                               '--repo', str(root), '--log-dir', str(logs), '--step', str(step)] +
                                                  (['--layer', layer] if step == 6 else []) +
                                                  (['--method', method] if step == 6 and layer in quick_driver.TWO_NODE_LAYERS else []) +
+                                                 (['--profile-file', 'p', '--reference-root', 'r'] if step == 9 else []) +
                                                  ([] if min_free is None else ['--min-free-disk-gb', str(min_free)]) +
                                                  (['--single-node'] if single_node else [])))
                 stack.enter_context(patch.object(subprocess, 'check_output', side_effect=git))
@@ -105,13 +109,14 @@ class QuickTests(unittest.TestCase):
                 self.assertIn(['checkout', '--detach', quick_driver.BASE], calls)
                 argv = popen.call_args.args[0]
                 self.assertEqual(float(argv[argv.index('--min-free-disk-gb') + 1]), 1.0 if min_free is None else min_free)
-                self.assertEqual(('--mode' in argv, argv[2].endswith({6: 'run_serving.py', 5: 'run_model.py', 4: 'run_async.py',
+                self.assertEqual(('--mode' in argv, argv[2].endswith({9: 'run_failslow_quick.py', 6: 'run_serving.py', 5: 'run_model.py', 4: 'run_async.py',
                                                                       3: 'run_sources.py', 2: 'run_topology.py'}[step])),
                                  (step < 5 or (step == 6 and layer in quick_driver.TWO_NODE_LAYERS), True))
                 self.assertEqual('--layer' in argv and argv[argv.index('--layer') + 1] == layer, step == 6)
                 self.assertEqual('--method' in argv and argv[argv.index('--method') + 1] == method,
                                  step == 6 and layer in quick_driver.TWO_NODE_LAYERS)
                 self.assertEqual('--layouts' in argv and argv[argv.index('--layouts') + 1] == 'tp2,tp4', single_node and step == 5)
+                self.assertEqual('--reference-root' in argv and argv[argv.index('--reference-root') + 1] == 'r', step == 9)
                 self.assertEqual((logs / 'runner.log').read_bytes(), child_output)
             else:
                 self.assertFalse(any(c[0] == 'checkout' for c in calls))
@@ -252,6 +257,16 @@ class QuickTests(unittest.TestCase):
         self.assertEqual(self.run_driver(step=6, layer='b3')['budget_s'], 300)
         with self.assertRaises(SystemExit):
             self.run_driver(step=6, layer='inflight', single_node=True)
+
+    def test_step9_reads_its_budget_and_launches_from_the_checked_out_implementation(self):
+        with patch.object(sys, 'path', list(sys.path)):  # the driver adds the checkout's failstop directory
+            result = self.run_driver(step=9)
+            failed = self.run_driver(step=9, failure='metric')
+        self.assertEqual((result['result'], result['budget_s']), ('PASS', run_failslow_quick.budget_seconds() + 120))
+        self.assertEqual(set(result['step9']), {'weavetp', 'anchortp', 'restart', 'failstop_restart'})
+        self.assertIn('QUICK CHECK step=9 result=PASS', result['output'])
+        self.assertIn('fail-stop restart', result['output'])
+        self.assertEqual(failed['result'], 'FAIL')
 
 
 if __name__ == '__main__':

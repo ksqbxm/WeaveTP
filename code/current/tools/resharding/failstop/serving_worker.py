@@ -665,7 +665,8 @@ class AnchorTPSwitcher(ServingSwitcher):
 
 
 class RestartSwitcher(ServingSwitcher):
-    """Fail-slow restart inside the same processes (process start and NCCL init are not counted: optimistic for restart).
+    """Restart inside the same processes, fail-slow and emulate fail-stop (process start and NCCL init are not counted:
+    optimistic for restart).
     Both switches stop EDP0 and replay its in-flight requests (shrink: the shared FailstopHooks; expand: requeued at the
     compaction), then reload the target layout from disk with the collective-free loader: TP2 on the healthy ranks,
     TP4 on all eight. Nothing migrates; EDP1 only follows the world transitions and keeps serving."""
