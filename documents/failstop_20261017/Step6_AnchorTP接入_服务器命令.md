@@ -1,5 +1,7 @@
 # AnchorTP 接入与正式 fail-stop 运行：服务器命令（按顺序）
 
+> 2026-10-21：实现 `560361c` 有扩容在途请求崩溃与结果文件覆盖两处缺陷（[08 §9](08_AnchorTP最小接入.md)）。先按 [Step6_inflight快验_服务器命令.md](Step6_inflight快验_服务器命令.md) 导入 `failstop_inflight_568c319.bundle`；本文件 ②–⑦ 的命令里 `8f8856d…` 换成清单 `568c319c088181723a23fd1d554f0beea87a02f0`、`560361c…` 换成实现 `c4df30a8a2bc2b9435cffde17cb2463be7eea113`，其余不变（③ 读的 `result.json` 的 `serving_wall_s` 现在就是控制门的值）。
+
 交付：实现 `16b1617af90eb4ada0bd32d715dcc45ccd5ca91b` + 启动脚本目录修正 `f2a85e9074e11c98605f72ce25f53c29e2f5fa7b` + 独占预检 MPS_OWNER 例外 `560361c60c6c1ad503b9afda14cd984e011dbd2a`，快验清单 `8f8856d4dbe8f61313180d14b7aa94c8347bb4f6`（`releases.json["step6"]`），bundle `anchortp_8f8856d.bundle`（1368708 字节，SHA256 `1ba26ce896e8c70ac00b96cba4259bd3cee11c061f7dadf80a60929ebd0a12e3`，基线 `f7d555998b45756998465924d733fd70e553d6b4`，含 Step 1–6 全部提交与本次的日志修正、实现、两处修正、钉定等提交）。设计与字段见 [08_AnchorTP最小接入.md](08_AnchorTP最小接入.md)。此前 Step 6 清单 `8a1e576` 的 b3 命令作废；B1/B2 层命令不变（改用本清单 SHA 即可）。
 
 全部步骤：① 导入 → ② 生成请求集 → ③ 标定（无故障试跑，定条数） → ④ b3 快验（两种方法） → ⑤ 正式矩阵 → ⑥ 分析 → ⑦ 打包回传、切回 `f7d5559`。CPU 侧 248 项测试通过；服务器 GPU 全部未运行，以下命令未在服务器执行过。
