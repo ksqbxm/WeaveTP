@@ -1,6 +1,8 @@
 ........................................................................ [ 24%]
 .........................s................................. [ 44%]
-................................................ [ 60%]
-..................................................... [ 78%]
-...............................................................     [100%]
-294 passed, 1 skipped, 61 subtests passed in 163.07s (0:02:43)
+................................................ [ 61%]
+..................................................... [ 79%]
+.............................................................       [100%]
+SUBFAILED(mode='emulate') tools/resharding/failstop/test_serving_protocol.py::ServingProtocolTests::test_expand_with_requests_in_flight
+1 failed, 292 passed, 1 skipped, 60 subtests passed in 209.86s (0:03:29)
+# the failing subtest: the machine ran on battery (about 2.7x slower); the same test failed on unchanged codex/failstop@42f19d3 at that time

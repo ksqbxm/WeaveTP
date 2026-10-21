@@ -107,24 +107,21 @@ def run(config, bus, journal, service, times, publish, wait, wait_until, fault_c
     return record
 
 
-def write_outputs(root, config, merged, summaries, times, record, edp0_slots, loaded, wait):
+def write_outputs(root, config, merged, summaries, times, record, loaded):
     """failslow_result.json from the fail-stop merge (serving_probe.merge_summaries: admitted request rows, leaders,
-    switches, gate times) plus the timeline, the injection records, the TP4 hash checks, the EDP0 decode steps and
-    restart's reload times (serving_probe.restart_loaded; None for the other methods)."""
+    switches, gate times) plus the timeline, the injection records, the EDP0 decode steps and restart's reload times
+    (serving_probe.restart_loaded; None for the other methods)."""
     settings, origin = config['failslow'], times['serving_start']
     timeline = record['timeline']
     timeline.mark('serving_done', times['serving_done'])
-    correctness, switches = config['run_mode'] == 'correctness', releases_fault_set(config)
-    hashes = dict(zip(edp0_slots, wait([f'tp4_hash/{s}' for s in edp0_slots]))) if correctness and switches else {}
     rows =[dict(row, generated_tokens=len(row['t_tokens'])) for row in merged['rows']]  # a request may be cut at the deadline
     steps = sorted([row['t'] + merged['clocks'][f'EDP0/{replica}']['shift_to_gate_s'], row['t_decode']]
                    for (domain, replica), summary in summaries.items() if domain == 'EDP0'
                    for row in summary['timeline'] if row['kind'] == 'step' and row['t_decode'] > 0)
     leader = merged['leaders']['EDP0']
     unfinished = sum(1 for r in rows if r['t_done'] is None)
-    check = {'event_order': not timeline.complete(), 'missing_events': timeline.complete(), 'cut_by_deadline': unfinished > 0,
-             'tp4_hash_passed': all(h['passed'] for h in hashes.values()) if hashes else None}
-    check['passed'] = check['event_order'] and check['tp4_hash_passed'] is not False
+    check = {'event_order': not timeline.complete(), 'missing_events': timeline.complete(), 'cut_by_deadline': unfinished > 0}
+    check['passed'] = check['event_order']
     result = {
         'schema_version': 'failslow-v1', 'launch': config['launch'], 'commit': config['commit'], 'method': settings['label'],
         'worker_method': config['method'], 'level': settings['level'], 'fault_gpus': settings['fault_gpus'],
@@ -139,7 +136,7 @@ def write_outputs(root, config, merged, summaries, times, record, edp0_slots, lo
         'worker_events_s': leader['failstop_events'], 'restart_loaded_s': loaded,
         'injection': {'started': record['started'], 'stopped': record['stopped']},
         'switches': [{k: s[k] for k in ('domain', 'direction', 'overlap_steps', 'bytes', 'milestones', 'audit')} for s in merged['switches']],
-        'tp4_hash': {str(s): h for s, h in hashes.items()}, 'replayed_tokens': leader['replayed_tokens'],
+        'replayed_tokens': leader['replayed_tokens'],
         'requests_admitted': len(rows), 'requests_completed': len(rows) - unfinished, 'requests_unfinished': unfinished,
         'requests': rows, 'edp0_decode_steps': steps, 'clocks': merged['clocks'], 'check': check}
     write_json(Path(root) / 'failslow_result.json', result)

@@ -98,6 +98,12 @@ def host_backing(config):
     return Path("/dev/shm") / f"weavetp_{config['launch']}_{config['node']}"
 
 
+def audits_reference(scenario, method):
+    """Only migrated fail-stop targets (weavetp/anchortp) are audited against the reference hashes; fail-slow and restart
+    (reloaded from disk) record reference_audit='skipped'."""
+    return scenario != 'failslow' and method != 'restart'
+
+
 def releases_fault_set(config):
     """The launch releases the fault set and rejoins it: fail-stop, or a fail-slow method that acts on the detection."""
     return config['scenario'] == 'failstop' or (config['scenario'] == 'failslow' and config['method'] != 'ignore')

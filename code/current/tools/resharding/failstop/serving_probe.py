@@ -16,7 +16,7 @@ from pathlib import Path
 
 import failslow_probe
 from async_state import audit_sequence
-from common import NODES, failed_slots, require, topology, write_json
+from common import NODES, audits_reference, failed_slots, require, topology, write_json
 from model_shards import model_local_orders
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
@@ -160,9 +160,9 @@ def control(config, bus, journal, check):
     require(failslow or (controller.idle() and len(controller.done) == len(instances)), 'requests left unfinished')
     edp0_slots = [s for s in range(16) if rows[s]['replica'] == 'EDP0']
     loaded = restart_loaded(wait, edp0_slots, victims, times['serving_start']) if config['method'] == 'restart' else None
-    if failslow:  # before finish: the workers are still up and their hash keys are all posted
+    if failslow:
         outputs = failslow_probe.write_outputs(root, config, merge_summaries(summaries, instances, times, admitted_only=True), summaries,
-                                               times, record, edp0_slots, loaded, wait)
+                                               times, record, loaded)
     publish('finish')
     wait([f'done/{s}' for s in range(16)])
     wait([f'clean/{n}' for n in NODES], config['reclaim_timeout_s'] + config['stage_timeout_s'])
@@ -303,6 +303,7 @@ def write_outputs(root, config, instances, workload, summaries, times, trigger, 
                 'kv_check_note': 'skipped: timing run' if timing else 'restart: no KV moves, EDP0 requests replay' if loaded else
                                  "head mapping of the survivors' saved TP2 snapshots",
                 'restart_loaded_s': loaded,
+                'reference_audit': 'passed' if not timing and audits_reference(config['scenario'], config['method']) else 'skipped',
                 'tfs_breakdown': {'fault_to_transition_s': times['transition/0/1'] - times['fail'],
                                   'world_rebuild_s': times['build/0/1'] - times['transition/0/1'],
                                   'weights_and_cutover_s': times['shrink_done'] - times['build/0/1'],

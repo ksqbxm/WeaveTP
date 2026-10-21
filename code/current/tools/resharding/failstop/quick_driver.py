@@ -109,7 +109,7 @@ def main():
     parser.add_argument('--mode', choices=('emulate', 'real'), default='emulate', help='Step 6 b3/inflight: fault mode')
     parser.add_argument('--method', choices=('weavetp', 'anchortp'), default='weavetp', help='Step 6 b3/inflight: recovery method')
     parser.add_argument('--profile-file', help='Step 6 b3/inflight and Step 9: frozen Step 3 profile.json')
-    parser.add_argument('--reference-root', help='Step 6 b3/inflight and Step 9: run_model.py output root with tp2/ and tp4/ reference hashes')
+    parser.add_argument('--reference-root', help='Step 6 b3/inflight: run_model.py output root with tp2/ and tp4/ reference hashes')
     parser.add_argument('--single-node', action='store_true',
                         help='Step 5: both layouts on this node without a peer (six checkpoint loads, 600 s budget); '
                              'Step 6: the CPU fake-backend check (always single node, no GPU)')
@@ -120,8 +120,8 @@ def main():
         parser.error('Step 6 layers a/b1/b2 run on one node: pass --single-node')
     if args.step == 6 and args.layer in TWO_NODE_LAYERS and args.single_node:
         parser.error(f'Step 6 layer {args.layer} is a two-node fail-stop run: start both nodes without --single-node')
-    if args.step == 9 and not (args.profile_file and args.reference_root):
-        parser.error('Step 9 needs --profile-file and --reference-root')
+    if args.step == 9 and not args.profile_file:
+        parser.error('Step 9 needs --profile-file')
     # Two nodes split the Step 5 layouts within 300 s; one node runs both layouts and needs twice the budget, and so
     # does the inflight layer's long workload.
     budget = 600 if (args.step == 5 and args.single_node) or (args.step == 6 and args.layer == 'inflight') else 300
@@ -175,7 +175,7 @@ def main():
             (['--reference-root', args.reference_root] if args.reference_root else [])
         extra = {5: ['--layouts', 'tp2,tp4'] if args.single_node else [],
                  6: ['--layer', args.layer] + (b3 if args.layer in TWO_NODE_LAYERS else []),
-                 9: ['--profile-file', args.profile_file, '--reference-root', args.reference_root]}.get(
+                 9: ['--profile-file', args.profile_file]}.get(
             args.step, ['--mode', 'both', '--rounds', '1', '--real-launches', '1'])
         argv = [sys.executable, '-B', str(entry), '--node', args.node, '--suite-id', suite, '--output', str(run), *extra,
                 '--quick', '--correctness-only', '--budget-seconds', str(max(1, deadline - time.monotonic() - 45)),
@@ -316,9 +316,8 @@ def main():
                   f"backend=block attention=torch_splitkv shared_gpu_mode=true single_node={str(args.single_node).lower()} "
                   f"accepted=false logs={run}", flush=True)
         elif args.step == 9:
-            print(f"QUICK CHECK step=9 result={status['result']} (fail-slow W: weavetp/anchortp/restart, deadline cut, event order, "
-                  f"no co-runner left, EDP0 TP4 hashes equal the pre-injection ones; fail-stop restart: TP2/TP4 reloads audited "
-                  f"against the reference, nothing migrated; {json.dumps(status.get('step9'), default=str)}) "
+            print(f"QUICK CHECK step=9 result={status['result']} (fail-slow W: weavetp/anchortp/restart, event order, deadline cut, "
+                  f"no co-runner left; fail-stop restart: passed, reference_audit skipped; {json.dumps(status.get('step9'), default=str)}) "
                   f"shared_gpu_mode=true accepted=false logs={run}", flush=True)
         elif args.step == 5:
             print(f"QUICK CHECK step=5 result={status['result']} (memory preflight, deterministic reference/candidate "

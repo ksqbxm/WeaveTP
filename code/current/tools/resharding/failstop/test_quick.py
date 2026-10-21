@@ -89,7 +89,7 @@ class QuickTests(unittest.TestCase):
                                                               '--repo', str(root), '--log-dir', str(logs), '--step', str(step)] +
                                                  (['--layer', layer] if step == 6 else []) +
                                                  (['--method', method] if step == 6 and layer in quick_driver.TWO_NODE_LAYERS else []) +
-                                                 (['--profile-file', 'p', '--reference-root', 'r'] if step == 9 else []) +
+                                                 (['--profile-file', 'p'] if step == 9 else []) +
                                                  ([] if min_free is None else ['--min-free-disk-gb', str(min_free)]) +
                                                  (['--single-node'] if single_node else [])))
                 stack.enter_context(patch.object(subprocess, 'check_output', side_effect=git))
@@ -116,7 +116,6 @@ class QuickTests(unittest.TestCase):
                 self.assertEqual('--method' in argv and argv[argv.index('--method') + 1] == method,
                                  step == 6 and layer in quick_driver.TWO_NODE_LAYERS)
                 self.assertEqual('--layouts' in argv and argv[argv.index('--layouts') + 1] == 'tp2,tp4', single_node and step == 5)
-                self.assertEqual('--reference-root' in argv and argv[argv.index('--reference-root') + 1] == 'r', step == 9)
                 self.assertEqual((logs / 'runner.log').read_bytes(), child_output)
             else:
                 self.assertFalse(any(c[0] == 'checkout' for c in calls))

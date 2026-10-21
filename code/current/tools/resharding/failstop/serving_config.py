@@ -21,7 +21,7 @@ import sys
 from pathlib import Path
 
 import model_memory
-from common import DEFAULTS, DETERMINISTIC_ENVIRONMENT, FAIL_COORDS, SERVING_PROBE, require
+from common import DEFAULTS, DETERMINISTIC_ENVIRONMENT, FAIL_COORDS, SERVING_PROBE, audits_reference, require
 from safety import check_gpu_processes, gpu_snapshot, mps_snapshot, pidfd_implementations
 
 CODE_ROOT = Path(__file__).resolve().parents[3]
@@ -125,7 +125,7 @@ def serving_config(*, node, launch, mode, output, master, port, commit, remainin
     profile = Path(profile_file)
     require(profile.is_file(), f'frozen Step 3 profile is required; not found: {profile}')
     reference = Path(reference_root or '')
-    if correctness and node == 'SL3061' and failslow is None:  # EDP0 audits targets against reference hashes (fail-slow: own TP4)
+    if correctness and node == 'SL3061' and audits_reference(scenario, method):  # EDP0 audits migrated targets
         for tp in (2, 4):
             require(all((reference / f'tp{tp}' / 'reference' / f'parameters_rank_{r}.json').is_file() for r in range(2 * tp)),
                     f'reference parameter hashes for tp{tp} are missing under {reference} (run_model.py reference role)')

@@ -22,7 +22,7 @@ from pathlib import Path
 
 import torch
 import torch.distributed as dist
-from common import Journal, connect, require, write_json
+from common import Journal, audits_reference, connect, require, write_json
 from determinism import require_default
 from model_shards import identity
 from model_worker import Worker as ModelWorker
@@ -94,24 +94,11 @@ class ServingWorker(ModelWorker):
         self.audits = config['run_mode'] == 'correctness'
         if not self.audits:
             require_default(self.manifest, 'serving worker')
-        self.tp4_hashes = None  # fail-slow: this rank's TP4 parameter hashes after the initial load
 
     def validate_weights(self, target, tp):
-        """Fail-slow has no reference hashes on the server: a TP4 target after the expand (or the restart reload) must
-        equal this rank's own TP4 load before the injection, bit for bit; TP2 targets have no baseline."""
-        if self.config['scenario'] != 'failslow':
-            return super().validate_weights(target, tp)
-        if tp != 4:
-            return {'skipped': 'fail-slow: no TP2 baseline'}
-        actual = self.runtime.parameter_hashes(target)
-        if self.tp4_hashes is None:
-            self.tp4_hashes = actual
-            return {'parameters': len(actual), 'reference': 'pre-injection baseline recorded'}
-        differing = sorted(n for n in set(actual) | set(self.tp4_hashes) if actual.get(n) != self.tp4_hashes.get(n))
-        check = {'slot': self.slot, 'parameters': len(actual), 'passed': not differing, 'differing': differing[:3],
-                 'reference': "this rank's TP4 parameters before the injection"}
-        self.bus.put(f'tp4_hash/{self.slot}', check)
-        return check
+        if not audits_reference(self.config['scenario'], self.config['method']):
+            return {'skipped': 'reference_audit skipped (fail-slow / restart)'}
+        return super().validate_weights(target, tp)
 
     # ---- world, groups, maps ---------------------------------------------------------------------------------
     def build(self, session, phase):

@@ -24,7 +24,7 @@ usage: quick_check.sh --manifest SHA --step N --node SL3060|SL3061 [--single-nod
   --mode              Step 6 b3/inflight fault mode (default emulate)
   --method            Step 6 b3/inflight recovery method under test (default weavetp; anchortp = fixed-path paused migration)
   --profile-file      Step 6 b3/inflight and Step 9: frozen Step 3 profile.json, same path on both nodes
-  --reference-root    Step 6 b3/inflight and Step 9: run_model.py output root with tp2/ and tp4/ reference hashes (read on SL3061)
+  --reference-root    Step 6 b3/inflight: run_model.py output root with tp2/ and tp4/ reference hashes (read on SL3061)
   --min-free-disk-gb  /data free-space threshold for the quick run (default 1)
 USAGE
 }
@@ -75,7 +75,7 @@ if [[ -n "$SINGLE_NODE" && "$STEP" != 5 && "$STEP" != 6 ]]; then fail "--single-
 if [[ "$STEP" == 6 && -z "$TWO_NODE" && -z "$SINGLE_NODE" ]]; then fail "Step 6 layer ${LAYER} runs on one node: pass --single-node"; fi
 if [[ "$STEP" == 6 && -n "$TWO_NODE" && -n "$SINGLE_NODE" ]]; then fail "Step 6 layer ${LAYER} is a two-node run: start both nodes without --single-node"; fi
 if [[ "$STEP" == 6 && -n "$TWO_NODE" && ( -z "$PROFILE_FILE" || -z "$REFERENCE_ROOT" ) ]]; then fail "Step 6 layer ${LAYER} needs --profile-file and --reference-root"; fi
-if [[ "$STEP" == 9 && ( -z "$PROFILE_FILE" || -z "$REFERENCE_ROOT" ) ]]; then fail "Step 9 needs --profile-file and --reference-root"; fi
+if [[ "$STEP" == 9 && -z "$PROFILE_FILE" ]]; then fail "Step 9 needs --profile-file"; fi
 
 cd /data
 mountpoint -q /data || fail "/data is not a mount point"

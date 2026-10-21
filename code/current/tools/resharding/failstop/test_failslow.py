@@ -130,8 +130,8 @@ class BudgetTests(unittest.TestCase):
                 self.config(4000, scenario='failstop', failslow=None, method=method, mode=mode)
 
     def test_restart_runs_the_emulate_failstop_cycle_with_a_reload_allowance(self):
-        config = self.config(4000, scenario='failstop', failslow=None, method='restart', node='SL3060', run_mode='correctness',
-                             quick=True, shared_gpu=True)
+        config = self.config(4000, scenario='failstop', failslow=None, method='restart', run_mode='correctness', quick=True,
+                             shared_gpu=True)  # SL3061 with no reference hashes: restart is never audited against them
         self.assertEqual((config['method'], config['failslow'], config['stage_timeout_s']),
                          ('restart', None, sc.FAILSLOW_RELOAD_S + sc.FAILSLOW_MARGIN_S))  # the quick 240 s would cut a reload
         args = run_failstop_e2e.parse(self.ARGS[:-4] + ['--method', 'restart'])
@@ -172,10 +172,10 @@ class QuickStep9Tests(unittest.TestCase):
             captured[config['launch']] = config
             return {'status': 'passed'}
         argv = ['--node', node, '--suite-id', 's9q', '--output', str(root / 'run'), '--quick', '--correctness-only',
-                '--profile-file', str(root / 'profile.json'), '--reference-root', str(root / 'ref')]
+                '--profile-file', str(root / 'profile.json')]
         with patch.multiple(run_failslow_quick, run_case=run_case, hog_pids=lambda: [], require_megatron_helpers=lambda: None,
                             repository_commit=lambda: 'c' * 40, check_data_space=lambda *_: None,
-                            gate_checks=lambda path: {'passed': True}, failstop_gate_checks=lambda path: {'passed': True}), \
+                            gate_checks=lambda path: {'passed': True}), \
                 patch.object(sc, 'pidfd_implementations', return_value={}), patch.dict(os.environ), \
                 contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(run_failslow_quick.main(argv), 0)
@@ -184,11 +184,7 @@ class QuickStep9Tests(unittest.TestCase):
     def test_both_nodes_build_configs_the_gate_accepts(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            (root / 'profile.json').write_text('{}')
-            for tp in (2, 4):
-                (root / 'ref' / f'tp{tp}' / 'reference').mkdir(parents=True)
-                for rank in range(2 * tp):
-                    (root / 'ref' / f'tp{tp}' / 'reference' / f'parameters_rank_{rank}.json').write_text('{}')
+            (root / 'profile.json').write_text('{}')  # no reference hashes: SL3061 builds the fail-stop restart launch without them
             configs = {node: self.configs(root, node) for node in NODES}  # each node builds its own, as on the servers
             self.assertEqual(sorted(configs['SL3060']), sorted([f's9q_{m}_failslow' for m in run_failslow_quick.METHODS] + ['s9q_restart_failstop']))
             for launch, config in configs['SL3060'].items():

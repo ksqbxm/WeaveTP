@@ -9,7 +9,7 @@ scenario x mode x gpu_sharing and metric; shared-GPU timing launches, --shared-g
 launch whose request rows do not reconcile is reported and left out.
 
 Fail-slow: when the paths hold failslow_result.json files (run_failstop_e2e --scenario failslow, SL3060 output), the
-output is `<launch>/timeline.csv` + `<launch>/metrics.json` per launch and `fig1.csv` (e2e/failslow_metrics.py); a launch whose event-order or TP4 hash check failed is rejected.
+output is `<launch>/timeline.csv` + `<launch>/metrics.json` per launch and `fig1.csv` (e2e/failslow_metrics.py); a launch whose event-order check failed is rejected.
 """
 
 import argparse
@@ -39,7 +39,7 @@ def analyze_failslow(paths, out):
         try:
             metrics, series = fs.analyze(fs.load(path))
             if not metrics['check_passed']:
-                raise ValueError('the launch failed its event-order or TP4 hash check')
+                raise ValueError('the launch failed its event-order check')
         except (ValueError, KeyError, TypeError) as error:
             rejected.append({'file': str(path), 'error': f'{type(error).__name__}: {error}'})
             continue
