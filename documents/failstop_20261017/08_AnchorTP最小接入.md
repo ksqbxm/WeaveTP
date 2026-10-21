@@ -85,7 +85,7 @@ python -B -X utf8 -m pytest -q -o addopts='' --noconftest -p no:cacheprovider te
 - 第 0 步日志修正：`0d4b17acbb2784036dade9db9e84b9478579e782`。
 - 实现（A）：`16b1617af90eb4ada0bd32d715dcc45ccd5ca91b` + 启动脚本目录修正 `f2a85e9074e11c98605f72ce25f53c29e2f5fa7b`+ 独占预检 MPS_OWNER 例外 `560361c60c6c1ad503b9afda14cd984e011dbd2a`（`releases.json["step6"]` 指向最后者；此前的 Step 6 清单 `8a1e576` 作废）。服务器命令（C，含 bundle）：见 [Step6_AnchorTP接入_服务器命令.md](Step6_AnchorTP接入_服务器命令.md)。
 - 2026-10-21 修正（§9）：实现（A）`c4df30a8a2bc2b9435cffde17cb2463be7eea113`，`releases.json["step6"]` 改指它（`560361c` 作废）。服务器命令（C，本次放在 bundle 所含的提交里）：见 [Step6_inflight快验_服务器命令.md](Step6_inflight快验_服务器命令.md)。
-- 2026-10-21 fail-slow 交付（`codex/failslow`，[09_failslow主图.md](09_failslow主图.md) §9）：`releases.json["step6"]` 改指 `1ccac7804105af6b9d70ee93df78f066a8b32e37`（与 `failslow` 同一实现；新增 emulate fail-stop 的 restart，weavetp/anchortp 的 fail-stop 行为同 `c4df30a`）。
+- 2026-10-21 fail-slow 交付（`codex/failslow`，[09_failslow主图.md](09_failslow主图.md) §9）：`releases.json["step6"]` 改指 `0fe0a3e3b182d8b200789c9d1a483ee7e66ba6a0`（与 `failslow` 同一实现；新增 emulate fail-stop 的 restart，不做参考 hash 比对；weavetp/anchortp 的 fail-stop 行为同 `c4df30a`）。
 
 ## 9. 2026-10-21 修正：扩容在途请求、结果文件、b3 两节点配置；`--shared-gpu-ok`；inflight 快验
 
