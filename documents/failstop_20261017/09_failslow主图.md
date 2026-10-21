@@ -92,9 +92,9 @@ python -B -X utf8 -m pytest -q -o addopts='' --noconftest -p no:cacheprovider te
 ## 8. 交付登记
 
 - 原实现 `be8396746d16a373ada21a7a710545b29123c7cc`（自 `2ff5962`）及其清单 `3d62941`、命令 `f112ef2` 作废。
-- rebase 后的 fail-slow 实现：`16e777fd84c9b638dc272c2d0c4f6a52f20b102d`（`be83967` 在 `568c319` 上重放，冲突以 `568c319` 为准）。§9 的五项：`1ccac7804105af6b9d70ee93df78f066a8b32e37`（其清单 `141050f`、命令 `fdcad58`、bundle `failslow_141050f` 作废）。实现（A）：`0fe0a3e3b182d8b200789c9d1a483ee7e66ba6a0`（§9 + §10）。
+- rebase 后的 fail-slow 实现：`16e777fd84c9b638dc272c2d0c4f6a52f20b102d`（`be83967` 在 `568c319` 上重放，冲突以 `568c319` 为准）。§9 的五项：`1ccac7804105af6b9d70ee93df78f066a8b32e37`（其清单 `141050f`、命令 `fdcad58`、bundle `failslow_141050f` 作废）。§10：`0fe0a3e3b182d8b200789c9d1a483ee7e66ba6a0`（其清单 `f884ff9`、命令 `3ab6d50`、bundle `failslow_f884ff9` 作废）。实现（A）：`073a50f41e70ee54551f3f2e2613c60203697ad1`（§9 + §10 + §11）。
 - 清单（B）：本文件所在提交，`releases.json` 的 `step6` 与 `failslow` 都指向 A。服务器命令在 B 的子提交里，随 bundle 交付：[Step9_failslow_服务器命令.md](Step9_failslow_服务器命令.md)。
-- CPU 回归：293 项：292 通过 + 1 跳过（hog 按名回收测试需要 Linux /proc），60 个 subtest 通过；1 个 subtest 失败：`test_expand_with_requests_in_flight` 的 emulate 子测试，本机改用电池供电后整体慢约 2.7 倍，超出该模拟的 8 s 等待上限；同一测试当时在未改动的 `codex/failstop@42f19d3` 上同样失败，`1ccac78` 在交流供电时 294/294 通过。§10 删除 2 项（两条加载不一致即失败的测试）。日志 [failslow_cpu_evidence/regression_pytest.log](failslow_cpu_evidence/regression_pytest.log)。日志 [failslow_cpu_evidence/regression_pytest.log](failslow_cpu_evidence/regression_pytest.log)。
+- CPU 回归：本机电池供电下全量 297 项测试：294 通过、1 跳过（仅 Linux）、2 失败；subtest 117 通过、2 失败。失败全部是 16 进程 CPU 模拟的 8 s 总线等待上限：两个 restart 模拟（各 1 项）单独重跑通过；`test_expand_with_requests_in_flight` 的 emulate/real 子测试在电池供电下失败（未改动的 `codex/failstop@42f19d3` 同样失败，交流供电时通过）。§11 新增 4 项（`test_server_launch.py`）。日志 [failslow_cpu_evidence/regression_pytest.log](failslow_cpu_evidence/regression_pytest.log)。
 - 服务器 GPU 未运行。
 
 ## 9. 2026-10-21：rebase 到 568c319、restart 的 fail-stop、`--shared-gpu-ok`、Step 9
@@ -115,3 +115,10 @@ python -B -X utf8 -m pytest -q -o addopts='' --noconftest -p no:cacheprovider te
 - TP4 自比一并去掉：它只在 correctness 模式下运行，实际只出现在 Step 9，而 Step 9 不再检查它。删除 worker 的注入前基线与 `tp4_hash/<slot>` 消息、网关的 `tp4_hash` 与 `check.tp4_hash_passed`；`check.passed` 只看事件顺序，分析器也只按事件顺序拒收。
 - 规则只有一处：`common.audits_reference(scenario, method)`，只有 fail-stop 的 weavetp/anchortp 迁移目标对参考 hash 比对；SL3061 的 correctness 运行只在这时要求参考 hash（`serving_config`），worker 的 `validate_weights` 其余情况返回 skipped，fail-stop 结果的 `failstop.reference_audit` 为 `passed`（correctness 且有比对）或 `skipped`。
 - Step 9 只检查：每次 launch 跑完且 passed、本节点没有残留 `failslow_hog.py`；SL3060 上 fail-slow 三次的事件顺序正确、截止时确有未完成请求（`run_failslow_quick.gate_checks`）。fail-stop restart launch 不再单独查网关文件。
+
+## 11. 2026-10-21（三）：上机暴露的两个缺陷
+
+1. **worker 参数解析。** 自 Step 5 接入（`241fb75`）起，每个真实模型 worker（`model_worker.py`、`serving_worker.py`，任何角色、任何 run_mode）都在 `MegatronRuntime.from_config` 用 `model_reference.add_args` 解析 `config['model_argv']`。那组参数是 model_reference 单独运行时用的，`--mr-output`、`--mr-role` 必填，而没有任何启动器传它们，worker 也不读任何 `mr_*`，所以每个 worker 启动即退出：`model_worker.py: error: the following arguments are required: --mr-output, --mr-role`（SL3060 先报的是 worker 3）。修正：只用 worker 需要的 `benchmark_live_moe_tp.add_live_args`。同一处的下一个问题也一并修正：Megatron 的 `validate_args` 按 `WORLD_SIZE`（缺省 1）检查 TP4 × EP2 × DP2，而 worker 解析时 world 还没建，所以解析期间临时设为拓扑的槽数（16），解析后还原；world 由 worker 自己建立，`initialize_megatron` 沿用它。
+2. **控制门导入。** `failslow_probe.py` 在第 17 行 `from tools.resharding.e2e import requests_io`，但服务器上控制门进程的 `sys.path` 只有 failstop 目录，而 `serving_probe` 在导入 `failslow_probe` 之后才插入代码根目录：`ModuleNotFoundError: No module named 'tools'`。修正：每个在模块顶层导入 `tools`/`megatron` 的 failstop 模块都自己插入代码根目录（同 `serving_config`、`model_memory`、`run_failslow_quick` 的写法），不再依赖导入顺序：`failslow_probe`，以及同样只靠别的模块先插入路径的 `anchortp_plan`、`async_fixture`、`async_topology`、`source_profile`、`source_runtime`、`topology_fixture`、`model_runtime`。
+
+新增 `test_server_launch.py`（像服务器一样）：(a) 用监管器真实的 `Supervisor.start_workers` 生成 28 个组合（failstop 10、nofault 8、failslow 10）× 两节点的全部 worker 命令行（含 real 模式的替换进程）和 Step 5 的 model worker 命令行，每个 epoch 内命令行只差 `--slot`，并以启动器设置的环境运行 worker 脚本真实的 `main()`：它自己的 argparse 和 `from_config` 里真实的 Megatron 解析（不建模型；只把 GPU 属性查询替换为 RTX 5090 的值）；(b) 45 个 failstop 模块各在一个新的 `python -I` 进程里导入，`sys.path` 里只有 failstop 目录、不设 PYTHONPATH。
