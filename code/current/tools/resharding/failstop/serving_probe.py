@@ -307,6 +307,7 @@ def write_outputs(root, config, instances, workload, summaries, times, trigger, 
                                           'b_max': config['serving']['b_max'], 'commit': config['commit'], 'launch': config['launch']},
                                   duration_s=duration, logical_steps=sum(s['steps'] for s in summaries.values()), failstop=failstop)
     result['clocks'] = clocks
+    result['gpu_sharing'] = 'shared' if config['shared_gpu_mode'] else 'exclusive'
     result['serving_wall_s'] = times['serving_done'] - times['serving_start']
     result['time_base'] = 'seconds since serving_start on the SL3060 gate clock (worker records shifted by clocks[*].shift_to_gate_s)'
     results.write_result(root / 'result.json', result)

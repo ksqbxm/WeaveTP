@@ -4,18 +4,19 @@ set -euo pipefail
 
 usage() {
   cat <<'USAGE'
-usage: quick_check.sh --step N --node SL3060|SL3061 [--single-node] [--layer a|b1|b2|b3] [--mode emulate|real]
+usage: quick_check.sh --step N --node SL3060|SL3061 [--single-node] [--layer a|b1|b2|b3|inflight] [--mode emulate|real]
                       [--method weavetp|anchortp] [--profile-file PATH] [--reference-root DIR] [--min-free-disk-gb N]
 
   --step N            2 (topology), 3 (sources/transport), 4 (async driver), 5 (model correctness), 6 (serving)
   --node              this node; two-node steps are started on both nodes within 60 seconds
   --single-node       run on this node alone: Step 5 (both layouts), Step 6 layers a, b1, b2 (required there)
   --layer             Step 6 only: a = fake backend + CPU tests (default), b1/b2 = real model on this node,
-                      b3 = two-node fail-stop end to end (never with --single-node)
-  --mode              Step 6 b3 fault mode (default emulate)
-  --method            Step 6 b3 recovery method under test (default weavetp; anchortp = fixed-path paused migration)
-  --profile-file      Step 6 b3: frozen Step 3 profile.json, same path on both nodes
-  --reference-root    Step 6 b3: run_model.py output root with tp2/ and tp4/ reference hashes (read on SL3061)
+                      b3 = two-node fail-stop end to end (never with --single-node),
+                      inflight = b3 with requests still running at the expand (two nodes, 600 s budget)
+  --mode              Step 6 b3/inflight fault mode (default emulate)
+  --method            Step 6 b3/inflight recovery method under test (default weavetp; anchortp = fixed-path paused migration)
+  --profile-file      Step 6 b3/inflight: frozen Step 3 profile.json, same path on both nodes
+  --reference-root    Step 6 b3/inflight: run_model.py output root with tp2/ and tp4/ reference hashes (read on SL3061)
   --min-free-disk-gb  /data free-space threshold for the quick run (default 1)
 USAGE
 }
@@ -53,15 +54,16 @@ case "$STEP" in
 esac
 [[ "$NODE" == SL3060 || "$NODE" == SL3061 ]] || fail "--node must be SL3060 or SL3061 (got '${NODE}')"
 [[ "$MIN_FREE_DISK_GB" =~ ^[0-9]+([.][0-9]+)?$ ]] || fail "--min-free-disk-gb must be a number (got '${MIN_FREE_DISK_GB}')"
-[[ "$LAYER" =~ ^(a|b1|b2|b3)$ ]] || fail "--layer must be a, b1, b2 or b3 (got '${LAYER}')"
+[[ "$LAYER" =~ ^(a|b1|b2|b3|inflight)$ ]] || fail "--layer must be a, b1, b2, b3 or inflight (got '${LAYER}')"
 [[ "$MODE" =~ ^(emulate|real)$ ]] || fail "--mode must be emulate or real (got '${MODE}')"
 [[ "$METHOD" =~ ^(weavetp|anchortp)$ ]] || fail "--method must be weavetp or anchortp (got '${METHOD}')"
 # Step 5 (before its fail-stop integration) needs only this node's eight GPUs; Step 6 layers a/b1/b2 run on one node,
-# layer b3 is the two-node fail-stop run.
+# layers b3 and inflight are the two-node fail-stop runs.
+TWO_NODE=; if [[ "$LAYER" == b3 || "$LAYER" == inflight ]]; then TWO_NODE=1; fi
 if [[ -n "$SINGLE_NODE" && "$STEP" != 5 && "$STEP" != 6 ]]; then fail "--single-node applies to Step 5 and Step 6 only"; fi
-if [[ "$STEP" == 6 && "$LAYER" != b3 && -z "$SINGLE_NODE" ]]; then fail "Step 6 layer ${LAYER} runs on one node: pass --single-node"; fi
-if [[ "$STEP" == 6 && "$LAYER" == b3 && -n "$SINGLE_NODE" ]]; then fail "Step 6 layer b3 is the two-node run: start both nodes without --single-node"; fi
-if [[ "$STEP" == 6 && "$LAYER" == b3 && ( -z "$PROFILE_FILE" || -z "$REFERENCE_ROOT" ) ]]; then fail "Step 6 layer b3 needs --profile-file and --reference-root"; fi
+if [[ "$STEP" == 6 && -z "$TWO_NODE" && -z "$SINGLE_NODE" ]]; then fail "Step 6 layer ${LAYER} runs on one node: pass --single-node"; fi
+if [[ "$STEP" == 6 && -n "$TWO_NODE" && -n "$SINGLE_NODE" ]]; then fail "Step 6 layer ${LAYER} is a two-node run: start both nodes without --single-node"; fi
+if [[ "$STEP" == 6 && -n "$TWO_NODE" && ( -z "$PROFILE_FILE" || -z "$REFERENCE_ROOT" ) ]]; then fail "Step 6 layer ${LAYER} needs --profile-file and --reference-root"; fi
 
 cd /data
 mountpoint -q /data || fail "/data is not a mount point"

@@ -1,5 +1,6 @@
 """Recovery metrics on hand-built launches: thresholds, censoring, replay-aware latency, token conservation."""
 
+import csv
 import json
 import sys
 from pathlib import Path
@@ -25,7 +26,7 @@ def request(seq, replica, arrive, first, step, n, *, replay=None):
             't_done': tokens[-1], 'admits': admits, 't_tokens': tokens}
 
 
-def launch(tmp_path, *, fail=20.0, rejoin=35.0, tp4_ready=40.0, horizon=90.0, scenario='failstop'):
+def launch(tmp_path, *, fail=20.0, rejoin=35.0, tp4_ready=40.0, horizon=90.0, scenario='failstop', gpu_sharing='exclusive'):
     """Steady 4 tok/s per replica; EDP0 (replicas 0/1) silent in [fail, fail+3) and [38, tp4_ready+1)."""
     rows = []
     seq = 0
@@ -48,7 +49,7 @@ def launch(tmp_path, *, fail=20.0, rejoin=35.0, tp4_ready=40.0, horizon=90.0, sc
     failstop = None if scenario == 'nofault' else {'replay_prefill_tokens': 14, 'stats_valid': True}
     result = {'method': 'weavetp', 'config': {'experiment': scenario, 'mode': 'emulate', 'run_mode': 'timing', 'timing_valid': True},
               'totals': {'generated_tokens': sum(r['output_len'] for r in rows)}, 'requests': rows, 'switches': switches,
-              'failstop': failstop, 'serving_wall_s': horizon}
+              'failstop': failstop, 'serving_wall_s': horizon, 'gpu_sharing': gpu_sharing}
     sha = {'requests': 'a', 'plan': 'b', 'workload': 'c', 'profile': 'd'}
     events = {'launch': f'l_{scenario}', 'sha256': sha, 'recovery_s': {'fail': fail, 'rejoin_request': rejoin, 'spawn': rejoin + 0.5,
                                                                         'switch_ack_expand': 38.0, 'serving_start': 0.0},
@@ -139,3 +140,15 @@ def test_summary_and_cli(tmp_path):
     assert cli.main([str(a), str(b), '--out', str(tmp_path / 'out2')]) == 1
     assert len(json.loads((tmp_path / 'out2' / 'rejected.json').read_text())) == 1
     assert nofault.exists()
+
+
+def test_shared_gpu_timing_launches_are_accepted_as_their_own_group(tmp_path):
+    launch(tmp_path / 'exclusive')
+    launch(tmp_path / 'shared', gpu_sharing='shared')  # run_failstop_e2e --shared-gpu-ok: timing_valid stays true
+    out = tmp_path / 'out'
+    assert cli.main([str(tmp_path), '--out', str(out)]) == 0
+    assert json.loads((out / 'rejected.json').read_text()) == []
+    rows = [r for r in csv.DictReader((out / 'summary.csv').open(encoding='utf-8')) if r['metric'] == 'shrink_tfs_s']
+    assert sorted((r['gpu_sharing'], r['n_launches']) for r in rows) == [('exclusive', '1'), ('shared', '1')]
+    launches = list(csv.DictReader((out / 'launch_metrics.csv').open(encoding='utf-8')))
+    assert sorted((r['gpu_sharing'], r['timing_valid']) for r in launches) == [('exclusive', 'True'), ('shared', 'True')]

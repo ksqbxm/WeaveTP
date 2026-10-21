@@ -69,7 +69,7 @@ def reference_requirements(seq_length, batch=1, margin=MARGIN):
     return result
 
 
-def scenario_table(inventory, seq_length):
+def scenario_table(inventory, seq_length, batch=1):
     """All sixteen scenario GPUs with role and requirement; free memory is known only where queried."""
     rows = []
     for name in NODES:
@@ -77,7 +77,7 @@ def scenario_table(inventory, seq_length):
                                        for i in range(8)]
         for row in node_rows(name, gpus, len(rows)):
             gpu = next(g for g in gpus if g['index'] == row['gpu_index'])
-            need = requirement(role(row), seq_length)
+            need = requirement(role(row), seq_length, batch)
             rows.append({**row, 'role': need['role'], 'binding_window': need['binding_window'],
                          'required_free_bytes': need['required_free_bytes'], 'free_bytes': gpu['free_bytes'],
                          'total_bytes': gpu['total_bytes'],
@@ -85,11 +85,12 @@ def scenario_table(inventory, seq_length):
     return rows
 
 
-def preflight(node, seq_length, gpus, run_layouts, query=query_gpus):
-    """Per-GPU table for the whole scenario plus the requirement of this launch's reference runs."""
+def preflight(node, seq_length, gpus, run_layouts, query=query_gpus, batch=1):
+    """Per-GPU table for the whole scenario plus the requirement of this launch's reference runs; `batch` sequences
+    of KV per role (a serving launch passes b_max)."""
     inventory = query(list(gpus))
     require(len(inventory) == 8, 'the scenario table needs all eight GPUs of this node')
-    table = scenario_table({node: inventory}, seq_length)
+    table = scenario_table({node: inventory}, seq_length, batch)
     scenario_shortages = [f"{r['node']} GPU {r['gpu_index']} ({r['role']}, {r['binding_window']}): free "
                           f"{r['free_bytes'] / GIB:.2f} GiB < required {r['required_free_bytes'] / GIB:.2f} GiB"
                           for r in table if r['sufficient'] is False]
@@ -102,7 +103,7 @@ def preflight(node, seq_length, gpus, run_layouts, query=query_gpus):
         need = reference[layout]['required_free_bytes_per_gpu']
         run_shortages.extend(f"{layout} run: GPU {g['index']} free {g['free_bytes'] / GIB:.2f} GiB < required "
                              f"{need / GIB:.2f} GiB" for g in inventory[:reference[layout]['gpus']] if g['free_bytes'] < need)
-    return {'node': node, 'seq_length': seq_length, 'inventory': inventory, 'scenario': table,
+    return {'node': node, 'seq_length': seq_length, 'batch': batch, 'inventory': inventory, 'scenario': table,
             'scenario_shortages': scenario_shortages, 'scenario_sufficient_on_this_node': not scenario_shortages,
             'reference_runs': reference, 'run_layouts': list(run_layouts), 'run_shortages': run_shortages,
             'run_required_free_bytes_per_gpu': run_required,

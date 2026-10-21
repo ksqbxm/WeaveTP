@@ -6,6 +6,8 @@ run_mode:
                and KV snapshot audits; the quick check and the server correctness runs.
   timing       default mode (no deterministic argument, environment stripped), no audits, no snapshots, exclusive
                GPUs (shared_gpu_mode=false, every GPU of the node idle before the launch), timing_valid=true.
+               With shared_gpu (run_failstop_e2e --shared-gpu-ok) the exclusive precheck is replaced by a free-memory
+               check, shared_gpu_mode=true, timing_valid stays true and result.json says gpu_sharing='shared'.
 scenario:
   failstop     fail at completed_count >= ceil(0.25 N), rejoin after the plan's seconds (both methods).
   nofault      the same request set on the fixed TP4 x 2 layout: the calibration run and the no-fault baseline.
@@ -15,6 +17,7 @@ import os
 import sys
 from pathlib import Path
 
+import model_memory
 from common import DEFAULTS, DETERMINISTIC_ENVIRONMENT, SERVING_PROBE, require
 from safety import check_gpu_processes, gpu_snapshot, mps_snapshot, pidfd_implementations
 
@@ -60,6 +63,14 @@ def require_exclusive_gpus(log, mps_owner=None):
     return {**snapshot, 'mps': mps, 'mps_owner_exception': {uuid: processes for uuid, processes in foreign.items() if processes}}
 
 
+def require_gpu_memory(node, seq_length, b_max):
+    """A shared timing launch (--shared-gpu-ok) only checks that every GPU of this node has the free memory of its
+    scenario role (model_memory's coexistence windows, KV for b_max sequences of seq_length); other tasks may stay."""
+    report = model_memory.preflight(node, seq_length, range(8), [], batch=b_max)
+    require(not report['scenario_shortages'], 'insufficient GPU memory for a shared timing launch: ' + '; '.join(report['scenario_shortages']))
+    return report
+
+
 def serving_config(*, node, launch, mode, output, master, port, commit, remaining, min_free_disk_gb, quick, shared_gpu,
                    run_mode, method, scenario, checkpoint, seq_length, profile_file, reference_root, requests, workload, plan,
                    b_max, capacity_tokens, rejoin_note=None):
@@ -67,7 +78,7 @@ def serving_config(*, node, launch, mode, output, master, port, commit, remainin
     require(method in METHODS, f'method must be one of {sorted(METHODS)}')
     require(scenario in SCENARIOS, f'scenario must be one of {SCENARIOS}')
     correctness = run_mode == 'correctness'
-    require(correctness or not (quick or shared_gpu), 'timing runs are never quick and never share GPUs')
+    require(correctness or not quick, 'timing runs are never quick')
     profile = Path(profile_file)
     require(profile.is_file(), f'frozen Step 3 profile is required; not found: {profile}')
     reference = Path(reference_root or '')
@@ -83,7 +94,7 @@ def serving_config(*, node, launch, mode, output, master, port, commit, remainin
             'method': method, 'scenario': scenario, 'run_mode': run_mode,
             'quick_mode': quick, 'correctness_only': correctness, 'shared_gpu_mode': shared_gpu,
             'mps_owner': None if shared_gpu else os.environ.get('MPS_OWNER'),
-            'timing_valid': not correctness and not shared_gpu, 'deterministic_mode': correctness,
+            'timing_valid': not correctness, 'deterministic_mode': correctness,
             'min_free_disk_gb': min_free_disk_gb, **pidfd_implementations(),
             'startup_timeout_s': long, 'stage_timeout_s': long, 'reclaim_timeout_s': min(120, remaining - 30),
             'launch_timeout_s': remaining, 'profile_file': str(profile), 'reference_root': str(reference),

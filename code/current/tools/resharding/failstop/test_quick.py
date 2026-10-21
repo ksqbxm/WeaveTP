@@ -38,11 +38,13 @@ class QuickTests(unittest.TestCase):
                                          'edp0_switches': [{'direction': 'shrink', 'overlap_steps': 0, 'kv_delta_bytes': 0},
                                                            {'direction': 'expand', 'overlap_steps': 0 if method == 'anchortp' else 2, 'kv_delta_bytes': 0}]},
                              'files': {'result.json': '/data/x/result.json'}}}
+            layers['inflight'] = {**layers['b3'], 'inflight_at_expand': 3, 'analysis': {'exit_code': 0, 'rejected': []}}
             summary = ({**flags, 'all_checks_passed': True, 'layouts_requested': layouts,
                         'deterministic_step_time_ratio': {} if failure == 'metric' else {l: {'median_ratio': 1.25} for l in layouts}}
                        if step == 5 else
                        {**flags, 'all_checks_passed': failure != 'metric', 'layer': layer, 'backend': 'fake' if layer == 'a' else 'block',
-                        'single_node': layer != 'b3', 'gpus_used': 0 if layer == 'a' else 8, 'layers': {layer: layers[layer]}}
+                        'single_node': layer not in quick_driver.TWO_NODE_LAYERS, 'gpus_used': 0 if layer == 'a' else 8,
+                        'layers': {layer: layers[layer]}}
                        if step == 6 else
                        {**flags, 'all_cases_passed': True, 'emulate': 'passed', 'real': 'passed',
                         'edp1_rejoin_pause_s': None if failure == 'metric' else 0.5})
@@ -83,7 +85,7 @@ class QuickTests(unittest.TestCase):
                 stack.enter_context(patch.object(sys, 'argv', ['quick_driver', '--node', node, '--sha', 'a' * 40,
                                                               '--repo', str(root), '--log-dir', str(logs), '--step', str(step)] +
                                                  (['--layer', layer] if step == 6 else []) +
-                                                 (['--method', method] if step == 6 and layer == 'b3' else []) +
+                                                 (['--method', method] if step == 6 and layer in quick_driver.TWO_NODE_LAYERS else []) +
                                                  ([] if min_free is None else ['--min-free-disk-gb', str(min_free)]) +
                                                  (['--single-node'] if single_node else [])))
                 stack.enter_context(patch.object(subprocess, 'check_output', side_effect=git))
@@ -105,9 +107,10 @@ class QuickTests(unittest.TestCase):
                 self.assertEqual(float(argv[argv.index('--min-free-disk-gb') + 1]), 1.0 if min_free is None else min_free)
                 self.assertEqual(('--mode' in argv, argv[2].endswith({6: 'run_serving.py', 5: 'run_model.py', 4: 'run_async.py',
                                                                       3: 'run_sources.py', 2: 'run_topology.py'}[step])),
-                                 (step < 5 or (step == 6 and layer == 'b3'), True))
+                                 (step < 5 or (step == 6 and layer in quick_driver.TWO_NODE_LAYERS), True))
                 self.assertEqual('--layer' in argv and argv[argv.index('--layer') + 1] == layer, step == 6)
-                self.assertEqual('--method' in argv and argv[argv.index('--method') + 1] == method, step == 6 and layer == 'b3')
+                self.assertEqual('--method' in argv and argv[argv.index('--method') + 1] == method,
+                                 step == 6 and layer in quick_driver.TWO_NODE_LAYERS)
                 self.assertEqual('--layouts' in argv and argv[argv.index('--layouts') + 1] == 'tp2,tp4', single_node and step == 5)
                 self.assertEqual((logs / 'runner.log').read_bytes(), child_output)
             else:
@@ -238,6 +241,17 @@ class QuickTests(unittest.TestCase):
             self.run_driver(step=6, layer='b3', single_node=True)
         with self.assertRaises(SystemExit):
             self.run_driver(step=6, layer='b1')
+
+    def test_step6_inflight_layer_runs_on_two_nodes_with_a_600_s_budget(self):
+        result = self.run_driver(step=6, layer='inflight')
+        self.assertEqual((result['result'], result['single_node'], result['layer'], result['budget_s']), ('PASS', False, 'inflight', 600))
+        self.assertEqual((result['inflight']['inflight_at_expand'], result['inflight']['analysis']['rejected']), (3, []))
+        self.assertIn('QUICK CHECK step=6 layer=inflight method=weavetp result=PASS', result['output'])
+        self.assertIn('"inflight_at_expand": 3', result['output'])
+        self.assertEqual(self.run_driver(step=6, layer='inflight', failure='metric')['result'], 'FAIL')
+        self.assertEqual(self.run_driver(step=6, layer='b3')['budget_s'], 300)
+        with self.assertRaises(SystemExit):
+            self.run_driver(step=6, layer='inflight', single_node=True)
 
 
 if __name__ == '__main__':

@@ -166,7 +166,8 @@ def failstop_metrics(launch, degraded_reference=None):
     full, full_censor = (expand_ttp, expand_censor)
     metrics = {
         'launch': launch['launch'], 'method': result['method'], 'scenario': result['config']['experiment'], 'mode': result['config']['mode'],
-        'run_mode': result['config']['run_mode'], 'timing_valid': result['config']['timing_valid'], 'stats_valid': fs['stats_valid'],
+        'run_mode': result['config']['run_mode'], 'timing_valid': result['config']['timing_valid'], 'gpu_sharing': result['gpu_sharing'],
+        'stats_valid': fs['stats_valid'],
         'serving_wall_s': result['serving_wall_s'], 'requests': len(result['requests']),
         'generated_tokens': result['totals']['generated_tokens'],
         'throughput_tok_s': result['totals']['generated_tokens'] / result['serving_wall_s'],
@@ -200,7 +201,7 @@ def nofault_metrics(launch):
     series = per_second(tokens, horizon)
     metrics = {'launch': launch['launch'], 'method': result['method'], 'scenario': result['config']['experiment'],
                'mode': result['config']['mode'], 'run_mode': result['config']['run_mode'], 'timing_valid': result['config']['timing_valid'],
-               'stats_valid': True, 'serving_wall_s': result['serving_wall_s'], 'requests': len(result['requests']),
+               'gpu_sharing': result['gpu_sharing'], 'stats_valid': True, 'serving_wall_s': result['serving_wall_s'], 'requests': len(result['requests']),
                'generated_tokens': result['totals']['generated_tokens'],
                'throughput_tok_s': result['totals']['generated_tokens'] / result['serving_wall_s'],
                'latency_all': latency(result)}
@@ -229,18 +230,19 @@ def flatten(metrics):
 
 
 def summarize(all_metrics):
-    """Per (method, scenario, mode) group and metric: mean, sample std (ddof=1, None below two samples), n_valid, n_censored."""
+    """Per (method, scenario, mode, gpu_sharing) group and metric: mean, sample std (ddof=1, None below two samples), n_valid,
+    n_censored; launches on shared GPUs (--shared-gpu-ok) never mix with exclusive ones."""
     groups = {}
     for metrics in all_metrics:
-        groups.setdefault((metrics['method'], metrics['scenario'], metrics['mode']), []).append(flatten(metrics))
+        groups.setdefault((metrics['method'], metrics['scenario'], metrics['mode'], metrics['gpu_sharing']), []).append(flatten(metrics))
     rows = []
-    for (method, scenario, mode), members in sorted(groups.items()):
+    for (method, scenario, mode, gpu_sharing), members in sorted(groups.items()):
         for field in SUMMARY_FIELDS:
             values = [m[field] for m in members if field in m and m[field] is not None]
             censored = sum(1 for m in members if field in m and m[field] is None)
             if not values and not censored:
                 continue
-            rows.append({'method': method, 'scenario': scenario, 'mode': mode, 'metric': field,
+            rows.append({'method': method, 'scenario': scenario, 'mode': mode, 'gpu_sharing': gpu_sharing, 'metric': field,
                          'mean': statistics.fmean(values) if values else None,
                          'sample_std': statistics.stdev(values) if len(values) >= 2 else None,
                          'n_valid': len(values), 'n_censored_or_missing': censored, 'n_launches': len(members)})

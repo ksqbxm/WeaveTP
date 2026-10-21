@@ -271,8 +271,8 @@ class Driver:
                     log = run.request_log[seq]
                     log.setdefault('t_first', stamp)  # a replay re-prefills; the first token keeps its original time
                     log['t_tokens'].append(stamp)
-                for seq in decode_rows[replica]:
-                    run.request_log[seq]['t_tokens'].append(stamp)
+                for seq in decode_rows[replica]:  # a rank that joined at an expand never saw the admits of handed-over rows
+                    run.request_log.setdefault(seq, {'admits': [], 't_tokens': []})['t_tokens'].append(stamp)
         done = run.control.complete(run.step, run.replicas)
         for row in done:
             run.backend.release(row.replica, row.seq)

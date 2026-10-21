@@ -86,6 +86,8 @@ class CleanupTests(unittest.TestCase):
 
                 def completed(timeout):
                     common.write_json(root / "controller_result.json", {"status": "passed", "metrics": {"value_s": 1}})
+                    common.write_json(root / "result.json", {"serving_wall_s": 2.5})  # the serving gate's own files
+                    common.write_json(root / "events_actual.json", {"schema_version": "events_actual_v1"})
                     return 0
 
                 child.wait.side_effect = completed
@@ -103,8 +105,11 @@ class CleanupTests(unittest.TestCase):
                         patch.object(run_probe, "exchange_terminal", side_effect=exchange):
                     result = run_probe.run_case(config)
                 self.assertEqual(result["status"], "failed" if cleanup_failed else "passed")
-                self.assertEqual(json.loads((root / "events_actual.json").read_text(encoding="utf-8")), result)
-                self.assertEqual(json.loads((root / "result.json").read_text(encoding="utf-8")), result)
+                self.assertEqual(json.loads((root / "launch_result.json").read_text(encoding="utf-8")), result)
+                # The launch outcome never replaces the gate's result.json / events_actual.json (the analyzer's inputs).
+                self.assertEqual(json.loads((root / "result.json").read_text(encoding="utf-8")), {"serving_wall_s": 2.5})
+                self.assertEqual(json.loads((root / "events_actual.json").read_text(encoding="utf-8")),
+                                 {"schema_version": "events_actual_v1"})
                 self.assertEqual(result["metrics"]["value_s"], 1)
                 self.assertEqual(result["pidfd_open_impl"], "syscall(434)")
                 service.cleanup.assert_called_once()

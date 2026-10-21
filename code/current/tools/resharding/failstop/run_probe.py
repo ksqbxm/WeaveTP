@@ -16,6 +16,7 @@ from common import (
     DEFAULTS,
     NODES,
     SHARED_GPU_NOTE,
+    SHARED_TIMING_NOTE,
     TOPOLOGY_PROBES,
     Journal,
     connect,
@@ -149,13 +150,13 @@ def run_case(config):
     result.update(kind=config["kind"], launch=config["launch"], shared_gpu_mode=config["shared_gpu_mode"],
                   quick_mode=config["quick_mode"],
                   pidfd_open_impl=config["pidfd_open_impl"], pidfd_send_signal_impl=config["pidfd_send_signal_impl"],
-                  timing_note=SHARED_GPU_NOTE if config["shared_gpu_mode"] else "exclusive GPU acceptance")
+                  timing_note=("exclusive GPU acceptance" if not config["shared_gpu_mode"] else
+                               SHARED_TIMING_NOTE if config.get("timing_valid") else SHARED_GPU_NOTE))
     for key in ("repeats", "correctness_only", "timing_valid"):
         if key in config:
             result[key] = config[key]
-    write_json(root / "result.json", result)
-    if config["node"] == NODES[0]:
-        write_json(root / "events_actual.json", result)
+    # The launch outcome has its own file: result.json / events_actual.json belong to the probe (the serving gate's W4 result).
+    write_json(root / "launch_result.json", result)
     return result
 
 

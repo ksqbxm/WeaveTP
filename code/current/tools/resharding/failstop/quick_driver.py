@@ -17,6 +17,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 BASE = 'f7d555998b45756998465924d733fd70e553d6b4'
+TWO_NODE_LAYERS = ('b3', 'inflight')  # Step 6 layers that run on both nodes
 
 
 def send(stream, value):
@@ -98,24 +99,26 @@ def main():
     parser.add_argument('--sha', required=True)
     parser.add_argument('--repo', type=Path, required=True)
     parser.add_argument('--log-dir', type=Path, required=True)
-    parser.add_argument('--layer', choices=('a', 'b1', 'b2', 'b3'), default='a',
-                        help='Step 6: a = fake backend + CPU tests; b1/b2 = real model on one node; b3 = two-node fail-stop e2e')
-    parser.add_argument('--mode', choices=('emulate', 'real'), default='emulate', help='Step 6 b3: fault mode')
-    parser.add_argument('--method', choices=('weavetp', 'anchortp'), default='weavetp', help='Step 6 b3: recovery method')
-    parser.add_argument('--profile-file', help='Step 6 b3: frozen Step 3 profile.json')
-    parser.add_argument('--reference-root', help='Step 6 b3: run_model.py output root with tp2/ and tp4/ reference hashes')
+    parser.add_argument('--layer', choices=('a', 'b1', 'b2') + TWO_NODE_LAYERS, default='a',
+                        help='Step 6: a = fake backend + CPU tests; b1/b2 = real model on one node; b3 = two-node fail-stop e2e; '
+                             'inflight = b3 with requests in flight at the expand (600 s budget)')
+    parser.add_argument('--mode', choices=('emulate', 'real'), default='emulate', help='Step 6 b3/inflight: fault mode')
+    parser.add_argument('--method', choices=('weavetp', 'anchortp'), default='weavetp', help='Step 6 b3/inflight: recovery method')
+    parser.add_argument('--profile-file', help='Step 6 b3/inflight: frozen Step 3 profile.json')
+    parser.add_argument('--reference-root', help='Step 6 b3/inflight: run_model.py output root with tp2/ and tp4/ reference hashes')
     parser.add_argument('--single-node', action='store_true',
                         help='Step 5: both layouts on this node without a peer (six checkpoint loads, 600 s budget); '
                              'Step 6: the CPU fake-backend check (always single node, no GPU)')
     args = parser.parse_args()
     if args.single_node and args.step not in (5, 6):
         parser.error('--single-node applies to Steps 5 and 6 only')
-    if args.step == 6 and args.layer != 'b3' and not args.single_node:
+    if args.step == 6 and args.layer not in TWO_NODE_LAYERS and not args.single_node:
         parser.error('Step 6 layers a/b1/b2 run on one node: pass --single-node')
-    if args.step == 6 and args.layer == 'b3' and args.single_node:
-        parser.error('Step 6 layer b3 is the two-node fail-stop run: start both nodes without --single-node')
-    # Two nodes split the Step 5 layouts within 300 s; one node runs both layouts and needs twice the budget.
-    budget = 600 if args.step == 5 and args.single_node else 300
+    if args.step == 6 and args.layer in TWO_NODE_LAYERS and args.single_node:
+        parser.error(f'Step 6 layer {args.layer} is a two-node fail-stop run: start both nodes without --single-node')
+    # Two nodes split the Step 5 layouts within 300 s; one node runs both layouts and needs twice the budget, and so
+    # does the inflight layer's long workload.
+    budget = 600 if (args.step == 5 and args.single_node) or (args.step == 6 and args.layer == 'inflight') else 300
     started, deadline = time.monotonic(), time.monotonic() + budget
     run = args.log_dir
     conn = stream = child = None
@@ -158,7 +161,7 @@ def main():
         b3 = ['--mode', args.mode, '--method', args.method] + (['--profile-file', args.profile_file] if args.profile_file else []) + \
             (['--reference-root', args.reference_root] if args.reference_root else [])
         extra = {5: ['--layouts', 'tp2,tp4'] if args.single_node else [],
-                 6: ['--layer', args.layer] + (b3 if args.layer == 'b3' else [])}.get(
+                 6: ['--layer', args.layer] + (b3 if args.layer in TWO_NODE_LAYERS else [])}.get(
             args.step, ['--mode', 'both', '--rounds', '1', '--real-launches', '1'])
         argv = [sys.executable, '-B', str(entry), '--node', args.node, '--suite-id', suite, '--output', str(run), *extra,
                 '--quick', '--correctness-only', '--budget-seconds', str(max(1, deadline - time.monotonic() - 45)),
@@ -200,7 +203,7 @@ def main():
         elif args.step == 6:
             layer = summary['layers'][args.layer]
             if not (summary['all_checks_passed'] and flags and summary['layer'] == args.layer and layer['passed'] and
-                    summary['single_node'] == (args.layer != 'b3')):
+                    summary['single_node'] == (args.layer not in TWO_NODE_LAYERS)):
                 raise RuntimeError(f'incomplete Step 6 layer {args.layer} checks')
             if args.layer == 'a':
                 runs = layer['runs']
@@ -216,8 +219,10 @@ def main():
                 status['b2'] = {k: layer[k] for k in ('in_process_bitwise', 'cross_process_tp2_bitwise', 'forwards', 'crossed_block_boundary')}
             else:
                 if layer['method'] != args.method:
-                    raise RuntimeError(f"layer b3 ran method {layer['method']}, requested {args.method}")
-                status['b3'] = {'mode': layer['mode'], 'method': layer['method'], 'metrics': layer['metrics'], 'files': layer['files']}
+                    raise RuntimeError(f"layer {args.layer} ran method {layer['method']}, requested {args.method}")
+                status[args.layer] = {'mode': layer['mode'], 'method': layer['method'], 'metrics': layer['metrics'], 'files': layer['files']}
+                if args.layer == 'inflight' and layer['metrics'] is not None:  # the gate's record (SL3060)
+                    status['inflight'].update(inflight_at_expand=layer['inflight_at_expand'], analysis=layer['analysis'])
         else:
             if not (summary['all_cases_passed'] and flags and summary['emulate'] == summary['real'] == 'passed'):
                 raise RuntimeError('incomplete emulate/real correctness matrix')
@@ -286,7 +291,7 @@ def main():
                   f"failstop cycle; runs={status.get('runs')}; tests={status.get('tests')}) backend=fake single_node=true "
                   f"accepted=false logs={run}", flush=True)
         elif args.step == 6:
-            print(f"QUICK CHECK step=6 layer={args.layer}{' method=' + args.method if args.layer == 'b3' else ''} result={status['result']} "
+            print(f"QUICK CHECK step=6 layer={args.layer}{' method=' + args.method if args.layer in TWO_NODE_LAYERS else ''} result={status['result']} "
                   f"({json.dumps(status.get(args.layer), default=str)}) "
                   f"backend=block attention=torch_splitkv shared_gpu_mode=true single_node={str(args.single_node).lower()} "
                   f"accepted=false logs={run}", flush=True)

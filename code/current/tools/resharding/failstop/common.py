@@ -19,6 +19,7 @@ STEP_PROBES = {**TOPOLOGY_PROBES, 4: ASYNC_PROBE, 5: MODEL_PROBE}
 # Step 5 §2.1: every bitwise check runs both sides under --deterministic-mode with this environment.
 DETERMINISTIC_ENVIRONMENT = {"NCCL_ALGO": "Ring", "CUBLAS_WORKSPACE_CONFIG": ":4096:8"}
 SHARED_GPU_NOTE = "与其他任务共享 GPU，仅用于正确性和可行性判断，各阶段耗时不作为正式数据"
+SHARED_TIMING_NOTE = "与其他任务共享 GPU 的 timing 运行（--shared-gpu-ok）：结果标 gpu_sharing=shared，外来进程见 launch 前后快照"
 FAIL_COORDS = {(0, 0), (0, 1), (1, 0), (1, 1)}  # (ep, etp)
 DEFAULTS = {
     "method": "weavetp",  # recovery method of a serving run: weavetp | anchortp (tools/resharding/e2e/methods.py)
@@ -27,7 +28,7 @@ DEFAULTS = {
     "shared_gpu_mode": False,
     "mps_owner": None,  # exclusive runs: the one user whose resident nvidia-cuda-mps-server may stay (MPS_OWNER)
     "quick_mode": False,
-    "timing_valid": False,  # only a non-shared timing serving run sets it (serving_config)
+    "timing_valid": False,  # only a timing serving run sets it (serving_config); shared ones say gpu_sharing='shared'
     "repeats": 10,
     "sample_s": 0.1,
     "stable_samples": 3,

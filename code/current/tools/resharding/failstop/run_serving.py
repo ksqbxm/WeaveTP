@@ -7,7 +7,11 @@
               processes (GPUs 0-3 and 4-7) and one TP4 process, each running the schedule twice.
   --layer b3  two nodes: the serving driver inside the Step 5 fail-stop worker, fault -> shrink ->
               replay -> rejoin -> expand on DeepSeek-V2-Lite (emulate by default, real with --mode real).
-Writes `<output>/<node>/summary.json` (quick-driver flags), the layer's own files and `error.txt` on failure.
+  --layer inflight  b3 with 200 long toy requests (96-288 output tokens), so EDP0 still serves requests when the
+              expand comes: the joining ranks decode handed-over requests, the expand KV check covers them, and
+              analyze_failstop_e2e must accept the gate's result files (fails when nothing was in flight).
+Writes `<output>/<node>/summary.json` (quick-driver flags), the layer's own files and `error.txt` on failure; the
+two-node layers' toy inputs sit in `<output>/inputs_<layer>` so both nodes' serving configs name the same paths.
 """
 
 import argparse
@@ -22,6 +26,7 @@ import time
 import traceback
 from pathlib import Path
 
+import analyze_failstop_e2e
 import model_memory
 import torch
 from common import NODES, SERVING_PROBE, require, require_megatron_helpers, write_json
@@ -49,6 +54,8 @@ RUNS = {
 }
 TESTS = ('tests/unit_tests/e2e',)
 GIB = 1 << 30
+TWO_NODE_LAYERS = ('b3', 'inflight')
+INFLIGHT = {'count': 200, 'output_scale': 32}  # ~2000 decode steps: EDP0 still serves when the expand comes
 
 
 # ---- layer a -------------------------------------------------------------------------------------------------
@@ -195,10 +202,13 @@ def b3_passed(outcome, metrics, method):
     return bool(passed)
 
 
-def layer_b3(args, root, deadline):
+def layer_b3(args, root, deadline, count=None, output_scale=1):
     require_megatron_helpers()
     require(Path(args.profile_file or '').is_file(), f'--profile-file (frozen Step 3 profile) is required for b3; not found: {args.profile_file}')
-    inputs = write_toy_inputs(root / 'inputs', count=args.b3_requests, failstop=True, rejoin_seconds=args.b3_rejoin_seconds)
+    # The gate compares the nodes' serving configs (paths included): the inputs live outside the node directories.
+    count = args.b3_requests if count is None else count
+    inputs = write_toy_inputs(args.output / f'inputs_{args.layer}', count=count, failstop=True, rejoin_seconds=args.b3_rejoin_seconds,
+                              output_scale=output_scale)
     case = cases(args.mode, 1, 1, args.suite_id)[0]
     apply_environment('correctness')
     config = serving_config(node=args.node, launch=case['launch'], mode=case['mode'], output=root / case['launch'], master=args.master,
@@ -207,7 +217,7 @@ def layer_b3(args, root, deadline):
                             method=args.method, scenario='failstop', checkpoint=args.checkpoint, seq_length=args.seq_length,
                             profile_file=args.profile_file or '', reference_root=args.reference_root, requests=inputs['requests'],
                             workload=inputs['workload'], plan=inputs['plan'], b_max=4, capacity_tokens=None)
-    print(f"Starting {case['launch']} mode={case['mode']} method={args.method} (serving worker, {args.b3_requests} toy requests)", flush=True)
+    print(f"Starting {case['launch']} mode={case['mode']} method={args.method} (serving worker, {count} toy requests)", flush=True)
     outcome = run_case(config)
     # The gate (SL3060) owns the metrics and the result files; SL3061's controller result carries the status only.
     result = json.loads((Path(config['output']) / 'controller_result.json').read_text(encoding='utf-8'))
@@ -218,7 +228,35 @@ def layer_b3(args, root, deadline):
             'passed': b3_passed(outcome, metrics, args.method)}
 
 
-LAYERS = {'a': layer_a, 'b1': layer_b1, 'b2': layer_b2, 'b3': layer_b3}
+def handed_over(result):
+    """Requests running on EDP0 at its expand cutover (last admit before it on EDP0, completed after it): the rows the
+    joining ranks decode without having seen their admits."""
+    cutover = next(s['milestones']['cutover'] for s in result['switches'] if s['domain'] == 'EDP0' and s['direction'] == 'expand')
+    seqs = []
+    for row in result['requests']:
+        before = [a for a in row['admits'] if a['t'] < cutover]
+        if before and before[-1]['replica'] in (0, 1) and row['t_done'] > cutover:
+            seqs.append(row['seq'])
+    return seqs
+
+
+def layer_inflight(args, root, deadline):
+    record = layer_b3(args, root, deadline, **INFLIGHT)
+    if record['metrics'] is None or record['status'] != 'passed':  # SL3061 (the gate owns the result files), or a failed launch
+        return record
+    output = Path(record['output'])
+    seqs = handed_over(json.loads((output / 'result.json').read_text(encoding='utf-8')))
+    analysis = root / 'analysis'
+    code = analyze_failstop_e2e.main([str(output), '--out', str(analysis)])
+    rejected = json.loads((analysis / 'rejected.json').read_text(encoding='utf-8'))
+    record.update(inflight_at_expand=len(seqs), inflight_seqs=seqs[:16], analysis={'exit_code': code, 'rejected': rejected, 'out': str(analysis)},
+                  passed=record['passed'] and bool(seqs) and code == 0 and not rejected)
+    if not seqs:
+        record['inflight_error'] = 'no request was running on EDP0 at the expand cutover: the workload drained first'
+    return record
+
+
+LAYERS = {'a': layer_a, 'b1': layer_b1, 'b2': layer_b2, 'b3': layer_b3, 'inflight': layer_inflight}
 
 
 def main(argv=None):
@@ -231,8 +269,8 @@ def main(argv=None):
     parser.add_argument('--budget-seconds', type=float, default=300)
     parser.add_argument('--min-free-disk-gb', type=float, default=1)
     parser.add_argument('--layer', choices=tuple(LAYERS), default='a')
-    parser.add_argument('--mode', choices=('emulate', 'real'), default='emulate', help='b3 only')
-    parser.add_argument('--method', choices=('weavetp', 'anchortp'), default='weavetp', help='b3 only: recovery method under test')
+    parser.add_argument('--mode', choices=('emulate', 'real'), default='emulate', help='b3/inflight only')
+    parser.add_argument('--method', choices=('weavetp', 'anchortp'), default='weavetp', help='b3/inflight only: recovery method under test')
     parser.add_argument('--checkpoint', default=os.environ.get('CHECKPOINT', '/data/models/DeepSeek-V2-Lite-megatron-v2'))
     parser.add_argument('--seq-length', type=int, default=512, help='b1/b2/b3: max_position_embeddings (rotary table and static baseline)')
     parser.add_argument('--profile-file', help='b3: frozen Step 3 profile.json')
@@ -251,9 +289,9 @@ def main(argv=None):
         check_data_space(args.min_free_disk_gb, root / 'disk_space.jsonl')
     summary = {'step': 6, 'probe': SERVING_PROBE, 'layer': args.layer, 'node': args.node, 'suite_id': args.suite_id,
                'backend': 'fake' if args.layer == 'a' else 'block', 'attention': 'none' if args.layer == 'a' else 'torch_splitkv',
-               'gpus_used': {'a': 0, 'b1': 8, 'b2': 8, 'b3': 8}[args.layer], 'mode': args.mode if args.layer == 'b3' else None,
-               'method': args.method if args.layer == 'b3' else None,
-               'single_node': args.layer != 'b3', 'quick_mode': True, 'correctness_only': True, 'shared_gpu_mode': args.layer != 'a',
+               'gpus_used': 0 if args.layer == 'a' else 8, 'mode': args.mode if args.layer in TWO_NODE_LAYERS else None,
+               'method': args.method if args.layer in TWO_NODE_LAYERS else None,
+               'single_node': args.layer not in TWO_NODE_LAYERS, 'quick_mode': True, 'correctness_only': True, 'shared_gpu_mode': args.layer != 'a',
                'timing_valid': False, 'accepted': False, 'all_checks_passed': False, 'seq_length': args.seq_length}
     try:
         summary['layers'] = {args.layer: LAYERS[args.layer](args, root, deadline)}

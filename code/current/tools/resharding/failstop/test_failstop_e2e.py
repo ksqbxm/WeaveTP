@@ -1,4 +1,4 @@
-"""Formal entry: configuration per run mode, argument refusals, dry-run manifest, exclusive-GPU refusal."""
+"""Formal entry: configuration per run mode, argument refusals, dry-run manifest, exclusive-GPU refusal, shared timing launches."""
 
 import contextlib
 import io
@@ -7,9 +7,11 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+import model_memory
 import run_failstop_e2e
 import serving_config
 from common import DETERMINISTIC_ENVIRONMENT
@@ -46,8 +48,9 @@ class ServingConfigTests(unittest.TestCase):
             self.assertEqual(correctness['startup_timeout_s'], 240)
             with self.assertRaisesRegex(RuntimeError, 'never quick'):
                 self.build(root, 'timing', quick=True)
-            with self.assertRaisesRegex(RuntimeError, 'never quick'):
-                self.build(root, 'timing', shared_gpu=True)
+            shared = self.build(root, 'timing', shared_gpu=True)  # run_failstop_e2e --shared-gpu-ok
+            self.assertEqual((shared['shared_gpu_mode'], shared['timing_valid'], shared['deterministic_mode'], shared['mps_owner']),
+                             (True, True, False, None))
             with self.assertRaisesRegex(RuntimeError, 'reference parameter hashes'):
                 self.build(root, 'correctness', node='SL3061')
 
@@ -69,6 +72,53 @@ class ServingConfigTests(unittest.TestCase):
         with patch.object(serving_config, 'gpu_snapshot', return_value=busy), patch.object(serving_config, 'mps_snapshot', return_value=mps):
             with self.assertRaisesRegex(RuntimeError, 'unrelated GPU process'):
                 serving_config.require_exclusive_gpus(Path('unused'))
+
+    def test_shared_timing_launch_checks_only_free_memory(self):
+        roles = (model_memory.SURVIVOR, model_memory.REJOIN, model_memory.HEALTHY)
+        need = max(model_memory.requirement(r, 2048, 8)['required_free_bytes'] for r in roles)
+        self.assertGreater(need, max(model_memory.requirement(r, 2048, 1)['required_free_bytes'] for r in roles))  # KV of b_max sequences
+        original = model_memory.preflight
+
+        def inventory(short=None):
+            def query(indices):
+                return [{'index': i, 'uuid': f'u{i}', 'total_bytes': 32 << 30,
+                         'free_bytes': (1 << 30) if i == short else need + (1 << 30)} for i in indices]
+            return lambda *args, **kwargs: original(*args, **kwargs, query=query)
+        with patch.object(model_memory, 'preflight', inventory()):
+            report = serving_config.require_gpu_memory('SL3061', 2048, 8)
+        self.assertEqual((report['batch'], report['scenario_shortages'], len(report['scenario'])), (8, [], 16))
+        with patch.object(model_memory, 'preflight', inventory(short=3)), \
+                self.assertRaisesRegex(RuntimeError, 'insufficient GPU memory for a shared timing launch: SL3061 GPU 3 '):
+            serving_config.require_gpu_memory('SL3061', 2048, 8)
+
+    def test_shared_launch_records_foreign_gpu_processes_before_and_after(self):
+        args = SimpleNamespace(shared_gpu_ok=True, run_mode='timing', node='SL3060', seq_length=2048, b_max=8)
+        before, after = {'processes': [{'pid': 7}]}, {'processes': [{'pid': 7}, {'pid': 8}]}
+        with tempfile.TemporaryDirectory() as directory:
+            root, owned = Path(directory), []
+            output = root / 'l0'
+
+            def census(log, own_pids=()):
+                owned.append(set(own_pids))
+                return after if owned[1:] else before
+            with patch.object(run_failstop_e2e, 'require_gpu_memory', return_value={'scenario_shortages': []}) as memory, \
+                    patch.object(run_failstop_e2e, 'foreign_gpu_processes', side_effect=census), \
+                    patch.object(run_failstop_e2e, 'require_exclusive_gpus') as exclusive:
+                run_failstop_e2e.gpu_preflight(args, root, 'l0')
+                output.mkdir()
+                (output / 'registered_processes.jsonl').write_text('{"pid": 41}\n{"pid": 42}\n')
+                path = run_failstop_e2e.foreign_after(root, 'l0', output)
+            memory.assert_called_once_with('SL3060', 2048, 8)
+            exclusive.assert_not_called()
+            self.assertEqual(json.loads(path.read_text()), {'before': before, 'after': after})
+            self.assertEqual(owned, [set(), {41, 42}])  # the launch's own registered PIDs are never foreign
+            self.assertTrue((root / 'l0_preflight_memory.json').is_file())
+            with patch.object(run_failstop_e2e, 'require_gpu_memory') as memory, \
+                    patch.object(run_failstop_e2e, 'require_exclusive_gpus', return_value={'gpus': []}) as exclusive:
+                run_failstop_e2e.gpu_preflight(SimpleNamespace(**{**vars(args), 'shared_gpu_ok': False}), root, 'l1')
+            memory.assert_not_called()
+            exclusive.assert_called_once()
+            self.assertTrue((root / 'l1_preflight_exclusive.json').is_file())
 
     def test_exclusive_precheck_tolerates_only_the_owners_resident_mps_server(self):
         import safety
@@ -121,6 +171,13 @@ class EntryTests(unittest.TestCase):
                 run_failstop_e2e.main(self.argv(root, nofault, nofault['plan']))
             with self.assertRaisesRegex(RuntimeError, 'correctness-run flag'):
                 run_failstop_e2e.main(self.argv(root, failstop, failstop['plan']) + ['--correctness-only'])
+            with self.assertRaisesRegex(RuntimeError, 'timing-run flag'):
+                run_failstop_e2e.main(self.argv(root, failstop, failstop['plan'], run_mode='correctness') + ['--shared-gpu-ok'])
+            self.assertEqual(manifest['gpu_sharing'], 'exclusive')
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                run_failstop_e2e.main(self.argv(root, failstop, failstop['plan']) + ['--shared-gpu-ok'])
+            self.assertEqual(json.loads(out.getvalue())['gpu_sharing'], 'shared')
             with self.assertRaisesRegex(RuntimeError, 'under /data'):
                 run_failstop_e2e.main(self.argv(root, failstop, failstop['plan'], output=str(root)))
 

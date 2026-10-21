@@ -9,7 +9,10 @@ Both nodes run the same command with the same --suite-id; SL3060 is the control 
 TCPStore port (--port-base + index) and output directory `<output>/<node>/<suite>_<method>_<scenario>_<mode>_<k>`;
 `matrix_manifest.json` records the request/workload/plan/profile hashes, the commit and the launch order, and
 `progress.json` the per-launch outcome (a failed launch stops the sequence: later launches are `not_run`).
-Timing launches refuse to start unless every GPU of the node is idle (serving_config.require_exclusive_gpus).
+Timing launches refuse to start unless every GPU of the node is idle (serving_config.require_exclusive_gpus);
+with --shared-gpu-ok they only check free memory (serving_config.require_gpu_memory), run with shared_gpu_mode=true
+(timing_valid stays true, result.json gpu_sharing='shared') and record the foreign GPU processes before and after
+each launch in `<launch>_foreign_gpu_processes.json`.
 """
 
 import argparse
@@ -24,12 +27,13 @@ from pathlib import Path
 
 from common import NODES, require, require_megatron_helpers, write_json
 from run_probe import repository_commit, run_case
-from safety import check_data_space
+from safety import check_data_space, foreign_gpu_processes
 from serving_config import (
     RUN_MODES,
     SCENARIOS,
     apply_environment,
     require_exclusive_gpus,
+    require_gpu_memory,
     serving_config,
 )
 
@@ -54,6 +58,10 @@ def parse(argv=None):
     parser.add_argument('--launches', type=int, default=1, help='independent launches of this cell, in order')
     parser.add_argument('--correctness-only', action='store_true',
                         help='correctness runs may share GPUs with other tasks; never valid with --run-mode timing')
+    parser.add_argument('--shared-gpu-ok', action='store_true',
+                        help='timing runs on GPUs other tasks also use: no exclusive precheck, only a free-memory check; '
+                             'timing_valid stays true, result.json says gpu_sharing=shared, foreign GPU processes are '
+                             'recorded before and after each launch')
     parser.add_argument('--requests', type=Path, required=True)
     parser.add_argument('--workload', type=Path, required=True)
     parser.add_argument('--plan', type=Path, required=True, help='plan_failstop.json or plan_nofault.json of the request set')
@@ -74,6 +82,7 @@ def parse(argv=None):
     require(math.isfinite(args.budget_seconds) and args.budget_seconds > 0 and
             1024 <= args.port_base <= 65536 - args.launches, 'invalid budget/port')
     require(not (args.correctness_only and args.run_mode == 'timing'), '--correctness-only is a correctness-run flag')
+    require(not (args.shared_gpu_ok and args.run_mode != 'timing'), '--shared-gpu-ok is a timing-run flag (correctness: --correctness-only)')
     require(args.scenario == 'nofault' or args.mode in ('emulate', 'real'), 'invalid mode')
     require(str(args.output).replace('\\', '/').startswith('/data/') and '..' not in args.output.parts, 'output must be under /data')
     return args
@@ -98,11 +107,34 @@ def check_inputs(args):
             'rejoin_seconds': next(e['anchor']['seconds'] for e in plan['events'] if e['type'] == 'rejoin') if is_failstop else None}
 
 
+def gpu_preflight(args, root, launch):
+    """Before a launch (a refusal leaves this record and no launch directory): a timing run needs every GPU idle; with
+    --shared-gpu-ok only enough free memory, and the foreign GPU processes are recorded."""
+    if args.shared_gpu_ok:
+        write_json(root / f'{launch}_preflight_memory.json', require_gpu_memory(args.node, args.seq_length, args.b_max))
+        write_json(root / f'{launch}_foreign_gpu_processes.json',
+                   {'before': foreign_gpu_processes(root / f'{launch}_foreign_gpu_processes.jsonl')})
+    elif args.run_mode == 'timing':
+        write_json(root / f'{launch}_preflight_exclusive.json',
+                   require_exclusive_gpus(root / f'{launch}_preflight_exclusive.jsonl', os.environ.get('MPS_OWNER')))
+
+
+def foreign_after(root, launch, output):
+    """After a shared launch, once run_case confirmed (or failed to confirm) its own processes' exit: the foreign GPU
+    processes again, this launch's registered PIDs left out."""
+    path = root / f'{launch}_foreign_gpu_processes.json'
+    registry = output / 'registered_processes.jsonl'
+    own = {json.loads(line)['pid'] for line in registry.read_text().splitlines()} if registry.exists() else set()
+    write_json(path, {**json.loads(path.read_text()), 'after': foreign_gpu_processes(root / f'{launch}_foreign_gpu_processes.jsonl', own)})
+    return path
+
+
 def main(argv=None):
     signal.signal(signal.SIGTERM, stop)
     args = parse(argv)
     manifest = {'suite': args.suite_id, 'node': args.node, 'method': args.method, 'scenario': args.scenario, 'mode': args.mode,
-                'run_mode': args.run_mode, 'launches': [launch_id(args, i) for i in range(args.launches)],
+                'run_mode': args.run_mode, 'gpu_sharing': 'shared' if args.shared_gpu_ok or args.correctness_only else 'exclusive',
+                'launches': [launch_id(args, i) for i in range(args.launches)],
                 'argv': sys.argv, **check_inputs(args)}
     if args.dry_run:
         print(json.dumps(manifest, indent=2, default=str))
@@ -136,18 +168,19 @@ def main(argv=None):
             continue
         output = root / launch
         require(not output.exists(), f'{output} exists: reruns take a new suite id')
-        if args.run_mode == 'timing':  # refused launches leave this record and no launch directory
-            write_json(root / f'{launch}_preflight_exclusive.json',
-                       require_exclusive_gpus(root / f'{launch}_preflight_exclusive.jsonl', os.environ.get('MPS_OWNER')))
+        gpu_preflight(args, root, launch)
         config = serving_config(node=args.node, launch=launch, mode=args.mode, output=output, master=args.master,
                                 port=args.port_base + index, commit=commit, remaining=remaining, min_free_disk_gb=args.min_free_disk_gb,
-                                quick=False, shared_gpu=args.correctness_only, run_mode=args.run_mode, method=args.method,
+                                quick=False, shared_gpu=args.correctness_only or args.shared_gpu_ok, run_mode=args.run_mode, method=args.method,
                                 scenario=args.scenario, checkpoint=args.checkpoint, seq_length=args.seq_length,
                                 profile_file=args.profile_file, reference_root=args.reference_root, requests=args.requests,
                                 workload=args.workload, plan=args.plan, b_max=args.b_max, capacity_tokens=args.capacity_tokens)
         print(f'Starting {launch} method={args.method} scenario={args.scenario} mode={args.mode} run_mode={args.run_mode}', flush=True)
         outcome = run_case(config)
-        record = {'launch': launch, 'output': str(output), **{k: outcome[k] for k in outcome if k != 'epochs'}}
+        record = {'launch': launch, 'output': str(output), **{k: outcome[k] for k in outcome if k != 'epochs'},
+                  'gpu_sharing': 'shared' if config['shared_gpu_mode'] else 'exclusive'}
+        if args.shared_gpu_ok:
+            record['foreign_gpu_processes'] = str(foreign_after(root, launch, output))
         if args.node == NODES[0] and outcome['status'] == 'passed':
             record['metrics'] = outcome['metrics']
         results.append(record)

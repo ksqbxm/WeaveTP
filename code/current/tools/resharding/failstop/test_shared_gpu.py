@@ -118,6 +118,23 @@ class SharedGpuTests(unittest.TestCase):
         self.assertIsNone(snapshot["gpus"][0]["processes"][0]["used_mib"])
         self.assertEqual(snapshot["gpus"][1]["processes"][0]["used_mib"], 4000)
 
+    def test_foreign_process_snapshot_records_user_command_and_memory(self):
+        cards = [{"index": 0, "uuid": "GPU-a", "used_mib": 5000, "processes": [process(99, 4000), process(41, 900), process(77, 10)]}]
+        snapshot = {"start_local": 1.0, "gpus": cards + [{"index": i, "uuid": f"GPU-{i}", "used_mib": 0, "processes": []} for i in range(1, 8)]}
+        command = "python train.py --data " + "x" * 200
+
+        def owner(pid):
+            if pid == 77:
+                raise KeyError(pid)  # no passwd entry (or the process left): user unknown, command from nvidia-smi
+            return "alice"
+        with patch.object(safety, "gpu_snapshot", return_value=snapshot), patch.object(safety, "process_owner", side_effect=owner), \
+                patch.object(Path, "read_bytes", lambda path: command.replace(" ", "\0").encode()):
+            census = safety.foreign_gpu_processes(None, own_pids={41})
+        self.assertEqual(census["processes"], [
+            {"gpu": 0, "uuid": "GPU-a", "pid": 99, "user": "alice", "command": command[:120], "used_mib": 4000},
+            {"gpu": 0, "uuid": "GPU-a", "pid": 77, "user": None, "command": "python", "used_mib": 10}])
+        self.assertEqual((census["t_local"], census["gpu_used_mib"]), (1.0, [5000] + [0] * 7))
+
     @patch.object(supervisor.signal, "SIGKILL", 9, create=True)
     def test_supervisor_full_shared_lifecycle_with_fluctuating_foreign_memory(self):
         with tempfile.TemporaryDirectory() as directory:

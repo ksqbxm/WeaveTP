@@ -2,10 +2,11 @@
 
   python analyze_failstop_e2e.py --out DIR <launch directory or run_failstop_e2e output root>... [--degraded-reference TOK_S]
 
-A launch directory holds result.json and events_actual.json (the SL3060 gate's output); a root is searched for
-them. Per launch: `metrics_<launch>.json` and `per_second_<launch>.csv`; over all launches: `launch_metrics.csv`
-(one row per launch) and `summary.csv` (mean / sample std / n per method x scenario x mode and metric). A launch
-whose request rows do not reconcile is reported and left out.
+A launch directory holds result.json and events_actual.json (the SL3060 gate's output; run_case's own outcome is
+launch_result.json); a root is searched for them. Per launch: `metrics_<launch>.json` and `per_second_<launch>.csv`;
+over all launches: `launch_metrics.csv` (one row per launch) and `summary.csv` (mean / sample std / n per method x
+scenario x mode x gpu_sharing and metric; shared-GPU timing launches, --shared-gpu-ok, are their own groups). A
+launch whose request rows do not reconcile is reported and left out.
 """
 
 import argparse
@@ -48,10 +49,11 @@ def main(argv=None):
         m.write_series(args.out / f"per_second_{metrics['launch']}.csv", series)
         collected.append(metrics)
     flat = [m.flatten(x) for x in collected]
-    fields = sorted({k for row in flat for k in row}, key=lambda k: (k not in ('launch', 'method', 'scenario', 'mode', 'run_mode'), k))
+    fields = sorted({k for row in flat for k in row},
+                    key=lambda k: (k not in ('launch', 'method', 'scenario', 'mode', 'run_mode', 'gpu_sharing'), k))
     m.write_csv(args.out / 'launch_metrics.csv', flat, fields)
     rows = m.summarize(collected)
-    m.write_csv(args.out / 'summary.csv', rows, ('method', 'scenario', 'mode', 'metric', 'mean', 'sample_std', 'n_valid',
+    m.write_csv(args.out / 'summary.csv', rows, ('method', 'scenario', 'mode', 'gpu_sharing', 'metric', 'mean', 'sample_std', 'n_valid',
                                                  'n_censored_or_missing', 'n_launches'))
     (args.out / 'rejected.json').write_text(json.dumps(rejected, indent=1) + '\n', encoding='utf-8')
     print(json.dumps({'launches': len(collected), 'rejected': rejected, 'summary_rows': len(rows), 'out': str(args.out)}, indent=1))

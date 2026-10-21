@@ -18,8 +18,10 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+import analyze_failstop_e2e
 import common
 import model_worker
+import run_serving
 import serving_probe
 import serving_worker
 import test_async_protocol as async_test
@@ -62,6 +64,8 @@ class FakeRuntime(model_test.FakeRuntime):
 
 
 class Simulation(model_test.Simulation):
+    toy = {'count': 12}  # write_toy_inputs arguments
+
     def actor(self, slot, epoch):
         self.local.identity = slot, epoch
         self.local.pid = 10000 + slot + epoch * 100
@@ -94,7 +98,7 @@ class Simulation(model_test.Simulation):
         model_test.reference_hashes(reference)
         (self.root / 'profile.json').write_text(json.dumps(model_test.profile([model_worker.identity(r) for r in self.rows])))
         settings = {**common.DEFAULTS, **self.extra_config}
-        inputs = write_toy_inputs(self.root / 'inputs', count=12, failstop=settings['scenario'] == 'failstop')
+        inputs = write_toy_inputs(self.root / 'inputs', failstop=settings['scenario'] == 'failstop', **self.toy)
         self.config = {**common.DEFAULTS, 'output': str(self.root), 'launch': 'cpu_serving', 'commit': 'cpu',
                        'mode': self.mode, 'rounds': 1, 'quick_mode': True, 'correctness_only': True,
                        'shared_gpu_mode': True, 'port': 1, 'stage_timeout_s': 8, 'launch_timeout_s': 60, 'reclaim_timeout_s': 8,
@@ -162,12 +166,15 @@ class Simulation(model_test.Simulation):
 
 class ServingProtocolTests(unittest.TestCase):
     @contextlib.contextmanager
-    def simulate(self, mode, extra):
+    def simulate(self, mode, extra, toy=None):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             torch.use_deterministic_algorithms(extra.get('run_mode', 'correctness') == 'correctness')
             try:
-                result = Simulation(mode, root, 1, extra).run()
+                simulation = Simulation(mode, root, 1, extra)
+                if toy is not None:
+                    simulation.toy = toy
+                result = simulation.run()
             finally:
                 torch.use_deterministic_algorithms(False)
             yield result, json.loads((root / 'result.json').read_text()), json.loads((root / 'events_actual.json').read_text()), root
@@ -253,6 +260,34 @@ class ServingProtocolTests(unittest.TestCase):
 
     def test_anchortp_real_cycle(self):
         self.run_mode('real', 'anchortp')
+
+    def test_expand_with_requests_in_flight(self):
+        """60 toy requests and a 1 s rejoin keep EDP0 serving at the expand, so the ranks that join (emulate victims, real
+        replacements) decode handed-over requests whose admits they never saw: a KeyError in Driver.body before the
+        fix. Every request completes, the gate's result holds the serving_wall_s the calibration reads, the analyzer
+        accepts the gate's files and the quick check's criterion (run_serving.handed_over) covers those requests.
+        The simulation's 8 s bus-wait cap bounds the workload."""
+        loop, joined = serving_worker.ServingWorker.loop, {}
+
+        def record(worker):
+            loop(worker)
+            joined[worker.slot] = {seq for seq, entry in worker.driver.run.request_log.items() if entry['t_tokens'] and not entry['admits']}
+
+        for mode in ('emulate', 'real'):
+            joined.clear()
+            with self.subTest(mode=mode), patch.object(serving_worker.ServingWorker, 'loop', record), \
+                    self.simulate(mode, {'method': 'weavetp'}, toy={'count': 60, 'rejoin_seconds': 1.0}) as (result, result_json, events, root):
+                victims = common.failed_slots(json.loads((root / 'rank_map.json').read_text())['0/0'])
+                handed = set().union(*joined.values())
+                self.assertTrue(handed, 'no joining rank decoded a handed-over request: the workload drained before the expand')
+                self.assertLessEqual({slot for slot, seqs in joined.items() if seqs}, set(victims))
+                self.assertLessEqual(handed, set(run_serving.handed_over(result_json)))
+                metrics = result['metrics']
+                self.assertEqual((metrics['requests_completed'], metrics['check_passed'], metrics['kv_check_passed']), (60, True, True))
+                self.assertEqual(result_json['serving_wall_s'], metrics['serving_wall_s'])
+                self.assertEqual(result_json['gpu_sharing'], 'shared')
+                self.assertEqual(analyze_failstop_e2e.main([str(root), '--out', str(root / 'analysis')]), 0)
+                self.assertEqual(json.loads((root / 'analysis' / 'rejected.json').read_text()), [])
 
 
 if __name__ == '__main__':

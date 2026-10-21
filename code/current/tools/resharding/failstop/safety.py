@@ -135,6 +135,25 @@ def process_owner(pid):
     return pwd.getpwuid(Path(f"/proc/{int(pid)}").stat().st_uid).pw_name
 
 
+def foreign_gpu_processes(log, own_pids=()):
+    """Every compute process on this node's GPUs except own_pids: PID, user, the first 120 characters of its command
+    line and its GPU memory (a shared timing launch records this before and after itself)."""
+    snapshot = gpu_snapshot(log)
+    processes = []
+    for gpu in snapshot["gpus"]:
+        for process in gpu["processes"]:
+            if process["pid"] in own_pids:
+                continue
+            try:
+                user = process_owner(process["pid"])
+                command = Path(f"/proc/{process['pid']}/cmdline").read_bytes().replace(b"\0", b" ").decode(errors="replace").strip()
+            except (OSError, KeyError):  # exited meanwhile, another PID namespace, or no passwd entry
+                user, command = None, ""
+            processes.append({"gpu": gpu["index"], "uuid": gpu["uuid"], "pid": process["pid"], "user": user,
+                              "command": (command or process["name"] or "")[:120], "used_mib": process["used_mib"]})
+    return {"t_local": snapshot["start_local"], "gpu_used_mib": [g["used_mib"] for g in snapshot["gpus"]], "processes": processes}
+
+
 def mps_snapshot(log, snapshot, explicit_pipe=None, shared_gpu_mode=False, mps_owner=None):
     """Query real service pipes; shared mode records daemons whose pipe cannot be located.
 
