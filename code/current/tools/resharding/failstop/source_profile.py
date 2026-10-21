@@ -2,13 +2,16 @@
 
 import math
 import statistics
+import sys
 import time
+from pathlib import Path
 
 import torch
 import torch.distributed as dist
 from source_fixture import identity
 
-from megatron.core.resharding.mixed_sources import digest
+sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+from megatron.core.resharding.mixed_sources import digest  # noqa: E402
 
 
 def fit(samples):

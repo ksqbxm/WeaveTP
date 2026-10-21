@@ -4,15 +4,18 @@ Weights and KV references are independently generated on CPU. No reference GPU
 model is resident during a measured run. The native DeepSeek model is Step 5.
 """
 
+import sys
 import time
 from functools import lru_cache
+from pathlib import Path
 
 import torch
 import torch.distributed as dist
 from async_state import PeakBudget, require
 
-from megatron.core.failstop import make_copy_service
-from tools.resharding.standby_weights import StandbyWeights, release_standby, storage_bytes
+sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+from megatron.core.failstop import make_copy_service  # noqa: E402
+from tools.resharding.standby_weights import StandbyWeights, release_standby, storage_bytes  # noqa: E402
 
 HEADS, LAYERS, DIM = 8, 2, 8
 

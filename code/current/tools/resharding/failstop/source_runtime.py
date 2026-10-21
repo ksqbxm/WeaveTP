@@ -2,6 +2,7 @@
 
 import json
 import os
+import sys
 from dataclasses import asdict, replace
 from pathlib import Path
 
@@ -11,10 +12,11 @@ from common import DETERMINISTIC_ENVIRONMENT, NODES, append_json, host_backing, 
 from source_fixture import NAMES, host_resident, identity, read_oracle
 from source_profile import collect
 
-from megatron.core.failstop import make_copy_service
-from megatron.core.resharding.host_weights import HostAttachment, probe_registration
-from megatron.core.resharding.mixed_sources import Shard, build_mixed_plan, digest, normalized
-from megatron.core.resharding.mixed_transport import execute
+sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+from megatron.core.failstop import make_copy_service  # noqa: E402
+from megatron.core.resharding.host_weights import HostAttachment, probe_registration  # noqa: E402
+from megatron.core.resharding.mixed_sources import Shard, build_mixed_plan, digest, normalized  # noqa: E402
+from megatron.core.resharding.mixed_transport import execute  # noqa: E402
 
 
 def shard(row, name, expert, start, stop, width, layout, tensor, *, host=False):

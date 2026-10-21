@@ -1,6 +1,10 @@
 """Exact byte coverage for the Step 2 toy weights, not a production planner."""
 
-from megatron.core.failstop import choose_local_order, overlap_bytes
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+from megatron.core.failstop import choose_local_order, overlap_bytes  # noqa: E402
 
 
 def toy_local_orders(rows):

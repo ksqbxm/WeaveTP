@@ -8,13 +8,15 @@ weavetp/anchortp/restart run the fail-stop shrink/expand cycle in emulate mode: 
 recovery is the rejoin. Results go to failslow_result.json (run_probe's own outcome is launch_result.json).
 """
 
+import sys
 import threading
 import time
 from pathlib import Path
 
 from common import releases_fault_set, require, write_json
 
-from tools.resharding.e2e import requests_io
+sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+from tools.resharding.e2e import requests_io  # noqa: E402
 
 # event -> events that must precede it; injection-only and switch-only events are left out of the other variants.
 PREREQUISITES = {'serving_start': (), 'slow_start': ('serving_start',), 'inject_start': ('serving_start', 'slow_start'),

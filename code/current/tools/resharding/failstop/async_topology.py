@@ -1,6 +1,10 @@
 """Keep survivor rank order across real rejoin so TP2 can continue serving."""
 
-from megatron.core.failstop import FaultSession
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+from megatron.core.failstop import FaultSession  # noqa: E402
 
 
 class AsyncSession(FaultSession):

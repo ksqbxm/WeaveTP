@@ -1,8 +1,12 @@
 ........................................................................ [ 24%]
-.........................s................................. [ 44%]
-................................................ [ 61%]
-..................................................... [ 79%]
-.............................................................       [100%]
+.........................s...F............................. [ 44%]
+................................................ [ 60%]
+...........................F....................................... [ 82%]
+...................................................                 [100%]
+FAILED tools/resharding/failstop/test_failslow_protocol.py::FailslowProtocolTests::test_restart_reloads_from_disk_and_replays
 SUBFAILED(mode='emulate') tools/resharding/failstop/test_serving_protocol.py::ServingProtocolTests::test_expand_with_requests_in_flight
-1 failed, 292 passed, 1 skipped, 60 subtests passed in 209.86s (0:03:29)
-# the failing subtest: the machine ran on battery (about 2.7x slower); the same test failed on unchanged codex/failstop@42f19d3 at that time
+SUBFAILED(mode='real') tools/resharding/failstop/test_serving_protocol.py::ServingProtocolTests::test_expand_with_requests_in_flight
+FAILED tools/resharding/failstop/test_serving_protocol.py::ServingProtocolTests::test_restart_cycle_reloads_tp2_then_tp4_from_disk
+4 failed, 294 passed, 1 skipped, 117 subtests passed in 571.30s (0:09:31)
+# every failure is the 16-actor simulation's 8 s bus-wait hang guard ('finish'); the machine ran on battery (about 2.7x slower).
+# rerun of the failing tests alone: both restart tests pass; test_expand_with_requests_in_flight fails (emulate, real), as it did on the unchanged codex/failstop 42f19d3 on battery.

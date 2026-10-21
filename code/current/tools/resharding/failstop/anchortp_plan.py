@@ -21,12 +21,15 @@ The planner interface is `plan(sources, targets, profile, *, membership, epoch, 
 
 import itertools
 import math
+import sys
 from dataclasses import asdict, replace
+from pathlib import Path
 
 from anchortp_schedule import CONSTRAINTS, IMPLEMENTATION_REF, schedule
 
-from megatron.core.resharding.live import TransferTask
-from megatron.core.resharding.mixed_sources import Task, digest
+sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+from megatron.core.resharding.live import TransferTask  # noqa: E402
+from megatron.core.resharding.mixed_sources import Task, digest  # noqa: E402
 
 LOCAL_BYTES_PER_S = 1000e9 / 8  # the profile's diagonal (1000 Gbps, never measured), see source_profile.collect
 PATHS = ('local_copy', 'gpu_same_node', 'network')

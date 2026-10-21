@@ -10,14 +10,17 @@ loaded bytes afterwards by hashing every parameter against the standalone refere
 """
 
 import hashlib
+import os
 import sys
+from pathlib import Path
 
 import torch
 from common import require
 from model_memory import weight_bytes
 
-from tools.resharding.correctness.router_determinism_driver import estimate_kv_cache_bytes
-from tools.resharding.standby_weights import StandbyWeights, release_standby, storage_bytes
+sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+from tools.resharding.correctness.router_determinism_driver import estimate_kv_cache_bytes  # noqa: E402
+from tools.resharding.standby_weights import StandbyWeights, release_standby, storage_bytes  # noqa: E402
 
 HEADS = 16
 KV_DIMS = (192, 128)  # MLA key (qk_head_dim + qk_pos_emb_head_dim) and value (v_head_dim)
@@ -53,21 +56,28 @@ class MegatronRuntime:
 
     @classmethod
     def from_config(cls, config):
-        """Parse the delivered Megatron/live arguments (including --deterministic-mode) in this process."""
-        from model_reference import add_args
-
+        """Parse the delivered Megatron/live arguments (including --deterministic-mode) in this process; the workers take
+        the live arguments only (model_reference's --mr-* group belongs to its standalone reference runs). The parse runs
+        before the world is built, so Megatron reads the world the arguments describe (every slot of the topology,
+        TP4 x EP2 x DP2) from WORLD_SIZE; the world itself is set up later (initialize_megatron adopts it)."""
         from examples.rl import benchmark_live_moe_tp as live
         from megatron.training import get_args
         from megatron.training.arguments import parse_and_validate_args
 
         with_argv = ['model_worker.py', *config['model_argv']]
         saved, sys.argv = sys.argv, with_argv
+        saved_world = os.environ.get('WORLD_SIZE')
+        os.environ['WORLD_SIZE'] = str(len(config['topology']))
         try:
-            parse_and_validate_args(extra_args_provider=add_args, args_defaults={
+            parse_and_validate_args(extra_args_provider=live.add_live_args, args_defaults={
                 'tokenizer_type': 'NullTokenizer', 'no_load_optim': True, 'no_load_rng': True,
                 'no_save_optim': True, 'no_save_rng': True, 'transformer_impl': 'local'}, ignore_unknown_args=False)
         finally:
             sys.argv = saved
+            if saved_world is None:
+                os.environ.pop('WORLD_SIZE')
+            else:
+                os.environ['WORLD_SIZE'] = saved_world
         args = get_args()
         args.apply_rope_fusion = False
         args.add_bias_linear = False
