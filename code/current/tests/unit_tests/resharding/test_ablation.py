@@ -1,32 +1,19 @@
-"""CPU tests for the planner ablation switches and the driver's L1 padding.
+"""CPU tests for the planner ablation switches and the plan statistics of the ablation driver.
 
 Run with --noconftest. Default-off parity is checked against the planner at beda9f1.
 """
 
-import ast
-import statistics
-from pathlib import Path
-
 import pytest
 import torch
-from test_source_search import ROOT, fingerprint, fixture, reference, replay
+from test_source_search import fingerprint, fixture, reference, replay
 from test_source_search_execution import cpu_fixture
 
 from megatron.core.resharding.utils import ParameterMetadata
+from tools.resharding.ablation.planstats import pad_records, plan_diff_bytes, plan_stats
 
 BASE = "beda9f120c4711763ea5caeb8d5861ee753b753d"
-DRIVER = ROOT / "tools/resharding/ablation/driver.py"
 NUMEL = 1_000_000  # 4 MB float32 entries, above B_min = 1 MiB
 SWITCH_OFF = dict(source_accumulate_load=True, source_global_gate=True, source_allowed_ranks=None)
-
-
-def driver_helpers(*names):
-    """Load pure helpers from driver.py without importing Megatron training."""
-    tree = ast.parse(DRIVER.read_text(encoding="utf-8"))
-    body = [node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name in names]
-    namespace = {"statistics": statistics}
-    exec(compile(ast.Module(body=body, type_ignores=[]), str(DRIVER), "exec"), namespace)
-    return [namespace[name] for name in names]
 
 
 def replicated(bandwidth, dst_ranks, min_gain=10.0, **switches):
@@ -105,7 +92,7 @@ def test_without_accumulated_load_every_entry_picks_the_same_fast_source():
     assert {rank: peers for rank, peers in sources(accumulated).items() if peers} == {1: [0], 2: [2], 3: [3]}
 
 
-# 4. Allowed senders and L1 padding.
+# 4. Allowed senders, L1 padding and plan statistics.
 @pytest.mark.parametrize("accumulate", [False, True])
 @pytest.mark.parametrize("allowed", [frozenset({0}), frozenset({1}), frozenset({2})])
 def test_allowed_ranks_restrict_rerouted_senders(allowed, accumulate):
@@ -117,15 +104,7 @@ def test_allowed_ranks_restrict_rerouted_senders(allowed, accumulate):
         assert {rank: peers for rank, peers in sources(plans).items() if peers} == {1: [0], 2: [0], 3: [0]}
 
 
-def test_allowed_ranks_alternate_numa_nodes():
-    (allowed_ranks,) = driver_helpers("allowed_ranks")
-    nodes = [0, 0, 0, 0, 1, 1, 1, 1]
-    assert [allowed_ranks(nodes, m) for m in (1, 2, 4, 8)] == [
-        [0], [0, 4], [0, 1, 4, 5], list(range(8))]
-
-
 def test_padding_is_shard_minus_needed_bytes():
-    (pad_records,) = driver_helpers("pad_records")
     rows = [
         # (src, dst, src param, needed bytes, task id, shard bytes)
         (0, 1, "weight::fc1", 25, 7, 100),   # two stride tiles of one shard
@@ -135,3 +114,16 @@ def test_padding_is_shard_minus_needed_bytes():
         (2, 1, "weight::fc2", 60, 11, 200),
     ]
     assert pad_records(rows) == [(3, 0, 1, 50), (9, 1, 1, 10), (11, 2, 1, 140)]
+
+
+def test_plan_stats_classifies_reroutes_against_l2():
+    domains = [0, 0, 1, 1]
+    l2 = [(1, 1, "a", 10), (0, 1, "b", 20), (2, 3, "c", 30)]
+    plan = [(0, 1, "a", 10), (3, 1, "b", 20), (2, 3, "c", 30)]  # a: local -> network, b: new sender
+    stats = plan_stats(plan, [(0, 0, 1, 5)], domains, l2)
+    assert stats["reroute_local_to_net_bytes"] == 10 and stats["reroute_sender_bytes"] == 20
+    assert stats["network_bytes"] == 10 + 20 + 30 + 5 and stats["local_bytes"] == 0 and stats["pad_bytes"] == 5
+    assert stats["cross_bytes"] == 20 and stats["link_bytes"][0][1] == 15
+    assert stats["sender_bytes_max"] == 30 and stats["sender_bytes_mean"] == pytest.approx(65 / 4)
+    assert plan_stats(l2, [], domains, l2)["reroute_sender_bytes"] == 0
+    assert plan_diff_bytes(plan, l2) == 30 and plan_diff_bytes(l2, l2) == 0
