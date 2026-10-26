@@ -29,7 +29,11 @@ import test_model_protocol as model_test
 import torch
 import torch.distributed as dist
 
+from tests.unit_tests.e2e import test_block_backend as backend_test
 from tests.unit_tests.e2e import test_block_context_forward as toy
+from tools.resharding.e2e import controller as ctl
+from tools.resharding.e2e import remote_control
+from tools.resharding.e2e.decode_policy import Greedy
 from tools.resharding.e2e.toy_inputs import write_toy_inputs
 
 HEADS, LAYERS = 4, (1, 2)
@@ -311,6 +315,32 @@ class ServingProtocolTests(unittest.TestCase):
             self.assertEqual(analyze_failstop_e2e.main([str(root), '--out', str(root / 'analysis')]), 0)
             downtime = json.loads(next((root / 'analysis').glob('metrics_*.json')).read_text())['restart_downtime']
             self.assertTrue(downtime['total_s'] > 0 and downtime['shrink']['loaded_s'] == loaded['shrink'])
+
+
+class ReplayHistoryTests(unittest.TestCase):
+    def test_a_request_back_on_its_first_replica_replays_the_history_published_at_its_last_requeue(self):
+        """The restart race without threads: requeued from replica 0, replayed on replica 1, requeued, back on replica 0, whose
+        ranks still hold the copy from the first stint. Every replay prefills the prompt once plus every committed token
+        (the worker's history_source over RemoteControl's publication), so each stint continues the uninterrupted greedy run."""
+        seq, prompt = 3, [2, 7, 1, 8]
+        channel, ledger = remote_control.MemoryChannel(), ctl.Ledger(ctl.RankMap.dense(2, 1))
+        worker = SimpleNamespace(driver=SimpleNamespace(run=SimpleNamespace(ledger=ledger)), bus=channel, prompts={seq: prompt})
+        backends = [backend_test.backend({seq: prompt}, history_source=lambda s: serving_worker.ServingWorker.history_source(worker, s))
+                    for _ in range(2)]
+        step = generated = 0
+        for replica, decodes in ((0, 2), (1, 1), (0, 1)):
+            row = ctl.Running(seq, replica, step, step + 9, len(prompt) + generated, 12, generated_at_admit=generated)
+            ledger.replica(replica).add(row)
+            backends[replica].prefill(replica, [seq], ledger, Greedy())
+            for _ in range(decodes):
+                backends[replica].decode(replica, [row], ledger, Greedy())
+            step += 1 + decodes
+            generated = row.generated(step)
+            self.assertEqual(backends[replica].histories[seq], backend_test.dense_reference_tokens(prompt, generated))
+            control = remote_control.RemoteControl(channel, f'D{replica}', ledger, histories=backends[replica].histories.get, publisher=True)
+            control.requeue([row], step)
+            backends[replica].bind(1)  # as restart's cutover: a fresh pool, the histories stay
+        self.assertEqual(sorted(k for k in channel.values if k.startswith('history/')), ['history/3/11', 'history/3/7', 'history/3/9'])
 
 
 if __name__ == '__main__':

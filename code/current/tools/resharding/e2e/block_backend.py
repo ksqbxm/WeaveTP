@@ -23,7 +23,7 @@ class BlockBackend:
         self.forward, self.replica, self.prompts, self.device = forward, replica, prompts, torch.device(device)
         self.geometry, self.dtype, self.dummy_token = geometry, dtype, dummy_token
         self.block_tokens, self.segment_tokens, self.max_delta_steps, self.max_sequence_length = block_tokens, segment_tokens, max_delta_steps, max_sequence_length
-        self.history_source = history_source      # seq -> committed tokens of a request replayed from another replica
+        self.history_source = history_source      # seq -> committed tokens of a replayed request, as published at its requeue
         self.histories, self.last_token = {}, {}  # seq -> prompt + committed tokens; seq -> next decode input
         self.switcher_factory = None
         self.deferred_releases = None  # a list while a switch keeps the compacted layout fixed
@@ -102,13 +102,11 @@ class BlockBackend:
         return logits, seconds
 
     def history_for(self, row):
-        """Prompt plus the tokens a replayed request had committed elsewhere, cut to the row's input length."""
-        if row.seq in self.histories:
-            history = self.histories[row.seq]
-        else:
-            committed = self.history_source(row.seq) if row.generated_at_admit > 0 else []
-            history = list(self.prompts[row.seq]) + list(committed)
-        history = list(history[:row.input_len])
+        """Prompt plus the tokens a replayed request had committed, cut to the row's input length. A replay always takes them
+        from the source, even back on this replica: the copy this rank kept from an earlier stint misses whatever the request
+        committed on another replica since."""
+        committed = self.history_source(row.seq) if row.generated_at_admit > 0 else []
+        history = (list(self.prompts[row.seq]) + list(committed))[:row.input_len]
         if len(history) != row.input_len:
             raise RuntimeError(f'seq {row.seq}: {len(history)} history tokens for an input length of {row.input_len}')
         return history

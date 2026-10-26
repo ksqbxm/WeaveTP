@@ -160,9 +160,9 @@ class ServingWorker(ModelWorker):
         return self.model(ids, positions, None, inference_context=context, runtime_gather_output=True)
 
     def history_source(self, seq):
-        """Committed tokens of a request replayed from another replica, as published at its requeue."""
+        """Committed tokens of a replayed request: the history (prompt + committed) published at its requeue, minus the prompt."""
         row = self.driver.run.ledger.row(seq)
-        return self.bus.wait([f'history/{seq}/{row.input_len}'])[0]
+        return self.bus.wait([f'history/{seq}/{row.input_len}'])[0][len(self.prompts[seq]):]
 
     def make_backend(self, tp, context=None):
         args = self.runtime.args
