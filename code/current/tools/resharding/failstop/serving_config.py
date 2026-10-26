@@ -151,7 +151,7 @@ def serving_config(*, node, launch, mode, output, master, port, commit, remainin
             'kv_heads': GEOMETRY['heads'], 'memory_margin_bytes': 2 * GIB, 'memory_limit_bytes': None,
             'model_argv': worker_arguments(checkpoint, 8, seq_length, run_mode),
             'serving': {'requests': str(requests), 'workload': str(workload), 'plan': str(plan), 'b_max': b_max,
-                        'decode_policy': 'greedy', 'block_tokens': 64, 'segment_tokens': 4096, 'max_delta_steps': 32,
+                        'decode_policy': 'greedy', 'block_tokens': 64, 'segment_tokens': 4096, 'max_delta_steps': 32, 'max_overlap_steps': 1,
                         'attention': 'torch', 'growth': {'shrink': 0, 'expand': 2}, 'geometry': GEOMETRY,
                         'capacity_tokens': capacity_tokens},
             'rejoin_note': rejoin_note, 'failslow': failslow}

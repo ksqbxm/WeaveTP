@@ -1,5 +1,7 @@
 """Fail-slow units: the gate timeline's event order, the combination/budget checks of the entry, the Step 9 configs of
-both nodes, the control service's wall-clock close and the co-runner reaping by script name + tag (Linux only)."""
+both nodes, the control service's wall-clock close, the co-runner reaping by script name + tag (Linux only), and the
+online switch's pieces: execute()'s in-flight hook, the barrier-then-decode order, the profile down-weighting, the
+Step 9 --method launch and its summary."""
 
 import contextlib
 import io
@@ -14,14 +16,19 @@ from pathlib import Path
 from unittest.mock import patch
 
 import failslow_inject
+import model_worker
 import run_failslow_quick
 import run_failstop_e2e
 import serving_config as sc
 import serving_probe
+import serving_worker
+import torch
 from common import NODES
 from failslow_probe import Timeline
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+from megatron.core.resharding.mixed_sources import Shard, Task  # noqa: E402
+from megatron.core.resharding.mixed_transport import execute  # noqa: E402
 from tools.resharding.e2e import controller as ctl  # noqa: E402
 from tools.resharding.e2e import remote_control  # noqa: E402
 from tools.resharding.e2e.toy_inputs import write_toy_inputs  # noqa: E402
@@ -260,6 +267,114 @@ class InjectorTests(unittest.TestCase):
                 child.wait()
         self.assertEqual(failslow_inject.hog_pids('launch_b'), [])
         self.assertTrue(os.access(failslow_inject.HOG, os.R_OK))
+
+
+class OnlineSwitchTests(unittest.TestCase):
+    TIMING = ('submitted_local', 'completed_local', 'elapsed_s', 'effective_bytes_per_s')
+
+    def execute(self, overlap):
+        """Two waves on CPU: a local copy and a send in wave 0, a receive in wave 1; the service fills received buffers."""
+        self.order = order = []
+
+        class Stream:
+            def wait_stream(self, other):
+                pass
+
+            def synchronize(self):
+                pass
+
+        class Service:
+            last_launch_stats = {'participation_marker_bytes': 2}
+
+            def __init__(self):
+                self.received = []
+
+            def submit_send(self, tensor, peer, task):
+                order.append(('send', task, tensor.tolist()))
+
+            def submit_recv(self, tensor, peer, task):
+                self.received.append((task, tensor))
+
+            def launch(self):
+                order.append('launch')
+                for task, tensor in self.received:
+                    tensor.fill_(100 + task)
+                return type('Work', (), {'wait': lambda work: order.append('wait')})()
+
+        def shard(device, rank):
+            return Shard(device, 'n', rank, 'gpu', 'w', 'w', None, 'torch.float32', 4, (8,), (0,), (8,), 'TP4')
+        here, peer = shard('me', 0), shard('peer', 1)
+        tasks = [Task(0, 0, here, here, (0,), (2,), 8), Task(1, 0, here, peer, (2,), (4,), 8), Task(2, 1, peer, here, (4,), (8,), 16)]
+        target, rows = torch.zeros(8), []
+        with patch.multiple(torch.cuda, Stream=Stream, current_stream=lambda: Stream(), stream=lambda s: contextlib.nullcontext()):
+            stats = execute(tasks, device='me', sources={'w': torch.arange(8.)}, targets={'w': target}, host=None, service_factory=Service,
+                            rank_to_group={0: 0, 1: 1}, labels={'event': 'e', 'round': 0, 'epoch': 0}, record=rows.append,
+                            resources=type('Resources', (), {'pending': []})(), overlap=overlap)
+        return stats, target, [{k: v for k, v in row.items() if k not in self.TIMING} for row in rows], order
+
+    def test_overlap_runs_between_launch_and_wait_and_changes_nothing_else(self):
+        stats, target, rows, order = self.execute(None)
+        hooked = self.execute(lambda work: self.order.append('overlap'))
+        self.assertEqual((stats, rows), hooked[:3:2])
+        self.assertTrue(torch.equal(target, hooked[1]))
+        self.assertEqual(target.tolist(), [0, 1, 0, 0, 102, 102, 102, 102])
+        self.assertEqual([o for o in order if isinstance(o, str)], ['launch', 'wait', 'launch', 'wait'])
+        self.assertEqual([o for o in hooked[3] if isinstance(o, str)], ['launch', 'overlap', 'wait', 'launch', 'overlap', 'wait'])
+
+    def test_barrier_comes_before_decode_and_the_budget_bounds_the_steps(self):
+        order, steps = [], []
+        worker = type('W', (), {'barrier': 'gloo', 'serving': {'max_overlap_steps': 2}})()
+        with patch.object(serving_worker.dist, 'barrier', lambda group=None: order.append(('barrier', group))):
+            run = serving_worker.ServingWorker.overlap(worker, lambda phase: order.append(('decode', phase)), steps, 3)
+            for _ in range(3):
+                run(None)
+            serving_worker.ServingWorker.overlap(worker, None, [], 5)(None)  # a target-only rank: barrier only
+        self.assertEqual(order, [('barrier', 'gloo'), ('decode', 'switching'), ('decode', 'switching'), ('barrier', 'gloo'),
+                                 ('decode', 'switching'), ('barrier', 'gloo'), ('barrier', 'gloo')])
+        self.assertEqual(len(steps), 3)
+
+    def test_downweighting_touches_only_the_fault_devices(self):
+        fit = lambda b: {'bytes_per_s': b, 'latency_s': 1e-5}  # noqa: E731
+        profile = {'p2p': {'a': {'b': fit(8.0), 'c': fit(6.0)}, 'b': {'a': fit(4.0), 'c': fit(2.0)}, 'c': {'a': fit(1.0), 'b': fit(3.0)}},
+                   'h2d': {'a': fit(9.0)}}
+        slowed = model_worker.downweighted(profile, {'a'}, 0.5)
+        changed = {(s, d) for s, row in profile['p2p'].items() for d, entry in row.items() if slowed['p2p'][s][d] != entry}
+        self.assertEqual(changed, {('a', 'b'), ('a', 'c'), ('b', 'a'), ('c', 'a')})
+        self.assertEqual((slowed['p2p']['a']['b']['bytes_per_s'], slowed['p2p']['c']['a']['latency_s']), (4.0, 1e-5))
+        self.assertEqual((slowed['h2d'], profile['p2p']['a']['b']['bytes_per_s']), (profile['h2d'], 8.0))  # the original is untouched
+
+    def test_kv_tasks_pair_each_target_with_its_one_holder(self):
+        def shard(device, start):
+            return Shard(device, 'n', 0, 'gpu', f't{device}', 'kv.0->0.A.key', None, 'torch.float32', 4, (4, 1, 2, 2), start,
+                         (start[0] + 2, 1, start[2] + 1, 2), 'TP4')
+        sources = [shard('s1', (0, 0, 0, 0)), shard('s2', (0, 0, 1, 0)), shard('s1', (2, 0, 0, 0))]
+        targets = [shard('t', (2, 0, 0, 0)), shard('t', (0, 0, 1, 0)), shard('t', (0, 0, 0, 0))]
+        tasks = model_worker.fixed_tasks(sources, targets, 10, 3)
+        self.assertEqual([(t.id, t.wave, t.source.device, t.target.start, t.payload_bytes) for t in tasks],
+                         [(10, 3, 's1', (0, 0, 0, 0), 16), (11, 3, 's2', (0, 0, 1, 0), 16), (12, 3, 's1', (2, 0, 0, 0), 16)])
+
+
+class QuickMethodTests(unittest.TestCase):
+    def test_a_method_runs_one_fail_slow_launch_on_its_own_budget(self):
+        self.assertEqual(run_failslow_quick.launch_names(), run_failslow_quick.LAUNCHES)
+        for method in ('weavetp', 'restart', 'ignore', 'anchortp'):
+            self.assertEqual(run_failslow_quick.launch_names(method), (method,))
+            self.assertEqual(run_failslow_quick.budget_seconds(method), sc.failslow_launch_seconds(run_failslow_quick.settings(method)) + 120)
+        self.assertGreater(run_failslow_quick.budget_seconds(), run_failslow_quick.budget_seconds('restart'))
+
+    def test_summary_uses_existing_fields_and_marks_what_is_missing(self):
+        restart = {'switches': [{'domain': 'EDP0', 'direction': d, 'overlap_steps': 0, 'milestones': {'switch_trigger': t, 'source_release_done': t + 4}}
+                                for d, t in (('shrink', 30.0), ('expand', 60.0))] +
+                               [{'domain': 'EDP1', 'direction': 'shrink', 'overlap_steps': 0, 'milestones': {}}],
+                   'restart_loaded_s': {'shrink': 33.5, 'expand': 63.0}, 'worker_events_s': {'fail': 30.0, 'rejoin_start': 60.0},
+                   'replayed_tokens': 120}
+        summary = run_failslow_quick.launch_summary(restart)
+        self.assertEqual(summary['restart_reload_s'], {'tp2': 3.5, 'tp4': 3.0})
+        self.assertEqual(summary['switch_s'], {'shrink': 4.0, 'expand': 4.0})
+        self.assertEqual(summary['decode_steps_in_switch'], {'EDP0/shrink': 0, 'EDP0/expand': 0, 'EDP1/shrink': 0, 'EDP1/expand': '缺失'})
+        ignore = run_failslow_quick.launch_summary({'switches': [], 'restart_loaded_s': None, 'worker_events_s': {}, 'replayed_tokens': 0})
+        self.assertEqual((ignore['restart_reload_s'], ignore['switch_s']['shrink'], ignore['replayed_tokens']),
+                         ({'tp2': '缺失', 'tp4': '缺失'}, '缺失', 0))
 
 
 if __name__ == '__main__':

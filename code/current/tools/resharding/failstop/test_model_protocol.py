@@ -159,9 +159,16 @@ class FakeRuntime:
     @staticmethod
     def release(model, protected, services):
         model.released = True
+        model.shapes = [p.shape for p in model.parameters()]  # for reallocate (the real runtime keeps its StandbyWeights)
         for p in model.parameters():
             p.data = torch.empty(0, dtype=p.dtype)
         return {'released': True}
+
+    @staticmethod
+    def reallocate(model):
+        model.released = False
+        for p, shape in zip(model.parameters(), model.shapes):
+            p.data = torch.full(shape, -1, dtype=p.dtype)  # poisoned, as allocate_and_poison: every byte must arrive
 
     @staticmethod
     def memory():

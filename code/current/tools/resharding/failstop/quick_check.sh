@@ -8,7 +8,7 @@ set -euo pipefail
 usage() {
   cat <<'USAGE'
 usage: quick_check.sh --manifest SHA --step N --node SL3060|SL3061 [--single-node] [--layer a|b1|b2|b3|inflight]
-                      [--mode emulate|real] [--method weavetp|anchortp] [--profile-file PATH] [--reference-root DIR]
+                      [--mode emulate|real] [--method METHOD] [--profile-file PATH] [--reference-root DIR]
                       [--min-free-disk-gb N]
 
   --manifest SHA      full SHA of the delivered manifest commit; its releases.json names the implementation
@@ -22,7 +22,8 @@ usage: quick_check.sh --manifest SHA --step N --node SL3060|SL3061 [--single-nod
                       b3 = two-node fail-stop end to end (never with --single-node),
                       inflight = b3 with requests still running at the expand (two nodes, 600 s budget)
   --mode              Step 6 b3/inflight fault mode (default emulate)
-  --method            Step 6 b3/inflight recovery method under test (default weavetp; anchortp = fixed-path paused migration)
+  --method            Step 6 b3/inflight recovery method under test (default weavetp; anchortp = fixed-path paused migration);
+                      Step 9: weavetp|restart|ignore|anchortp runs only that fail-slow launch (default: all four launches)
   --profile-file      Step 6 b3/inflight and Step 9: frozen Step 3 profile.json, same path on both nodes
   --reference-root    Step 6 b3/inflight: run_model.py output root with tp2/ and tp4/ reference hashes (read on SL3061)
   --min-free-disk-gb  /data free-space threshold for the quick run (default 1)
@@ -35,7 +36,7 @@ fail() {
   exit 2
 }
 
-MANIFEST= STEP= NODE= MIN_FREE_DISK_GB=1 SINGLE_NODE= LAYER=a MODE=emulate METHOD=weavetp PROFILE_FILE= REFERENCE_ROOT=
+MANIFEST= STEP= NODE= MIN_FREE_DISK_GB=1 SINGLE_NODE= LAYER=a MODE=emulate METHOD= PROFILE_FILE= REFERENCE_ROOT=
 while (($#)); do
   case "$1" in
     --help|-h) usage; exit 0 ;;
@@ -67,7 +68,12 @@ esac
 [[ "$MIN_FREE_DISK_GB" =~ ^[0-9]+([.][0-9]+)?$ ]] || fail "--min-free-disk-gb must be a number (got '${MIN_FREE_DISK_GB}')"
 [[ "$LAYER" =~ ^(a|b1|b2|b3|inflight)$ ]] || fail "--layer must be a, b1, b2, b3 or inflight (got '${LAYER}')"
 [[ "$MODE" =~ ^(emulate|real)$ ]] || fail "--mode must be emulate or real (got '${MODE}')"
-[[ "$METHOD" =~ ^(weavetp|anchortp)$ ]] || fail "--method must be weavetp or anchortp (got '${METHOD}')"
+if [[ "$STEP" == 9 ]]; then
+  [[ -z "$METHOD" || "$METHOD" =~ ^(weavetp|restart|ignore|anchortp)$ ]] || fail "Step 9 --method must be weavetp, restart, ignore or anchortp (got '${METHOD}')"
+else
+  METHOD=${METHOD:-weavetp}
+  [[ "$METHOD" =~ ^(weavetp|anchortp)$ ]] || fail "--method must be weavetp or anchortp (got '${METHOD}')"
+fi
 # Step 5 (before its fail-stop integration) needs only this node's eight GPUs; Step 6 layers a/b1/b2 run on one node,
 # layers b3 and inflight are the two-node fail-stop runs.
 TWO_NODE=; if [[ "$LAYER" == b3 || "$LAYER" == inflight ]]; then TWO_NODE=1; fi
@@ -93,7 +99,7 @@ SHA=$(printf '%s' "$RELEASES" | "$PYTHON" -c 'import json,sys; print(json.load(s
 mkdir -p "/data/ubuntu/lxh/weavetp/acceptance/$NAME/kickoff"
 LOGDIR=$(mktemp -d "/data/ubuntu/lxh/weavetp/acceptance/$NAME/kickoff/${NODE}_$(date -u +%Y%m%dT%H%M%SZ)_XXXXXX")
 git -C "$REPO" show "$SHA:$FAILSTOP/quick_driver.py" > "$LOGDIR/quick_driver.py" || fail "implementation ${SHA} is not in ${REPO}"
-nohup "$PYTHON" -B "$LOGDIR/quick_driver.py" --step "$STEP" --node "$NODE" --sha "$SHA" --repo "$REPO" --log-dir "$LOGDIR" --min-free-disk-gb "$MIN_FREE_DISK_GB" $SINGLE_NODE --layer "$LAYER" --mode "$MODE" --method "$METHOD" ${PROFILE_FILE:+--profile-file "$PROFILE_FILE"} ${REFERENCE_ROOT:+--reference-root "$REFERENCE_ROOT"} > "$LOGDIR/nohup.log" 2>&1 < /dev/null &
+nohup "$PYTHON" -B "$LOGDIR/quick_driver.py" --step "$STEP" --node "$NODE" --sha "$SHA" --repo "$REPO" --log-dir "$LOGDIR" --min-free-disk-gb "$MIN_FREE_DISK_GB" $SINGLE_NODE --layer "$LAYER" --mode "$MODE" ${METHOD:+--method "$METHOD"} ${PROFILE_FILE:+--profile-file "$PROFILE_FILE"} ${REFERENCE_ROOT:+--reference-root "$REFERENCE_ROOT"} > "$LOGDIR/nohup.log" 2>&1 < /dev/null &
 printf '%s\n' "$!" > "$LOGDIR/driver.pid"
 if [[ -n "$SINGLE_NODE" ]]; then
   printf 'Started Step %s on %s alone (single node, no peer).\nLog: %s/nohup.log\n' "$STEP" "$NODE" "$LOGDIR"

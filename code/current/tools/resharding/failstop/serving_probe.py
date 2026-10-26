@@ -16,7 +16,15 @@ from pathlib import Path
 
 import failslow_probe
 from async_state import audit_sequence
-from common import NODES, audits_reference, failed_slots, require, topology, write_json
+from common import (
+    NODES,
+    audits_reference,
+    failed_slots,
+    online_switch,
+    require,
+    topology,
+    write_json,
+)
 from model_shards import model_local_orders
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
@@ -222,6 +230,9 @@ def fault_cycle(config, bus, journal, service, session, times, validate, wait, w
         service.trigger(domain, 'shrink')
     wait([f'switch_ack/shrink/{s}' for s in range(16)])
     times['switch_ack_shrink'] = time.monotonic()
+    if online_switch(config):  # the victims stay sources until every member finished the migration and its checks
+        wait([f'shrink_ready/{s}' for s in range(16)], config['stage_timeout_s'])
+        times['shrink_ready'] = time.monotonic()
     publish('kill')
     if mode == 'real':
         wait(['kill_sent'])

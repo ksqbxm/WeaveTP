@@ -53,11 +53,14 @@ class FailstopHooks:
     committed tokens and original submit time), EDP0 admits nothing until the TP2 layout serves,
     and the target rank map is the degraded one. expand: the target rank map is the normal one.
     Event times feed the after_event_seconds anchor and the fail-stop result fields.
+    replay=False (the online fail-slow WeaveTP shrink): EDP0 keeps its requests and serves through the switch, their KV
+    migrates, so nothing is requeued or set down; only the target rank map changes.
     """
 
-    def __init__(self, control, normal_map, degraded_map, edp0_replicas):
+    def __init__(self, control, normal_map, degraded_map, edp0_replicas, replay=True):
         """The maps may be RankMaps or callables returning them (real worlds renumber ranks per epoch)."""
         self.control, self.normal_map, self.degraded_map, self.edp0 = control, normal_map, degraded_map, set(edp0_replicas)
+        self.replay = replay
         self.down = set()
         self.replayed_tokens = 0  # prompt + committed tokens re-prefilled after the fault
 
@@ -68,11 +71,12 @@ class FailstopHooks:
         now = run.clock()
         if direction == 'shrink':
             run.failstop_events['fail'] = now
-            rows = [row for r in self.edp0 for row in run.ledger.replica(r).running.values()]
-            self.replayed_tokens += sum(row.generated(run.step) + row.input_len for row in rows)
-            self.control.requeue(rows, run.step)
-            self.down.update(self.edp0)
-            self.control.set_down(self.down)
+            if self.replay:  # fail-stop and every non-online fail-slow method
+                rows = [row for r in self.edp0 for row in run.ledger.replica(r).running.values()]
+                self.replayed_tokens += sum(row.generated(run.step) + row.input_len for row in rows)
+                self.control.requeue(rows, run.step)
+                self.down.update(self.edp0)
+                self.control.set_down(self.down)
             run.target_rank_map = self.degraded_map() if callable(self.degraded_map) else self.degraded_map
         else:
             run.failstop_events['rejoin_start'] = now

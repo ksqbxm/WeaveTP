@@ -210,11 +210,18 @@ class MegatronRuntime:
 
     @staticmethod
     def release(model, protected, services):
-        standby = StandbyWeights(model, protected_tensors=protected)
+        # The standby view stays on the model, so reallocate() can bring the same storages back for a later switch.
+        standby = model.__dict__.get('failstop_standby') or StandbyWeights(model, protected_tensors=protected)
+        model.failstop_standby = standby
         storages = tuple(standby.groups)
         audit = release_standby(standby, services)
         require(all(s.nbytes() == 0 for s in storages), 'standby release did not clear storage')
         return audit
+
+    @staticmethod
+    def reallocate(model):
+        """A released model's storages at their original sizes, NaN-poisoned: every byte must arrive through a plan."""
+        model.failstop_standby.allocate_and_poison()
 
     @staticmethod
     def memory():

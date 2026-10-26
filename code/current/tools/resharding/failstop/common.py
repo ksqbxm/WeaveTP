@@ -109,6 +109,12 @@ def releases_fault_set(config):
     return config['scenario'] == 'failstop' or (config['scenario'] == 'failslow' and config['method'] != 'ignore')
 
 
+def online_switch(config):
+    """Fail-slow WeaveTP switches online: groups, models and weight plans are ready before serving, EDP0 keeps serving
+    and its KV migrates (no replay), waves overlap decode. Every other scenario/method keeps the stop-and-replay shrink."""
+    return config['scenario'] == 'failslow' and config['method'] == 'weavetp'
+
+
 def failed_slots(rows):
     result = [r["slot"] for r in rows
               if r["replica"] == "EDP0" and (r["ep"], r["etp"]) in FAIL_COORDS]

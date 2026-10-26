@@ -107,7 +107,8 @@ def main():
                         help='Step 6: a = fake backend + CPU tests; b1/b2 = real model on one node; b3 = two-node fail-stop e2e; '
                              'inflight = b3 with requests in flight at the expand (600 s budget)')
     parser.add_argument('--mode', choices=('emulate', 'real'), default='emulate', help='Step 6 b3/inflight: fault mode')
-    parser.add_argument('--method', choices=('weavetp', 'anchortp'), default='weavetp', help='Step 6 b3/inflight: recovery method')
+    parser.add_argument('--method', choices=('weavetp', 'anchortp', 'restart', 'ignore'),
+                        help='Step 6 b3/inflight: recovery method (default weavetp); Step 9: only this fail-slow launch')
     parser.add_argument('--profile-file', help='Step 6 b3/inflight and Step 9: frozen Step 3 profile.json')
     parser.add_argument('--reference-root', help='Step 6 b3/inflight: run_model.py output root with tp2/ and tp4/ reference hashes')
     parser.add_argument('--single-node', action='store_true',
@@ -122,6 +123,10 @@ def main():
         parser.error(f'Step 6 layer {args.layer} is a two-node fail-stop run: start both nodes without --single-node')
     if args.step == 9 and not args.profile_file:
         parser.error('Step 9 needs --profile-file')
+    if args.step != 9:
+        args.method = args.method or 'weavetp'
+        if args.method not in ('weavetp', 'anchortp'):
+            parser.error('Step 6 --method is weavetp or anchortp')
     # Two nodes split the Step 5 layouts within 300 s; one node runs both layouts and needs twice the budget, and so
     # does the inflight layer's long workload.
     budget = 600 if (args.step == 5 and args.single_node) or (args.step == 6 and args.layer == 'inflight') else 300
@@ -154,7 +159,7 @@ def main():
             sys.path.insert(0, str(args.repo / 'code/current/tools/resharding/failstop'))
             import run_failslow_quick
 
-            budget = run_failslow_quick.budget_seconds() + 120
+            budget = run_failslow_quick.budget_seconds(args.method) + 120
             deadline, status['budget_s'] = started + budget, budget
         if args.single_node:
             suite = f's{args.step}q_' + datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S') + '_' + uuid.uuid4().hex[:8] + '_single'
@@ -175,7 +180,7 @@ def main():
             (['--reference-root', args.reference_root] if args.reference_root else [])
         extra = {5: ['--layouts', 'tp2,tp4'] if args.single_node else [],
                  6: ['--layer', args.layer] + (b3 if args.layer in TWO_NODE_LAYERS else []),
-                 9: ['--profile-file', args.profile_file]}.get(
+                 9: ['--profile-file', args.profile_file] + (['--method', args.method] if args.method else [])}.get(
             args.step, ['--mode', 'both', '--rounds', '1', '--real-launches', '1'])
         argv = [sys.executable, '-B', str(entry), '--node', args.node, '--suite-id', suite, '--output', str(run), *extra,
                 '--quick', '--correctness-only', '--budget-seconds', str(max(1, deadline - time.monotonic() - 45)),
@@ -239,10 +244,12 @@ def main():
                     status['inflight'].update(inflight_at_expand=layer['inflight_at_expand'], analysis=layer['analysis'])
         elif args.step == 9:
             launches = summary['launches']
-            if not (summary['all_checks_passed'] and flags and set(launches) == set(run_failslow_quick.LAUNCHES) and
+            if not (summary['all_checks_passed'] and flags and set(launches) == set(run_failslow_quick.launch_names(args.method)) and
                     all(r['passed'] for r in launches.values())):
                 raise RuntimeError('incomplete Step 9 fail-slow checks')
             status['step9'] = {m: {k: r[k] for k in ('status', 'leftover_hogs', 'gate') if k in r} for m, r in launches.items()}
+            for name, record in launches.items():  # restart reloads, switch durations, decode steps in switches, replayed tokens
+                print(f"STEP 9 SUMMARY {name}: {json.dumps(record.get('gate', {}).get('summary', '缺失'), ensure_ascii=False)}", flush=True)
         else:
             if not (summary['all_cases_passed'] and flags and summary['emulate'] == summary['real'] == 'passed'):
                 raise RuntimeError('incomplete emulate/real correctness matrix')
@@ -316,7 +323,8 @@ def main():
                   f"backend=block attention=torch_splitkv shared_gpu_mode=true single_node={str(args.single_node).lower()} "
                   f"accepted=false logs={run}", flush=True)
         elif args.step == 9:
-            print(f"QUICK CHECK step=9 result={status['result']} (fail-slow W: weavetp/anchortp/restart, event order, deadline cut, "
+            print(f"QUICK CHECK step=9{' method=' + args.method if args.method else ''} result={status['result']} "
+                  f"(fail-slow W: {args.method or 'weavetp/anchortp/restart'}, event order, deadline cut, "
                   f"no co-runner left; fail-stop restart: passed, reference_audit skipped; {json.dumps(status.get('step9'), default=str)}) "
                   f"shared_gpu_mode=true accepted=false logs={run}", flush=True)
         elif args.step == 5:

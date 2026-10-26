@@ -106,7 +106,7 @@ class Simulation(model_test.Simulation):
                        'deterministic_mode': settings['run_mode'] == 'correctness', 'kv_heads': HEADS, 'memory_margin_bytes': 0,
                        'memory_limit_bytes': None,
                        'serving': {'requests': str(inputs['requests']), 'workload': str(inputs['workload']), 'plan': str(inputs['plan']),
-                                   'b_max': 2, 'decode_policy': 'greedy', 'block_tokens': 4, 'segment_tokens': 16, 'max_delta_steps': 2,
+                                   'b_max': 2, 'decode_policy': 'greedy', 'block_tokens': 4, 'segment_tokens': 16, 'max_delta_steps': 2, 'max_overlap_steps': 1,
                                    'attention': 'auto', 'growth': {'shrink': 0, 'expand': 1}, 'geometry': GEOMETRY, 'capacity_tokens': 40},
                        **self.extra_config}
         sim = self
@@ -146,7 +146,8 @@ class Simulation(model_test.Simulation):
                 get_rank=lambda group=None: self.local.rank if group is None else group.rank(),
                 get_world_size=lambda group=None: self.local.size if group is None else group.size(),
                 get_process_group_ranks=lambda group: list(group.members), get_backend=lambda: 'fake',
-                all_reduce=self.reduce, all_gather=self.gather, broadcast_object_list=self.broadcast_object_list))
+                all_reduce=self.reduce, all_gather=self.gather, broadcast_object_list=self.broadcast_object_list,
+                barrier=lambda group=None, **kwargs: self.collective(group, None, 'barrier')))
             stack.enter_context(patch.object(model_worker.c10d, '_abort_process_group',
                 lambda: common.require(getattr(self.local, 'rank', None) is not None, 'abort without a process group')))
             stack.enter_context(patch.object(serving_probe.signal, 'SIGKILL', 9, create=True))

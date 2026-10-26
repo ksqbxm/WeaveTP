@@ -7,11 +7,13 @@ from dataclasses import asdict
 import torch
 
 
-def execute(tasks, *, device, sources, targets, host, service_factory, rank_to_group, labels, record, resources):
+def execute(tasks, *, device, sources, targets, host, service_factory, rank_to_group, labels, record, resources, overlap=None):
     """Run every wave of a mixed plan on this device and return its byte totals.
 
     All members iterate identical waves and launch the copy service each time,
-    so the one-byte participation ring never waits on an absent rank.
+    so the one-byte participation ring never waits on an absent rank. `overlap(work)`, when given, runs between
+    each wave's launch and its wait (the caller's ordering barrier and foreground decode); without it the waves
+    are synchronous as before.
     """
     h2d = torch.cuda.Stream()
     stats = {'payload_bytes': 0, 'sent_bytes': 0, 'control_bytes': 0, 'reuse_bytes': 0}
@@ -69,6 +71,8 @@ def execute(tasks, *, device, sources, targets, host, service_factory, rank_to_g
         service.producer_stream = producer
         work = service.launch()
         resources.pending.append(work)
+        if overlap is not None:
+            overlap(work)
         # H2D is already in flight while NCCL launches and waits on its own streams.
         work.wait()
         for dest, received in pending:
