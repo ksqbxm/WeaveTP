@@ -1,6 +1,6 @@
 # fail-slow weavetp 在线切换：依据、探针与删改清单
 
-状态（2026-10-26）：**已实现，CPU 已验证，服务器 GPU 未运行。** 分支 `codex/failslow-online`（自 `codex/failslow@848350f`，实现 073a50f）。只改 fail-slow 场景下的 weavetp（`common.online_switch`）；fail-stop 全部、AnchorTP、restart、ignore、nofault 行为不变，`releases.json["step6"]` 不动。交付登记见 §6，审阅后的修改见 §7。
+状态（2026-10-26）：**已实现，CPU 已验证，服务器 GPU 未运行。** 分支 `codex/failslow-online`（自 `codex/failslow@848350f`，实现 073a50f）。只改 fail-slow 场景下的 weavetp（`common.online_switch`）；fail-stop 全部、AnchorTP、restart、ignore、nofault 行为不变（重放 history 的修复除外，见 §5），`releases.json["step6"]` 不动。交付登记见 §6，审阅后的修改见 §7。
 
 ## 1. 依据
 
@@ -60,6 +60,7 @@
 ## 5. 已有问题（汇报，不在本次范围）
 
 - **restart 循环的 history 竞态。** 电池供电降频时，`test_serving_protocol.test_restart_cycle_reloads_tp2_then_tp4_from_disk` 在未改动的 `848350f` 上也稳定失败：`seq 19: 7 history tokens for an input length of 8`。某个 rank 重新接纳回队请求时用了本地过期的 history。交流供电下通过。fail-stop 与 fail-slow 的 restart 都走这段代码。
+  - **已修（实现 `d8b8cd7`：`a7c64d5` 加上 `codex/restart-history` 的 `0c7b250`，cherry-pick 无冲突；只进 `releases.json["failslow"]`，`step6` 仍为 `073a50f`，fail-stop 照旧）。** 根因：`BlockBackend.history_for` 优先用本 rank 自留的 history。请求从副本 R 回队（故障重放、restart 扩回时的回队、peak 驱逐），在另一副本上又提交了 token 后再回队、回到 R 时，R 的 rank（rejoin 后的 emulate victim 或 survivor）手里是上一段的旧副本，比 `input_len` 短。改为重放一律用回队时发布的 `history/<seq>/<len>`。同时发现 `ServingWorker.history_source` 把发布的整段 history（prompt + 已提交）当作"已提交 token"返回，跨副本重放时 prompt 拼了两次（上下文与 greedy 输出错，长度和计时不变），改为去掉 prompt。确定性单测 `test_serving_protocol.ReplayHistoryTests`（回队 → 另一副本 → 再回队 → 回到原副本，每段与不中断的 greedy 结果逐 token 相同）。本机一直是交流供电，用 12–32 个忙循环进程加压代替降频：修复前 restart 模拟 18 次里 2 次报此错（另 1 次是 8 s 等待上限）；修复后 29 次全部通过（`0c7b250` 加压 14 次、不加压 5 次，`d8b8cd7` 加压 10 次），其中 2 次确实走到了旧副本更短的路径。记录见 `failslow_online_cpu_evidence/history_restart_loaded.txt`。
 - **`test_expand_with_requests_in_flight`** 的 emulate/real 子测试在电池供电下超出模拟器 8 s 等待上限（基线同样失败，交流供电下通过）。交流供电下 emulate 子测试还会偶发另一种失败："the workload drained before the expand"。60 条 toy 请求中，EDP0 扩容 cutover 时仍在运行的只有 1–4 条，降到 0 条测试就失败。基线 `848350f` 与本分支的分布相同（均值 2.4 / 2.2，最小值都是 1），所以这是测试余量太小，不是代码差异；交替重跑记录见 `failslow_online_cpu_evidence/review_inflight_margin.log`。
 - **peak=evict 的跨域驱逐**（§4），只影响非在线路径。
 
@@ -71,15 +72,16 @@
   - 第一次交付 `9fb58aa`（电池供电）：301 通过、1 跳过、3 失败，失败项与基线电池供电相同。
   - 审阅修改后 `a7c64d5`（交流供电、主机空闲）：302 通过（296 + 新增 6 项）、1 跳过（仅 Linux），118 subtest 通过，1 个 subtest 失败。失败的是 `test_expand_with_requests_in_flight` 的 emulate 子测试（"drained before the expand"），这是 §5 的测试余量问题，与改动无关：单独重复运行时，`848350f` 24/24 通过，第一次交付 `434b104` 9/10，`a7c64d5` 20/24；但三者"cutover 时仍在运行的请求数"分布相同（§5）。
   - 另一次全量在主机被另一会话的 16 个忙循环占满时运行，同一子测试触发 8 s 等待上限。
-  - 日志在 [failslow_online_cpu_evidence/](failslow_online_cpu_evidence/)：`baseline_ac.log`（基线、交流）、`baseline_battery.log`（基线、电池）、`base_items_battery.log`（#7/#11/#15 之后）、`online_battery.log`（第一次交付）、`review_ac.log`（审阅后、交流空闲）、`review_ac_loaded.log`（审阅后、主机满载）、`review_inflight_margin.log`（上述重复运行与余量测量）。
+  - history 修复后 `d8b8cd7`（交流供电、主机空闲）：303 通过（302 + `ReplayHistoryTests`）、1 跳过（仅 Linux），119 subtest；紧接着重跑的 `a7c64d5` 为 302 通过、1 跳过、119 subtest（这两次 in-flight 子测试都没有碰上余量问题）。
+  - 日志在 [failslow_online_cpu_evidence/](failslow_online_cpu_evidence/)：`baseline_ac.log`（基线、交流）、`baseline_battery.log`（基线、电池）、`base_items_battery.log`（#7/#11/#15 之后）、`online_battery.log`（第一次交付）、`review_ac.log`（审阅后、交流空闲）、`review_ac_loaded.log`（审阅后、主机满载）、`review_inflight_margin.log`（上述重复运行与余量测量）、`history_ac.log` / `history_review_base_ac.log`（history 修复后 / 同时段的 `a7c64d5`）、`history_restart_loaded.txt`（§5 的加压 restart 模拟）。
 - 新增/修改测试：
   - `test_failslow_protocol.test_weavetp_switches_online`：缩容 KV 前缀和 delta 字节 > 0、replayed_tokens = 0、victim 在释放前参与 shrink 与 shrink_delta、survivor 在 transfer 之后才 transition、缩容与扩回的 KV 逐位校验通过、启动后 `runtime.build` 与规划器调用均为 0（只在启动时 16 次 TP4 加载、4 次 TP2 构建、32 次规划）、启动后无 `new_group`、每个 rank 的释放/再分配顺序（稳态只有一套布局驻留）、缩容计划用降权画像而扩回用原始画像。
   - `test_failslow.py`：`execute` 带钩子时钩子在 launch 与 wait 之间、不带钩子结果逐字节一致；栅栏在 decode 之前且步数受预算限制；降权只改故障 device 的进出条目；KV 固定配对；`--method` 单次 launch 与预算；摘要字段（缺失项标"缺失"）。
-- 交付（审阅后，取代第一次交付 A `9fb58aa` / B `915d08d` / C `434b104`）：
-  - 实现（A）`a7c64d5871519553272e215bfc93d4216d0dc3c6`；
+- 交付（history 修复后，取代审阅后的 A `a7c64d5` / B `9488be4` / C `6748e02`，以及第一次交付 A `9fb58aa` / B `915d08d` / C `434b104`）：
+  - 实现（A）`d8b8cd7ef1d59926e3e294a2e6d905e115cdfdfb`（`a7c64d5` + §5 的 history 修复）；
   - 清单（B）为本文件所在提交，`releases.json["failslow"]` 指向 A，`step6` 仍为 `073a50f`；
   - 服务器命令在 B 的子提交（C）里，随 bundle 交付：[Step9_failslow_服务器命令.md](Step9_failslow_服务器命令.md)。
-- 行数（相对 `848350f`，不含 releases.json）：实现 +409/−112 行（不计空行、注释和 docstring：314 行）；测试 +216/−14 行（174 行）。审阅修改本身相对第一次交付：实现 +131/−150 行，测试 +1/−1 行。
+- 行数（相对 `848350f`，不含 releases.json）：实现 +409/−112 行（不计空行、注释和 docstring：314 行）；测试 +216/−14 行（174 行）。审阅修改本身相对第一次交付：实现 +131/−150 行，测试 +1/−1 行。history 修复相对 `a7c64d5`：实现 +8/−10 行，测试 +30 行。
 
 ## 7. 审阅修改（2026-10-26，实现 `a7c64d5`）
 

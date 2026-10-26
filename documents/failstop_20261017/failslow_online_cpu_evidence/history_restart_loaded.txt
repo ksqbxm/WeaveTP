@@ -1,0 +1,74 @@
+Every block but the last was run on codex/restart-history (434b104 base): its replay code (block_backend.py,
+remote_control.py, the requeue paths in serving_worker.py) is identical to a7c64d5's. The last block is the cherry-pick
+d8b8cd7 (a7c64d5 + the fix), same harness, AC power.
+
+test_serving_protocol.py::ServingProtocolTests::test_restart_cycle_reloads_tp2_then_tp4_from_disk, run one at a time on AC power
+(Win32_Battery.BatteryStatus = 2) while N busy-loop Python processes load the 16 logical CPUs, to stand in for battery
+throttling. "baseline" = 434b104 code (block_backend.py / serving_worker.py as at 434b104), "fixed" = 0c7b250.
+Fixed runs also load a scratch pytest plugin that wraps BlockBackend.history_for and counts the replays whose rank still held
+its own copy of the history (replays_with_local_copy) and those where that copy was shorter than the row's input length
+(stale: the baseline raises on every one of them).
+
+baseline, 16 busy loops
+baseline run 1: 1 passed in 24.86s [31 s]
+baseline run 2: 1 failed in 33.58s [37 s] seq 19: 7 history tokens for an input length of 11
+baseline run 3: 1 passed in 28.27s [34 s]
+baseline, 32 busy loops
+baseline32 run 1: 1 passed in 38.87s [50 s]
+baseline32 run 2: 1 passed in 37.53s [47 s]
+baseline32 run 3: 1 passed in 34.91s [44 s]
+baseline32 run 4: 1 passed in 34.77s [45 s]
+baseline32 run 5: 1 passed in 36.62s [44 s]
+baseline, 16 busy loops
+baseline16 run 1: 1 passed in 39.36s [51 s]
+baseline16 run 2: 1 failed in 43.02s [47 s] TimeoutError(keys)   (the simulation's 8 s bus-wait guard, not the history check)
+baseline16 run 3: 1 passed in 28.32s [33 s]
+baseline16 run 4: 1 passed in 33.12s [37 s]
+baseline16 run 5: 1 passed in 31.30s [36 s]
+baseline16 run 6: 1 passed in 28.80s [33 s]
+baseline, 12 busy loops
+baseline12 run 1: 1 failed in 32.98s [36 s] seq 19: 7 history tokens for an input length of 10
+baseline12 run 2: 1 passed in 30.49s [36 s]
+baseline12 run 3: 1 passed in 27.21s [31 s]
+baseline12 run 4: 1 passed in 26.51s [31 s]
+
+fixed, 12 busy loops
+fixed12 run 1: 1 passed in 23.43s [36 s]  | {"exit": 0, "replays_with_local_copy": 6, "stale": 0, "examples": []}
+fixed12 run 2: 1 passed in 24.24s [34 s]  | {"exit": 0, "replays_with_local_copy": 6, "stale": 0, "examples": []}
+fixed12 run 3: 1 passed in 31.16s [48 s]  | {"exit": 0, "replays_with_local_copy": 6, "stale": 0, "examples": []}
+fixed12 run 4: 1 passed in 30.00s [49 s]  | {"exit": 0, "replays_with_local_copy": 6, "stale": 0, "examples": []}
+fixed12 run 5: 1 passed in 29.76s [42 s]  | {"exit": 0, "replays_with_local_copy": 20, "stale": 4, "examples": [{"seq": 15, "replica": 0, "local": 8, "input_len": 11}, {"seq": 18, "replica": 1, "local": 7, "input_len": 10}, {"seq": 18, "replica": 1, "local": 7, "input_len": 10}]}
+fixed12 run 6: 1 passed in 24.43s [37 s]  | {"exit": 0, "replays_with_local_copy": 6, "stale": 0, "examples": []}
+fixed12 run 7: 1 passed in 22.81s [33 s]  | {"exit": 0, "replays_with_local_copy": 6, "stale": 0, "examples": []}
+fixed12 run 8: 1 passed in 20.27s [30 s]  | {"exit": 0, "replays_with_local_copy": 6, "stale": 0, "examples": []}
+fixed, 16 busy loops
+fixed16 run 1: 1 passed in 25.40s [41 s]  | {"exit": 0, "replays_with_local_copy": 6, "stale": 0, "examples": []}
+fixed16 run 2: 1 passed in 22.77s [36 s]  | {"exit": 0, "replays_with_local_copy": 6, "stale": 0, "examples": []}
+fixed16 run 3: 1 passed in 24.14s [36 s]  | {"exit": 0, "replays_with_local_copy": 8, "stale": 0, "examples": []}
+fixed16 run 4: 1 passed in 22.54s [35 s]  | {"exit": 0, "replays_with_local_copy": 2, "stale": 0, "examples": []}
+fixed16 run 5: 1 passed in 24.97s [37 s]  | {"exit": 0, "replays_with_local_copy": 8, "stale": 0, "examples": []}
+fixed16 run 6: 1 passed in 21.45s [32 s]  | {"exit": 0, "replays_with_local_copy": 6, "stale": 0, "examples": []}
+fixed, no load
+fixed0 run 1: 1 passed in 10.09s [14 s]  | {"exit": 0, "replays_with_local_copy": 8, "stale": 0, "examples": []}
+fixed0 run 2: 1 passed in 11.23s [17 s]  | {"exit": 0, "replays_with_local_copy": 12, "stale": 0, "examples": []}
+fixed0 run 3: 1 passed in 9.89s [14 s]  | {"exit": 0, "replays_with_local_copy": 8, "stale": 0, "examples": []}
+fixed0 run 4: 1 passed in 10.27s [15 s]  | {"exit": 0, "replays_with_local_copy": 4, "stale": 0, "examples": []}
+fixed0 run 5: 1 passed in 13.17s [17 s]  | {"exit": 0, "replays_with_local_copy": 8, "stale": 0, "examples": []}
+
+ReplayHistoryTests (deterministic, no threads) against each half of the fix:
+  434b104 code                 AssertionError: [2, 7, 1, 8, 2, 7, 1, 13, 13] != [2, 7, 1, 8, 21, 21, 21, 21, 21]  (prompt prefilled twice)
+  history_source fix only      RuntimeError: seq 3: 7 history tokens for an input length of 9                    (stale local copy)
+  history_for fix only         AssertionError: [2, 7, 1, 8, 2, 7, 1, 13, 13] != [2, 7, 1, 8, 21, 21, 21, 21, 21]
+  both (0c7b250)               1 passed
+
+d8b8cd7 (a7c64d5 + fix), 12 then 16 busy loops
+rebased12 run 1: 1 passed in 15.42s [21 s]  | {"exit": 0, "replays_with_local_copy": 6, "stale": 0, "examples": []}
+rebased12 run 2: 1 passed in 16.69s [25 s]  | {"exit": 0, "replays_with_local_copy": 6, "stale": 0, "examples": []}
+rebased12 run 3: 1 passed in 16.21s [23 s]  | {"exit": 0, "replays_with_local_copy": 6, "stale": 0, "examples": []}
+rebased12 run 4: 1 passed in 16.22s [24 s]  | {"exit": 0, "replays_with_local_copy": 6, "stale": 0, "examples": []}
+rebased12 run 5: 1 passed in 16.11s [23 s]  | {"exit": 0, "replays_with_local_copy": 8, "stale": 0, "examples": []}
+rebased12 run 6: 1 passed in 16.03s [23 s]  | {"exit": 0, "replays_with_local_copy": 6, "stale": 0, "examples": []}
+rebased16 run 1: 1 passed in 20.45s [34 s]  | {"exit": 0, "replays_with_local_copy": 6, "stale": 0, "examples": []}
+rebased16 run 2: 1 passed in 19.19s [30 s]  | {"exit": 0, "replays_with_local_copy": 4, "stale": 0, "examples": []}
+rebased16 run 3: 1 passed in 22.84s [34 s]  | {"exit": 0, "replays_with_local_copy": 12, "stale": 4, "examples": [{"seq": 19, "replica": 1, "local": 7, "input_len": 11}, {"seq": 19, "replica": 1, "local": 7, "input_len": 11}, {"seq": 19, "replica": 1, "local": 7, "input_len": 11}]}
+rebased16 run 4: 1 passed in 18.64s [29 s]  | {"exit": 0, "replays_with_local_copy": 6, "stale": 0, "examples": []}
