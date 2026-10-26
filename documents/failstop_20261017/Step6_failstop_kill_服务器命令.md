@@ -1,15 +1,15 @@
 # fail-stop WeaveTP `--mode kill`：快验与正式运行（服务器命令）
 
-交付：实现 A `6f2fc849328c368cd45f9254575129fc32eb2731`，清单 B `c71d737c0e3185097432a0f06c6ae17beaa96c5c`（`releases.json["step6"]` 指向 A，`failslow` 仍为 `d8b8cd7ef1d59926e3e294a2e6d905e115cdfdfb`）。本文件在 B 的子提交 C 里，C 随 bundle `failstop_online_c71d737.bundle` 交付（基线 `f7d555998b45756998465924d733fd70e553d6b4`，ref `refs/heads/codex/failstop-online-c71d737` 指向 C），bundle 的 SHA256 在同名 `.sha256` 文件里。设计与字段见 [11_failstop在线化依据.md](11_failstop在线化依据.md)。CPU 回归 306 通过、1 跳过、123 个子测试；**以下命令都未在服务器执行过，下文的时长全是估计值。**
+交付：实现 A `c4b203e0d059700088f4b23fc84b9ab88605e935`，清单 B `dee4f3b91dff0923764aaa78232fe5cae744e247`（`releases.json["step6"]` 指向 A，`failslow` 仍为 `d8b8cd7ef1d59926e3e294a2e6d905e115cdfdfb`）。本文件在 B 的子提交 C 里，C 随 bundle `failstop_online_dee4f3b.bundle` 交付（基线 `f7d555998b45756998465924d733fd70e553d6b4`，ref `refs/heads/codex/failstop-online-dee4f3b` 指向 C），bundle 的 SHA256 在同名 `.sha256` 文件里。设计与字段见 [11_failstop在线化依据.md](11_failstop在线化依据.md)。CPU 回归 306 通过、1 跳过、123 个子测试；**以下命令都未在服务器执行过，下文的时长全是估计值。**
 
-此前的 step6 实现 `073a50f` 带有两个回放历史问题，用它跑出的 step6 结果作废（11 §8）。顺序：① 导入 → ② 快验（kill 的 b3）→ ③ 正式矩阵 → ④ 回传。
+此前的 step6 实现 `073a50f` 带有两个回放历史问题，用它跑出的 step6 结果作废（11 §8）。首版交付（实现 `6f2fc84`、清单 `c71d737`、bundle `failstop_online_c71d737`）经审阅后作废（11 §9），请改用本 bundle。顺序：① 导入 → ② 快验（kill 的 b3）→ ③ 正式矩阵 → ④ 回传。
 
 ## ① 导入 bundle（Windows → SL3061 → SL3060；只 fetch 和校验，不检出主仓库）
 
 Windows：
 
 ```powershell
-$Bundle = 'C:/Users/ksqbx/.codex/worktrees/failstop-online/failstop_online_c71d737.bundle'
+$Bundle = 'C:/Users/ksqbx/.codex/worktrees/failstop-online/failstop_online_dee4f3b.bundle'
 Get-FileHash -LiteralPath $Bundle -Algorithm SHA256
 Get-Content "$Bundle.sha256"
 scp $Bundle "$Bundle.sha256" 5090-SL3061:/data/ubuntu/lxh/weavetp/
@@ -22,17 +22,17 @@ set -e
 cd /data && mountpoint -q /data
 source /data/ubuntu/lxh/weavetp/env.sh
 cd /data/ubuntu/lxh/weavetp
-sha256sum -c failstop_online_c71d737.bundle.sha256
-git -C "$REPO" bundle verify "$PWD/failstop_online_c71d737.bundle"
-git -C "$REPO" fetch "$PWD/failstop_online_c71d737.bundle" refs/heads/codex/failstop-online-c71d737:refs/heads/codex/failstop-online-c71d737
-test "$(git -C "$REPO" rev-parse refs/heads/codex/failstop-online-c71d737~1)" = c71d737c0e3185097432a0f06c6ae17beaa96c5c
-test "$(git -C "$REPO" show c71d737c0e3185097432a0f06c6ae17beaa96c5c:code/current/tools/resharding/failstop/releases.json | "$PYTHON" -c 'import json,sys; print(json.load(sys.stdin)["step6"])')" = 6f2fc849328c368cd45f9254575129fc32eb2731
-test "$(git -C "$REPO" show c71d737c0e3185097432a0f06c6ae17beaa96c5c:code/current/tools/resharding/failstop/releases.json | "$PYTHON" -c 'import json,sys; print(json.load(sys.stdin)["failslow"])')" = d8b8cd7ef1d59926e3e294a2e6d905e115cdfdfb
-git -C "$REPO" rev-parse refs/heads/codex/failstop-online-c71d737
-scp failstop_online_c71d737.bundle failstop_online_c71d737.bundle.sha256 ubuntu@10.60.14.1:/data/ubuntu/lxh/weavetp/
+sha256sum -c failstop_online_dee4f3b.bundle.sha256
+git -C "$REPO" bundle verify "$PWD/failstop_online_dee4f3b.bundle"
+git -C "$REPO" fetch "$PWD/failstop_online_dee4f3b.bundle" refs/heads/codex/failstop-online-dee4f3b:refs/heads/codex/failstop-online-dee4f3b
+test "$(git -C "$REPO" rev-parse refs/heads/codex/failstop-online-dee4f3b~1)" = dee4f3b91dff0923764aaa78232fe5cae744e247
+test "$(git -C "$REPO" show dee4f3b91dff0923764aaa78232fe5cae744e247:code/current/tools/resharding/failstop/releases.json | "$PYTHON" -c 'import json,sys; print(json.load(sys.stdin)["step6"])')" = c4b203e0d059700088f4b23fc84b9ab88605e935
+test "$(git -C "$REPO" show dee4f3b91dff0923764aaa78232fe5cae744e247:code/current/tools/resharding/failstop/releases.json | "$PYTHON" -c 'import json,sys; print(json.load(sys.stdin)["failslow"])')" = d8b8cd7ef1d59926e3e294a2e6d905e115cdfdfb
+git -C "$REPO" rev-parse refs/heads/codex/failstop-online-dee4f3b
+scp failstop_online_dee4f3b.bundle failstop_online_dee4f3b.bundle.sha256 ubuntu@10.60.14.1:/data/ubuntu/lxh/weavetp/
 ```
 
-`rev-parse refs/heads/codex/failstop-online-c71d737` 打印的是 C（本文件所在提交），请记入回传。SL3060 执行同样的命令，去掉最后一行 `scp`。导入只新增分支 `codex/failstop-online-c71d737`，主仓库的检出和工作区不变。
+`rev-parse refs/heads/codex/failstop-online-dee4f3b` 打印的是 C（本文件所在提交），请记入回传。SL3060 执行同样的命令，去掉最后一行 `scp`。导入只新增分支 `codex/failstop-online-dee4f3b`，主仓库的检出和工作区不变。
 
 ## ② 快验：quick_check --step 6 --layer b3 --mode kill（每节点一条命令，≤ 300 s）
 
@@ -43,7 +43,7 @@ scp failstop_online_c71d737.bundle failstop_online_c71d737.bundle.sha256 ubuntu@
 - 两节点 60 s 内先后启动，SL3060 先。SL3061 的命令只把 `--node SL3060` 改成 `--node SL3061`。
 
 ```bash
-source /data/ubuntu/lxh/weavetp/env.sh && bash <(git -C "$REPO" show c71d737c0e3185097432a0f06c6ae17beaa96c5c:code/current/tools/resharding/failstop/quick_check.sh) --manifest c71d737c0e3185097432a0f06c6ae17beaa96c5c --step 6 --layer b3 --method weavetp --mode kill --node SL3060 --profile-file /data/ubuntu/lxh/weavetp/profiles/step3_s3q_20261017T200325_62b5818c_real_00.json --reference-root /data/ubuntu/lxh/weavetp/acceptance/step05_model_correctness/s5q_20261017T165421_80b77c92_single/SL3061
+source /data/ubuntu/lxh/weavetp/env.sh && bash <(git -C "$REPO" show dee4f3b91dff0923764aaa78232fe5cae744e247:code/current/tools/resharding/failstop/quick_check.sh) --manifest dee4f3b91dff0923764aaa78232fe5cae744e247 --step 6 --layer b3 --method weavetp --mode kill --node SL3060 --profile-file /data/ubuntu/lxh/weavetp/profiles/step3_s3q_20261017T200325_62b5818c_real_00.json --reference-root /data/ubuntu/lxh/weavetp/acceptance/step05_model_correctness/s5q_20261017T165421_80b77c92_single/SL3061
 ```
 
 `nohup.log`（`/data/ubuntu/lxh/weavetp/acceptance/step06_batched_serving/kickoff/<NODE>_*/`）中 SL3060 的结论行：
@@ -69,7 +69,7 @@ EV=<结论行 files 里 events_actual.json 的路径>; RS=<同一目录的 resul
 
 ## ③ 正式矩阵（timing，独占 16 卡；b-max 8；每格 3 次独立 launch）
 
-前提：② 两节点都 PASS，且 R1、R2、EDP1 三条判据都满足。请求集与标定沿用 [Step6_AnchorTP接入_服务器命令.md](Step6_AnchorTP接入_服务器命令.md) 的 ②③。生成工具 `tools.resharding.e2e.make_failstop_requests`，标定目标为无故障服务约 108 s。若此前已按那份文档的 ③ 标定并冻结请求集，可以继续用（请求集与实现无关）；否则先做 ②③，把其中的 `git -C "$REPO" checkout --detach 560361c…` 换成 `git -C "$REPO" checkout --detach c71d737c0e3185097432a0f06c6ae17beaa96c5c`。此前的正式结果作废，需按下表重跑。
+前提：② 两节点都 PASS，且 R1、R2、EDP1 三条判据都满足。请求集与标定沿用 [Step6_AnchorTP接入_服务器命令.md](Step6_AnchorTP接入_服务器命令.md) 的 ②③。生成工具 `tools.resharding.e2e.make_failstop_requests`，标定目标为无故障服务约 108 s。若此前已按那份文档的 ③ 标定并冻结请求集，可以继续用（请求集与实现无关）；否则先做 ②③，把其中的 `git -C "$REPO" checkout --detach 560361c…` 换成 `git -C "$REPO" checkout --detach dee4f3b91dff0923764aaa78232fe5cae744e247`。此前的正式结果作废，需按下表重跑。
 
 **矩阵**（b-max 8；N=3；顺序执行，不并行）：
 
@@ -121,7 +121,7 @@ EV=<结论行 files 里 events_actual.json 的路径>; RS=<同一目录的 resul
 SL3060 的命令如下，SL3061 只改 `--node`：
 
 ```bash
-source /data/ubuntu/lxh/weavetp/env.sh && git -C "$REPO" checkout --detach c71d737c0e3185097432a0f06c6ae17beaa96c5c
+source /data/ubuntu/lxh/weavetp/env.sh && git -C "$REPO" checkout --detach dee4f3b91dff0923764aaa78232fe5cae744e247
 REQ=/data/ubuntu/lxh/weavetp/failstop_requests/N<标定的 N>
 PROFILE=/data/ubuntu/lxh/weavetp/profiles/step3_s3q_20261017T200325_62b5818c_real_00.json
 OUT=/data/ubuntu/lxh/weavetp/acceptance/step07_e2e_acceptance
