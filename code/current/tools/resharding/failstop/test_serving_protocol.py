@@ -295,8 +295,7 @@ class ServingProtocolTests(unittest.TestCase):
         """120 toy requests and a 1 s rejoin keep EDP0 serving at the expand, so the ranks that join (emulate victims, real
         replacements) decode handed-over requests whose admits they never saw: a KeyError in Driver.body before the
         fix. Every request completes, the gate's result holds the serving_wall_s the calibration reads, the analyzer
-        accepts the gate's files and the quick check's criterion (run_serving.handed_over) covers those requests.
-        The simulation's 8 s bus-wait cap bounds the workload."""
+        accepts the gate's files and the quick check's criterion (run_serving.handed_over) covers those requests."""
         loop, joined = serving_worker.ServingWorker.loop, {}
 
         def record(worker):

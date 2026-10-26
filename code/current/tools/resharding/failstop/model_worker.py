@@ -172,7 +172,7 @@ class Worker:
                 self.prebuilt[2] = self.build(stage, 2)
                 # The world never changes in emulate mode: serving models keep their communicators.
                 self.prebuilt[2]['service2'] = self.prebuilt[1]['target']
-            for phase in list(self.prebuilt)[1:]:
+            for phase in self.prebuilt:
                 if self.healthy:
                     self.prebuilt[phase]['target'] = self.prebuilt[0]['target']
             if self.online:  # EDP0's phase-2 groups are its phase-0 ones (same ranks): the initial TP4 model serves again
@@ -442,12 +442,10 @@ class Worker:
         self.transfers.append({'phase': f'{round_id}/{phase}', 'label': label, **stats, 'tasks': len(tasks)})
         return stats
 
-    def warm_pairs(self, pairs, session=None, group=None):
+    def warm_pairs(self, pairs, session, group):
         """Online switch: one one-element exchange over every (source rank, target rank) pair a planned or KV wave will
         use, through the same copy service and order as execute(), so no wave pays a first P2P connection. session/group:
-        the world the waves run in (default the current one; kill: the degraded world and its data group)."""
-        session = self.session if session is None else session
-        group = self.pack['data'] if group is None else group
+        the world the waves run in and its data group (kill: the degraded world)."""
         service = make_copy_service(session, self.slot, group, p2p_order='task-round')
         index = {r: i for i, r in enumerate(dist.get_process_group_ranks(group))}
         rank = session.rank_map()[self.slot]['new_rank']
@@ -461,11 +459,10 @@ class Worker:
         service.launch().wait()
         return len(pairs)
 
-    def plan_before_serving(self, label, sources, targets, profile, session=None):
+    def plan_before_serving(self, label, sources, targets, profile, session):
         """Online switch: publish this rank's weight shards for `label`, gather everyone's and plan them now (every rank
-        computes the same plan); transfer() runs it at the switch. session: the world the switch runs in (default the
-        current one; kill: the degraded world, whose members exclude the victims)."""
-        session = self.session if session is None else session
+        computes the same plan); transfer() runs it at the switch. session: the world the switch runs in (kill: the
+        degraded world, whose members exclude the victims)."""
         self.bus.put(f'plan_shards/{label}/{self.slot}', {'sources': [asdict(s) for s in sources], 'targets': [asdict(t) for t in targets]})
         mapping = session.rank_map()
         rank_map = {identity(r): r['new_rank'] for r in mapping if r['active']}

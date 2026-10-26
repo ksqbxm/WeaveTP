@@ -11,6 +11,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+import analyze_failstop_e2e
 import model_worker
 import serving_worker
 import test_serving_protocol as serving_test
@@ -23,8 +24,9 @@ LIVE = tuple(s for s in range(16) if s not in VICTIMS)  # kill keeps the initial
 
 
 class Recording(serving_test.Simulation):
-    """The serving simulation with every world, group, abort and barrier call recorded as (event, (slot, epoch), stage,
-    detail); stage: 'start' until every rank serves, 'serving' until the rejoin's transition, 'rejoin', 'finish'."""
+    """The serving simulation with every world, group, abort and collective call and every switch ack recorded as
+    (event, (slot, epoch), stage, detail); stage: 'start' until every rank serves, 'serving' until the rejoin's
+    transition, 'rejoin', 'finish'."""
 
     log = None
 
@@ -51,14 +53,19 @@ class Recording(serving_test.Simulation):
         super().abort(group)
 
     def collective(self, group, value, kind):
-        if kind == 'barrier':
-            self.note('barrier', group.members)
+        self.note('collective', (kind, group.members))
         return super().collective(group, value, kind)
+
+    def put(self, key, value):
+        if key.startswith(('switch_ack/', 'phase/0/1/')):  # only the workers ack and report
+            self.note('ack' if key.startswith('switch_ack/') else 'degraded_report', key.split('/')[1])
+        super().put(key, value)
 
 
 def recorded(sim):
-    """Planner calls, model builds, requeues, and the groups holding a dead rank left after abort_dead_groups."""
-    plan, build = model_worker.PLANNERS['weavetp'], serving_test.FakeRuntime.build
+    """Planner calls, model builds, model-parallel state drops, requeues, and the groups holding a dead rank left after
+    abort_dead_groups."""
+    plan, build, destroyed = model_worker.PLANNERS['weavetp'], serving_test.FakeRuntime.build, serving_test.FakeRuntime.world_destroyed
     requeue, abort_dead = remote_control.RemoteControl.requeue, serving_worker.ServingWorker.abort_dead_groups
 
     def note(event, detail, function):
@@ -72,8 +79,12 @@ def recorded(sim):
         sim.note('dead_left', [g.members for g in sim.local.registry if g is not sim.local.default and set(g.members) & set(VICTIMS)])
     return [patch.dict(model_worker.PLANNERS, {'weavetp': note('plan', lambda *a, **k: None, plan)}),
             patch.object(serving_test.FakeRuntime, 'build', note('build', lambda self, tp, groups, load: (tp, load), build)),
+            patch.object(serving_test.FakeRuntime, 'world_destroyed', note('world_destroyed', lambda self: None, destroyed)),
             patch.object(remote_control.RemoteControl, 'requeue', note('requeue', lambda self, rows, step: len(rows), requeue)),
-            patch.object(serving_worker.ServingWorker, 'abort_dead_groups', after_abort)]
+            patch.object(serving_worker.ServingWorker, 'abort_dead_groups', after_abort),
+            # the shrink's growth takes the whole open-block zone: an online-style budget would leave EDP1 no step in the
+            # waves, kill's EDP1 still decodes in every one (no KV moves)
+            patch.object(serving_worker.ServingSwitcher, 'growth', staticmethod(lambda serving: {'shrink': serving['max_delta_steps'], 'expand': 1}))]
 
 
 class KillProtocolTests(unittest.TestCase):
@@ -92,6 +103,8 @@ class KillProtocolTests(unittest.TestCase):
                 torch.use_deterministic_algorithms(False)
             result_json, events = (json.loads((root / name).read_text()) for name in ('result.json', 'events_actual.json'))
             plans = {p.stem.removeprefix('source_plan_0_'): json.loads(p.read_text()) for p in root.glob('source_plan_*.json')}
+            self.assertEqual(analyze_failstop_e2e.main([str(root), '--out', str(root / 'analysis')]), 0)
+            self.assertEqual(json.loads((root / 'analysis' / 'rejected.json').read_text()), [])
         self.check(log, result, result_json, events, plans, run_mode)
 
     def check(self, log, result, result_json, events, plans, run_mode):
@@ -102,23 +115,35 @@ class KillProtocolTests(unittest.TestCase):
         aborts = [e for e in serving if e[0] == 'abort']
         self.assertTrue(aborts and all(e[3] is not None and set(e[3]) & set(VICTIMS) for e in aborts), aborts)
         self.assertEqual({e[1] for e in aborts}, {(s, 0) for s in LIVE})
+        for identity in [(s, 0) for s in LIVE]:  # once its degraded world served (after its phase-1 report: shrink_done)
+            mine = [e[0] for e in serving if e[1] == identity]
+            self.assertLess(mine.index('degraded_report'), mine.index('abort'))
         self.assertEqual(sorted((e[1], e[3]) for e in log if e[0] == 'dead_left'), [((s, 0), []) for s in LIVE])
+        # with them the initial world's model-parallel state goes, once per live rank (real drops it at the fault)
+        self.assertEqual(sorted(e[1] for e in serving if e[0] == 'world_destroyed'), [(s, 0) for s in LIVE])
         # the rejoin: each live rank aborts the world and initializes the new one once; each replacement only initializes
         for identity in [(s, 0) for s in LIVE] + [(s, 2) for s in VICTIMS]:
             self.assertEqual([(e[0], e[3]) for e in rejoin if e[1] == identity and e[0] in ('init', 'abort')],
                              ([('abort', None)] if identity[1] == 0 else []) + [('init', 'nccl')])
-        # the victims (only mirroring the shrink's requeue before their ack, then killed) touch no group after the start
-        self.assertEqual([e for e in log if e[1][0] in VICTIMS and e[1][1] == 0 and e[2] != 'start' and e[0] != 'requeue'], [])
+        # the gate kills the victims once every rank acked the shrink: no victim takes part in a collective after its ack
+        # (the peak eviction's broadcast over the EDP0 domain comes before it), nor in any group call after the start
+        for slot in VICTIMS:
+            mine = [e for e in log if e[1] == (slot, 0)]
+            ack = mine.index(next(e for e in mine if e[0] == 'ack'))
+            self.assertEqual([e for e in mine[ack:] if e[0] == 'collective'], [])
+            self.assertEqual([e for e in mine if e[2] != 'start' and e[0] in ('new_group', 'init', 'abort', 'plan', 'build')], [])
         # the shrink's TP2 targets were built before serving (released, reallocated at the shrink): 16 TP4 loads and
         # 4 TP2 builds at the start, the 8 TP4 expand targets at the rejoin
         self.assertEqual(sorted(e[3] for e in log if e[0] == 'build' and e[2] == 'start'), [(2, False)] * 4 + [(4, True)] * 16)
         self.assertEqual([e[3] for e in rejoin if e[0] == 'build'], [(4, False)] * 8)
         # b) the shrink waves order on the barrier of the twelve live ranks only (a dead member would hang them)
-        barriers = [e for e in serving if e[0] == 'barrier']
-        self.assertEqual(({e[3] for e in barriers}, {e[1] for e in barriers}), ({LIVE}, {(s, 0) for s in LIVE}))
-        # c) EDP1 decodes inside the shrink waves; EDP0's requests in flight are requeued and replay from prompt + history
+        barriers = [e for e in serving if e[0] == 'collective' and e[3][0] == 'barrier']
+        self.assertEqual(({e[3][1] for e in barriers}, {e[1] for e in barriers}), ({LIVE}, {(s, 0) for s in LIVE}))
+        # c) EDP1 decodes in every shrink wave (max_overlap_steps = 1; no KV moves, so no open-block budget caps it);
+        # EDP0's requests in flight are requeued and replay from prompt + history
+        waves = 1 + max(t['wave'] for t in plans['shrink']['tasks'])
         edp1 = {s['direction']: s for s in result_json['switches'] if s['domain'] == 'EDP1'}
-        self.assertGreater(edp1['shrink']['overlap_steps'], 0)
+        self.assertEqual(edp1['shrink']['overlap_steps'], waves)
         self.assertGreater(sum(e[3] for e in serving if e[0] == 'requeue'), 0)
         metrics = result['metrics']
         self.assertEqual((metrics['requests_completed'], metrics['check_passed']), (12, True))

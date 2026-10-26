@@ -12,6 +12,7 @@ Transfers are synchronous waves (Step 4 overlap is not measured here).
 
 import argparse
 import json
+import math
 import os
 import sys
 import time
@@ -91,7 +92,7 @@ class ServingWorker(ModelWorker):
                                               v_dim=serving['geometry']['v_dim'])
         self.backend = self.driver = None
         self.kv_checks = []
-        self.dead_group_abort_s = None  # kill: abort_dead_groups()
+        self.dead_group_abort_s = None  # kill: abort_dead_groups(), reported with the expand
         self.switcher_class = SWITCHERS[config['method']]  # the only place a method differs: switcher + its planner
         # correctness: reference hash audits, KV snapshots and bitwise checks; timing: none of them (default mode).
         self.audits = config['run_mode'] == 'correctness'
@@ -258,12 +259,14 @@ class ServingWorker(ModelWorker):
 
     def abort_dead_groups(self):
         """kill, once the degraded world serves: abort every process group of this rank that holds a SIGKILLed victim (the
-        phase-0 groups and the model-parallel state of the initial load; never the default world), so the victims' GPUs
-        are reclaimed before the spawn. No group is created; the rejoin aborts and rebuilds the rest of the world."""
+        phase-0 groups and the model-parallel groups of the initial load; never the default world), so the victims' GPUs
+        are reclaimed before the spawn, and drop the initial world's model-parallel state with them (real drops it at the
+        fault too). No group is created; the rejoin aborts and rebuilds the rest of the world."""
         start, victims = time.monotonic(), set(self.session.failed)  # kill keeps the initial world's ranks (= slots)
         for group, ranks in list(c10d._world.pg_group_ranks.items()):
             if group is not c10d.GroupMember.WORLD and victims & set(ranks):
                 c10d._abort_process_group(group)
+        self.runtime.world_destroyed()
         self.dead_group_abort_s = time.monotonic() - start
 
     def serve_until(self, key, decode_fn):
@@ -296,20 +299,20 @@ class ServingWorker(ModelWorker):
             self.runtime.release(self.tp2_model, [], [])
         if self.kill:
             shrink = self.plan_before_serving('shrink', tp4, tp2, self.profile, self.degraded)
-            pairs = {(t.source.rank, t.target.rank) for t in shrink['tasks']}
-            warmed = self.warm_pairs({(a, b) for a, b in pairs if a != b}, self.degraded, self.prebuilt[1]['data'])
+            warmed = self.warm_pairs({(t.source.rank, t.target.rank) for t in shrink['tasks'] if t.source.rank != t.target.rank},
+                                     self.degraded, self.prebuilt[1]['data'])
             self.events.append({'event': 'kill_ready', 'shrink_tasks': len(shrink['tasks']), 'p2p_pairs_warmed': warmed})
             return
         self.tp4_model, (current, degraded) = model, self.shrink_maps()
         fault = {identity(r) for r in self.config['topology'] if r['slot'] in self.session.failed}
         factor = 1 / (1 + LEVELS[self.config['failslow']['level']])
-        shrink = self.plan_before_serving('shrink', tp4, tp2, downweighted(self.profile, fault, factor))
-        expand = self.plan_before_serving('expand', tp4 if self.healthy else tp2, [] if self.healthy else tp4, self.profile)
+        shrink = self.plan_before_serving('shrink', tp4, tp2, downweighted(self.profile, fault, factor), self.session)
+        expand = self.plan_before_serving('expand', tp4 if self.healthy else tp2, [] if self.healthy else tp4, self.profile, self.session)
         heads = range(self.serving['geometry']['heads'] // self.serving['geometry']['group_heads'])
         kv = {(self.builder.holder(a, replica, g), self.builder.holder(b, replica, g)) for a, b in ((current, degraded), (degraded, current))
               for replica in (REPLICA_IDS['EDP0', 0], REPLICA_IDS['EDP0', 1]) for g in heads}
         pairs = {(t.source.rank, t.target.rank) for plan in (shrink, expand) for t in plan['tasks']} | kv
-        warmed = self.warm_pairs({(a, b) for a, b in pairs if a != b})
+        warmed = self.warm_pairs({(a, b) for a, b in pairs if a != b}, self.session, self.pack['data'])
         self.events.append({'event': 'online_ready', 'shrink_tasks': len(shrink['tasks']), 'expand_tasks': len(expand['tasks']),
                             'downweight': {'devices': sorted(fault), 'factor': factor}, 'p2p_pairs_warmed': warmed})
 
@@ -325,7 +328,7 @@ class ServingWorker(ModelWorker):
     def overlap(self, decode_fn, steps, budget):
         """execute()'s in-flight hook of the online switch (as the live benchmark): every member has enqueued this wave's
         P2P before any rank enters a model collective (Gloo barrier), then this domain decodes max_overlap_steps steps,
-        at most `budget` in the whole switch (the open-block zone the delta copies). decode_fn None: barrier only."""
+        at most `budget` in the whole switch (online: the open-block zone the delta copies). decode_fn None: barrier only."""
         def run(work):
             dist.barrier(group=self.barrier)
             for _ in range(self.serving['max_overlap_steps']):
@@ -345,10 +348,10 @@ class ServingWorker(ModelWorker):
 
         meta None (fail-stop, fail-slow anchortp/restart: survivors only, after the transition): the target is built now
         (kill: the TP2 model built before serving, storage reallocated, planned then too) and only weights move; the
-        requests replay from prompt + committed history. Online (meta = this rank's
-        compacted tables, still in the phase-0 world): every EDP0 rank, victims included, also sends its A-zone KV; a
-        survivor receives into the TP2 model built before serving (storage reallocated) and a TP2 pool laid out like
-        the tables; the waves overlap decode."""
+        requests replay from prompt + committed history. Online (meta = this rank's compacted tables, still in the
+        phase-0 world): every EDP0 rank, victims included, also sends its A-zone KV; a survivor receives into the TP2
+        model built before serving (storage reallocated) and a TP2 pool laid out like the tables; the waves overlap
+        decode."""
         target = target_context = budget = None
         moves, kv_sources, kv_targets = [], [], []
         if meta is None:
@@ -634,9 +637,14 @@ class ServingSwitcher:
         self.online_shrink = worker.online and self.direction == 'shrink'
         # The ranks whose KV migrates: the survivors at the expand; every EDP0 rank (victims too) at the online shrink.
         self.moves_kv = (self.role == 'survivor' and self.direction == 'expand') or (self.online_shrink and self.role != 'healthy')
-        worker.bus.put(f'switch_ack/{self.direction}/{worker.slot}', True)
+
+    def ack(self):
+        """This rank is past the switch's last collective over its whole domain (the peak eviction's broadcast): from now on
+        the gate may fault the victims."""
+        self.w.bus.put(f'switch_ack/{self.direction}/{self.w.slot}', True)
 
     def compact(self, direction):
+        self.ack()
         if self.moves_kv:
             context = self.w.backend.context
             self.w.backend.hold_releases()  # the compacted layout stays fixed until the cutover
@@ -648,13 +656,12 @@ class ServingSwitcher:
         return {'moved_blocks': 0}
 
     def base_wave(self, direction, decode_fn):
-        w, steps = self.w, []
-        # Online (and kill's shrink): the waves overlap decode, at most max_delta_steps - growth steps (the open-block zone
-        # the delta copies). kill's survivors only take the barrier: their TP4 groups hold the dead ranks.
-        overlap = None
-        if w.online or (w.kill and direction == 'shrink'):
-            overlap = w.overlap(None if w.kill and self.role == 'survivor' else decode_fn, steps,
-                                w.serving['max_delta_steps'] - self.run.growth.get(direction, 0))
+        w, steps, overlap = self.w, [], None
+        if w.online:  # the waves overlap decode, at most max_delta_steps - growth steps (the open-block zone the delta copies)
+            overlap = w.overlap(decode_fn, steps, w.serving['max_delta_steps'] - self.run.growth.get(direction, 0))
+        elif w.kill and direction == 'shrink':
+            # no KV moves, so no budget: EDP1 decodes in every wave; the survivors only order (their TP4 groups hold dead ranks)
+            overlap = w.overlap(decode_fn if self.role == 'healthy' else None, steps, math.inf)
         if self.online_shrink:
             # Online fail-slow WeaveTP: migrate in the phase-0 world, both EDPs decode inside the waves, victims are sources;
             # the world moves to the degraded groups only at the cutover. Fail-stop and the other methods: the path below.
@@ -792,11 +799,11 @@ class ServingSwitcher:
         run.layout = w.tp
         if direction == 'shrink' and self.role == 'survivor':
             w.bus.put(f'destination/{ROUND}/1/{w.slot}', True)
-        if direction == 'shrink' and w.kill:
-            w.abort_dead_groups()
         # An emulate victim's single switch spans the whole degraded period and ends in the expanded world.
         w.phase_report(ROUND, 2 if self.role == 'victim' else self.phase, empty_receiver=self.role == 'victim')
         w.session.complete()  # after the report (the gate compares rank maps in the transition state); forwards may run again
+        if direction == 'shrink' and w.kill:  # the degraded world serves (shrink_done); the dead groups go now
+            w.abort_dead_groups()
 
 
 class AnchorTPSwitcher(ServingSwitcher):
@@ -834,6 +841,7 @@ class RestartSwitcher(ServingSwitcher):
         return {'shrink': 0, 'expand': 0}
 
     def compact(self, direction):
+        self.ack()
         run, hooks = self.run, self.run.hooks
         if self.role == 'survivor' and direction == 'expand':
             rows = [row for r in hooks.edp0 for row in run.ledger.replica(r).running.values()]

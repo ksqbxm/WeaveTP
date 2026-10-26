@@ -195,7 +195,12 @@ class Simulation:
                 if node == 'SL3061':
                     self.wait([f'cuda/2/{s}' for s in victims])
                 self.put(f'verified/2/{node}', True)
-            self.wait(['finish'])
+            # as the real supervisor, the finish is awaited for the whole launch (the drain), not one protocol step
+            deadline = time.monotonic() + self.config['launch_timeout_s']
+            while not self.has('finish'):
+                if self.errors or time.monotonic() > deadline:
+                    raise TimeoutError(['finish'])
+                time.sleep(0.01)
             self.wait([f'done/{s}' for s in slots])
             self.put(f'clean/{node}', True)
         except BaseException:

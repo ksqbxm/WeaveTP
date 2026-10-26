@@ -371,8 +371,9 @@ def write_outputs(root, config, instances, workload, summaries, times, trigger, 
                        'abort_s': {phase: times[f'aborted_{phase}'] - times[f'transition/0/{phase}'] for phase in (1, 2)},
                        'rebuild_s': {phase: times[f'build/0/{phase}'] - times[f'aborted_{phase}'] for phase in (1, 2)},
                        'edp1_pause_s': max((p['edp1_rejoin_pause_s'] for p in pauses), default=None),
-                       # kill: the slowest live rank's abort of the groups holding a victim, once the degraded world served
-                       'dead_group_abort_s': max((r['dead_group_abort_s'] for r in reports['0/1'] if r['dead_group_abort_s'] is not None),
+                       # kill: the slowest live rank's abort of the groups holding a victim once the degraded world served
+                       # (after its phase-1 report, so reported at the expand)
+                       'dead_group_abort_s': max((r['dead_group_abort_s'] for r in reports['0/2'] if r['dead_group_abort_s'] is not None),
                                                  default=None),
                        'null_reason': None if reclaim is not None else 'emulate mode has no GPU reclaim or EDP1 abort pause'}})
     write_json(root / 'events_actual.json', events)
