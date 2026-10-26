@@ -1,13 +1,13 @@
 # 快验：fail-slow 在线切换 Step 9（服务器命令）
 
-交付：实现 A `a7c64d5871519553272e215bfc93d4216d0dc3c6`，清单 B `9488be44b8ed6152c4089413289312d1805d2dd5`（`releases.json["failslow"]` 指向 A；`step6` 仍为 `073a50f41e70ee54551f3f2e2613c60203697ad1`，fail-stop 不变）。本文件在 B 的子提交 C 里，C 随 bundle `failslow_online_9488be4.bundle` 交付（基线 `f7d555998b45756998465924d733fd70e553d6b4`，ref `refs/heads/codex/failslow-online-9488be4` 指向 C），bundle 的 SHA256 在同名 `.sha256` 文件里。设计与删改清单见 [10_failslow在线化依据.md](10_failslow在线化依据.md)；CPU 回归（交流供电、主机空闲）302 项通过、1 项仅 Linux 的测试跳过；1 个 subtest 失败，是 fail-stop 测试 test_expand_with_requests_in_flight 的 emulate 子测试，属已知的余量问题，基线上同样存在（见 10 §5、§6）。以下命令未在服务器执行过。
+交付：实现 A `d8b8cd7ef1d59926e3e294a2e6d905e115cdfdfb`（审阅后的 `a7c64d5` 加上重放 history 的修复：restart 循环的竞态与跨副本重放时 prompt 重复，见 [10_failslow在线化依据.md](10_failslow在线化依据.md) §5），清单 B `005a4c84e40fa2c576e29952f0638f5807f530a3`（`releases.json["failslow"]` 指向 A；`step6` 仍为 `073a50f41e70ee54551f3f2e2613c60203697ad1`，fail-stop 不变）。本文件在 B 的子提交 C 里，C 随 bundle `failslow_online_005a4c8.bundle` 交付（基线 `f7d555998b45756998465924d733fd70e553d6b4`，ref `refs/heads/codex/failslow-online-005a4c8` 指向 C），bundle 的 SHA256 在同名 `.sha256` 文件里。上一版 bundle `failslow_online_9488be4`（A `a7c64d5`、B `9488be4`）作废；已导入的旧分支留着不用即可。设计与删改清单见 10；CPU 回归（交流供电、主机空闲）303 项通过、1 项仅 Linux 的测试跳过、119 subtest 通过，与同时段重跑的 a7c64d5（302 项）相比只多出新单测 ReplayHistoryTests（见 10 §5、§6）。以下命令未在服务器执行过。
 
 ## ① 导入 bundle（Windows → SL3061 → SL3060；只 fetch 和校验，不检出主仓库）
 
 Windows：
 
 ```powershell
-$Bundle = 'C:/Users/ksqbx/.codex/worktrees/failslow-online/failslow_online_9488be4.bundle'
+$Bundle = 'C:/Users/ksqbx/.codex/worktrees/failslow-online/failslow_online_005a4c8.bundle'
 Get-FileHash -LiteralPath $Bundle -Algorithm SHA256
 Get-Content "$Bundle.sha256"
 scp $Bundle "$Bundle.sha256" 5090-SL3061:/data/ubuntu/lxh/weavetp/
@@ -20,16 +20,16 @@ set -e
 cd /data && mountpoint -q /data
 source /data/ubuntu/lxh/weavetp/env.sh
 cd /data/ubuntu/lxh/weavetp
-sha256sum -c failslow_online_9488be4.bundle.sha256
-git -C "$REPO" bundle verify "$PWD/failslow_online_9488be4.bundle"
-git -C "$REPO" fetch "$PWD/failslow_online_9488be4.bundle" refs/heads/codex/failslow-online-9488be4:refs/heads/codex/failslow-online-9488be4
-test "$(git -C "$REPO" rev-parse refs/heads/codex/failslow-online-9488be4~1)" = 9488be44b8ed6152c4089413289312d1805d2dd5
-test "$(git -C "$REPO" show 9488be44b8ed6152c4089413289312d1805d2dd5:code/current/tools/resharding/failstop/releases.json | "$PYTHON" -c 'import json,sys; print(json.load(sys.stdin)["failslow"])')" = a7c64d5871519553272e215bfc93d4216d0dc3c6
-git -C "$REPO" rev-parse refs/heads/codex/failslow-online-9488be4
-scp failslow_online_9488be4.bundle failslow_online_9488be4.bundle.sha256 ubuntu@10.60.14.1:/data/ubuntu/lxh/weavetp/
+sha256sum -c failslow_online_005a4c8.bundle.sha256
+git -C "$REPO" bundle verify "$PWD/failslow_online_005a4c8.bundle"
+git -C "$REPO" fetch "$PWD/failslow_online_005a4c8.bundle" refs/heads/codex/failslow-online-005a4c8:refs/heads/codex/failslow-online-005a4c8
+test "$(git -C "$REPO" rev-parse refs/heads/codex/failslow-online-005a4c8~1)" = 005a4c84e40fa2c576e29952f0638f5807f530a3
+test "$(git -C "$REPO" show 005a4c84e40fa2c576e29952f0638f5807f530a3:code/current/tools/resharding/failstop/releases.json | "$PYTHON" -c 'import json,sys; print(json.load(sys.stdin)["failslow"])')" = d8b8cd7ef1d59926e3e294a2e6d905e115cdfdfb
+git -C "$REPO" rev-parse refs/heads/codex/failslow-online-005a4c8
+scp failslow_online_005a4c8.bundle failslow_online_005a4c8.bundle.sha256 ubuntu@10.60.14.1:/data/ubuntu/lxh/weavetp/
 ```
 
-`rev-parse refs/heads/codex/failslow-online-9488be4` 打印的是 C（本文件所在提交），请记入回传。SL3060：同上，去掉最后一行 `scp`。导入只新增分支 `codex/failslow-online-9488be4`，主仓库的检出和工作区不变。
+`rev-parse refs/heads/codex/failslow-online-005a4c8` 打印的是 C（本文件所在提交），请记入回传。SL3060：同上，去掉最后一行 `scp`。导入只新增分支 `codex/failslow-online-005a4c8`，主仓库的检出和工作区不变。
 
 快验直接从清单 B 读出 `quick_check.sh` 运行，不需要先检出：它按 B 的 `releases.json["failslow"]` 找到实现 A，把 A 的 `quick_driver.py` 取到 kickoff 目录运行；`quick_driver` 在 quick 锁内检查已跟踪文件干净、检出 A，结束后切回 `f7d5559`。运行期间主仓库被检出为 A，请避开其他正在使用主仓库工作区的任务。
 
@@ -38,15 +38,15 @@ scp failslow_online_9488be4.bundle failslow_online_9488be4.bundle.sha256 ubuntu@
 每条命令只跑该方法一次 fail-slow W 级 launch：共享 GPU、correctness 模式，SL3061 的 GPU 0/1/4/5 每卡 1 个 `failslow_hog.py`，warmup 20 s、D 30 s、tail 20 s、检测 10 s，toy 请求池 2000 条，到截止时还有请求未完成。每条约 5 分钟。每次两节点 60 s 内先后启动，SL3060 先；SL3061 的命令只把 `--node SL3060` 改成 `--node SL3061`。三条依次跑（同一时间只跑一条）。
 
 ```bash
-source /data/ubuntu/lxh/weavetp/env.sh && bash <(git -C "$REPO" show 9488be44b8ed6152c4089413289312d1805d2dd5:code/current/tools/resharding/failstop/quick_check.sh) --manifest 9488be44b8ed6152c4089413289312d1805d2dd5 --step 9 --method weavetp --node SL3060 --profile-file /data/ubuntu/lxh/weavetp/profiles/step3_s3q_20261017T200325_62b5818c_real_00.json
+source /data/ubuntu/lxh/weavetp/env.sh && bash <(git -C "$REPO" show 005a4c84e40fa2c576e29952f0638f5807f530a3:code/current/tools/resharding/failstop/quick_check.sh) --manifest 005a4c84e40fa2c576e29952f0638f5807f530a3 --step 9 --method weavetp --node SL3060 --profile-file /data/ubuntu/lxh/weavetp/profiles/step3_s3q_20261017T200325_62b5818c_real_00.json
 ```
 
 ```bash
-source /data/ubuntu/lxh/weavetp/env.sh && bash <(git -C "$REPO" show 9488be44b8ed6152c4089413289312d1805d2dd5:code/current/tools/resharding/failstop/quick_check.sh) --manifest 9488be44b8ed6152c4089413289312d1805d2dd5 --step 9 --method restart --node SL3060 --profile-file /data/ubuntu/lxh/weavetp/profiles/step3_s3q_20261017T200325_62b5818c_real_00.json
+source /data/ubuntu/lxh/weavetp/env.sh && bash <(git -C "$REPO" show 005a4c84e40fa2c576e29952f0638f5807f530a3:code/current/tools/resharding/failstop/quick_check.sh) --manifest 005a4c84e40fa2c576e29952f0638f5807f530a3 --step 9 --method restart --node SL3060 --profile-file /data/ubuntu/lxh/weavetp/profiles/step3_s3q_20261017T200325_62b5818c_real_00.json
 ```
 
 ```bash
-source /data/ubuntu/lxh/weavetp/env.sh && bash <(git -C "$REPO" show 9488be44b8ed6152c4089413289312d1805d2dd5:code/current/tools/resharding/failstop/quick_check.sh) --manifest 9488be44b8ed6152c4089413289312d1805d2dd5 --step 9 --method ignore --node SL3060 --profile-file /data/ubuntu/lxh/weavetp/profiles/step3_s3q_20261017T200325_62b5818c_real_00.json
+source /data/ubuntu/lxh/weavetp/env.sh && bash <(git -C "$REPO" show 005a4c84e40fa2c576e29952f0638f5807f530a3:code/current/tools/resharding/failstop/quick_check.sh) --manifest 005a4c84e40fa2c576e29952f0638f5807f530a3 --step 9 --method ignore --node SL3060 --profile-file /data/ubuntu/lxh/weavetp/profiles/step3_s3q_20261017T200325_62b5818c_real_00.json
 ```
 
 `nohup.log`（`/data/ubuntu/lxh/weavetp/acceptance/step09_failslow/kickoff/<NODE>_*/`）末行应为 `QUICK CHECK step=9 method=<方法> result=PASS ...`。只检查：launch 跑完且 passed、本节点没有残留的 `failslow_hog.py`；SL3060 上事件顺序正确、截止时确有未完成请求。
