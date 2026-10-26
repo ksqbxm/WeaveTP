@@ -1,15 +1,15 @@
 # fail-slow 主图：实验入口与分析器（`--scenario failslow`）
 
-状态（2026-10-21）：**已实现，CPU 已验证，服务器 GPU 未运行。** 分支 `codex/failslow`，已 rebase 到 `codex/failstop` 的清单 `568c319`（实现 `c4df30a`），`releases.json` 的 `step6` 与 `failslow` 指向同一实现（§9）。交付登记见 §8。本分支新功能只在 `--scenario failslow` 与 `--method restart` 下生效，weavetp/anchortp 的 fail-stop 行为与 `c4df30a` 相同。
+状态（2026-10-21）：**已实现，CPU 已验证，服务器 GPU 未运行。** 分支 `codex/failslow`，已 rebase 到 `codex/failstop` 的清单 `568c319`（实现 `c4df30a`），`releases.json` 的 `step6` 与 `failslow` 指向同一实现（§9）。交付登记见 §8。本分支新功能只在 `--scenario failslow` 与 `--method restart` 下生效，weavetp/anchortp 的 fail-stop 行为与 `c4df30a` 相同。fail-slow 的 weavetp 在 `codex/failslow-online` 上改为在线切换（组、模型、权重计划都在开始服务前备好，缩容不重放、KV 一起迁移），见 [10_failslow在线化依据.md](10_failslow在线化依据.md)；下文 §1、§4、§7 已按在线切换更新。
 
 图：横轴 W/M/S，纵轴为窗口内端到端输出吞吐（token/s）除以同参数 nofault 的均值；方法 ignore、restart、anchortp、weavetp。慢速时长 D 默认 600 s（FALCON/GREYHOUND 中计算型 fail-slow 平均约 10 分钟）。
 
 ## 1. 两点现有能力（读代码结论）
 
-1. **缩容时不能边服务边缩容。** shrink 一开始 EDP0 就停服：在途请求带已提交 token 回到队首、EDP0 标记 down（`e2e/failstop_adapter.FailstopHooks.before`），TP2 就绪后重新 prefill。shrink 的权重波次期间 EDP1 也不解码（`serving_worker.py` 中 `sender_transfer('shrink')` 不带 decode_fn）。按要求不改 shrink 路径，weavetp/anchortp 的缩容都是停服缩容。扩容有 overlap：WeaveTP 在 base 波后跑 `growth['expand']=2` 个前台步，EDP1 在等计划键时继续服务；AnchorTP 两次迁移都是 `overlap_steps=0`。
+1. **缩容时不能边服务边缩容。** shrink 一开始 EDP0 就停服：在途请求带已提交 token 回到队首、EDP0 标记 down（`e2e/failstop_adapter.FailstopHooks.before`），TP2 就绪后重新 prefill。shrink 的权重波次期间 EDP1 也不解码（`serving_worker.py` 中 `sender_transfer('shrink')` 不带 decode_fn）。fail-stop 全部方法与 fail-slow 的 anchortp/restart 仍是停服缩容；fail-slow 的 weavetp 改为在线缩容（10 §2）。扩容有 overlap：WeaveTP 在 base 波后跑 `growth['expand']=2` 个前台步，EDP1 在等计划键时继续服务；AnchorTP 两次迁移都是 `overlap_steps=0`。
 2. **原驱动不支持按墙钟截止**，只在全部请求完成时下发 `done`。新增 `ControlService.close()`：截止后，对不在 hold、也没有待切换的域直接下发 `done`，不再接纳。worker 的 loop 退出路径不变，在途请求保留为未完成。
 
-emulate 模式已具备 fail-slow 需要的其余条件：进程不 kill；TP2 子组在启动时从现有 world 预建；被撤 rank 在 `emulate_release` 时释放权重和 KV（`StandbyWeights` resize 到 0）；慢卡释放后不发布任何分片，既不是 shrink 的源，也不是 expand 的源。因此 fail-slow 一律用 emulate 机制（强制 `--mode emulate`），weavetp/anchortp 没有新增切换代码。
+emulate 模式已具备 fail-slow 需要的其余条件：进程不 kill；TP2 子组在启动时从现有 world 预建；被撤 rank 在 `emulate_release` 时释放权重和 KV（`StandbyWeights` resize 到 0）；慢卡释放后不发布任何分片，不再是任何迁移的源（在线 weavetp 的慢卡在释放之前是缩容的源）。因此 fail-slow 一律用 emulate 机制（强制 `--mode emulate`）；anchortp 没有新增切换代码，weavetp 的在线切换见 10。
 
 ## 2. 时间线（网关时钟，SL3060）
 
@@ -39,7 +39,7 @@ deadline = inject_start + D + tail → close() → serving_done
 | 方法 | 检测后 | 注入结束后 | 实现位置 |
 |---|---|---|---|
 | ignore | 不动 | 不动 | `SWITCHERS['ignore']`（从不触发） |
-| weavetp | 撤下故障集合，EDP0 在 4 个健康 rank 上缩到 TP2：混合选源迁移权重，在途请求重新 prefill，停服缩容（§1） | 扩回 TP4：现有扩容路径（KV 前缀 + delta，2 个前台步） | 现有 `ServingSwitcher` |
+| weavetp | 在线缩到 TP2（4 个健康 rank）：权重按开始服务前算好的计划迁移（故障卡 p2p 降权 1/(1+k)），KV 一起迁移、不重放，迁移期间两个域都在波内解码；迁移完成后才撤下故障集合（10 §2） | 扩回 TP4：现有扩容路径（KV 前缀 + delta，2 个前台步），目标是再分配的初始 TP4 模型，计划开始服务前算好 | `ServingSwitcher`（`common.online_switch`） |
 | anchortp | 同时间点，固定选源、stop-the-world | 同时间点，`overlap_steps=0`、无 delta | 现有 `AnchorTPSwitcher` |
 | restart | EDP0 停服，在途请求回队；4 个健康 rank 在同一批进程内从磁盘加载 TP2 后重新 prefill | 再次停服回队，8 个 rank 从磁盘加载 TP4 | 新增 `RestartSwitcher`；也用于 emulate fail-stop（§9） |
 | nofault | 不注入、不切换（worker 内部方法为 ignore） | — | `--method nofault` |
@@ -72,9 +72,9 @@ restart 的说明：
 
 ## 7. 正确性与验证
 
-- **不做权重的逐参数检查（§10）。** fail-slow 的所有方法和 fail-stop 的 restart 既不对参考 hash 比对，也不做 TP4 自比；fail-stop 结果里标 `reference_audit="skipped"`。correctness 模式下 weavetp/anchortp 仍有扩容 KV 逐位检查和切换时的 logits 比对。
+- **不做权重的逐参数检查（§10）。** fail-slow 的所有方法和 fail-stop 的 restart 既不对参考 hash 比对，也不做 TP4 自比；fail-stop 结果里标 `reference_audit="skipped"`。correctness 模式下 weavetp/anchortp 仍有扩容 KV 逐位检查和切换时的 logits 比对；fail-slow weavetp 的缩容也逐位检查迁移的 KV。
 - **不做 token 逐位比对**，worker 也不记录 token id。
-- quick_check `--step 9`（共享 GPU、correctness、W 级、warmup 20 s、D 30 s、tail 20 s、detect 10 s、toy 请求池 2000 条）：依次跑 weavetp、anchortp、restart 三次 fail-slow launch，再跑一次 emulate fail-stop 的 restart（64 条 toy 请求，输出 24–72 token，全部完成）。只检查：每次 launch 跑完且 passed；本节点没有残留 `failslow_hog.py`；SL3060 上 fail-slow 三次的事件顺序正确、截止时确有未完成请求。不需要 `--reference-root`。toy 输入写在 `<run>/inputs_failslow`、`<run>/inputs_failstop`，两节点路径相同（§9）。
+- quick_check `--step 9`（共享 GPU、correctness、W 级、warmup 20 s、D 30 s、tail 20 s、detect 10 s、toy 请求池 2000 条）：依次跑 weavetp、anchortp、restart 三次 fail-slow launch，再跑一次 emulate fail-stop 的 restart（64 条 toy 请求，输出 24–72 token，全部完成）。只检查：每次 launch 跑完且 passed；本节点没有残留 `failslow_hog.py`；SL3060 上 fail-slow 三次的事件顺序正确、截止时确有未完成请求。不需要 `--reference-root`。toy 输入写在 `<run>/inputs_failslow`、`<run>/inputs_failstop`，两节点路径相同（§9）。加 `--method weavetp|restart|ignore|anchortp` 时只跑该方法一次 fail-slow launch，SL3060 打印摘要行（[Step9_failslow_服务器命令.md](Step9_failslow_服务器命令.md) ②）。
 - 扩容时加入的 rank 记 decode token 时间的 KeyError 已由 fail-stop 的 `c4df30a` 修复（同一行 setdefault），rebase 后本分支不再单独改这一行。
 - CPU 回归（`code/current`）：
 

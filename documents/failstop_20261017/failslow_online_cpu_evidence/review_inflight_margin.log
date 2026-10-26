@@ -1,0 +1,89 @@
+# test_expand_with_requests_in_flight (fail-stop, emulate subtest): exported trees 848350f (baseline), 434b104 (first delivery), a7c64d5 (review); AC power, 2026-10-26
+## interleaved rounds 1-4 (another session was running its regression part of the time; "KeyError" matches the test docstring printed in the traceback, not an error)
+round=1 commit=848350f 1 passed, 2 subtests passed in 31.19s | ok | cpu_load_after=19% 17:31:48
+round=1 commit=434b104 1 passed, 2 subtests passed in 21.62s | ok | cpu_load_after=5% 17:32:15
+round=1 commit=a7c64d5 1 failed, 1 passed, 1 subtests passed in 37.61s | KeyError drained before the expand  | cpu_load_after=17% 17:32:57
+round=2 commit=848350f 1 passed, 2 subtests passed in 23.00s | ok | cpu_load_after=87% 17:33:23
+round=2 commit=434b104 1 passed, 2 subtests passed in 30.09s | ok | cpu_load_after=77% 17:33:58
+round=2 commit=a7c64d5 1 passed, 2 subtests passed in 22.53s | ok | cpu_load_after=9% 17:34:24
+round=3 commit=848350f 1 passed, 2 subtests passed in 19.67s | ok | cpu_load_after=30% 17:34:47
+round=3 commit=434b104 1 passed, 2 subtests passed in 21.06s | ok | cpu_load_after=10% 17:35:12
+round=3 commit=a7c64d5 1 passed, 2 subtests passed in 21.68s | ok | cpu_load_after=7% 17:35:38
+round=4 commit=848350f 1 passed, 2 subtests passed in 23.38s | ok | cpu_load_after=33% 17:36:05
+round=4 commit=434b104 1 passed, 2 subtests passed in 21.29s | ok | cpu_load_after=% 17:36:30
+round=4 commit=a7c64d5 1 passed, 2 subtests passed in 21.79s | ok | cpu_load_after=16% 17:36:56
+
+## interleaved rounds 5-10 (idle host; failure reasons not captured in this batch)
+round=1 commit=848350f 1 passed, 2 subtests passed in 19.07s | ok | cpu_load_after=28% 17:37:59
+round=1 commit=434b104 1 passed, 2 subtests passed in 19.46s | ok | cpu_load_after=33% 17:38:22
+round=1 commit=a7c64d5 1 passed, 2 subtests passed in 20.00s | ok | cpu_load_after=23% 17:38:46
+round=2 commit=848350f 1 passed, 2 subtests passed in 19.94s | ok | cpu_load_after=10% 17:39:10
+round=2 commit=434b104 1 passed, 2 subtests passed in 20.89s | ok | cpu_load_after=3% 17:39:34
+round=2 commit=a7c64d5 1 passed, 2 subtests passed in 21.24s | ok | cpu_load_after=25% 17:39:59
+round=3 commit=848350f 1 passed, 2 subtests passed in 20.68s | ok | cpu_load_after=1% 17:40:24
+round=3 commit=434b104 1 passed, 2 subtests passed in 21.54s | ok | cpu_load_after=29% 17:40:49
+round=3 commit=a7c64d5 1 passed, 2 subtests passed in 20.82s | ok | cpu_load_after=20% 17:41:14
+round=4 commit=848350f 1 passed, 2 subtests passed in 21.71s | ok | cpu_load_after=21% 17:41:40
+round=4 commit=434b104 1 passed, 2 subtests passed in 21.35s | ok | cpu_load_after=30% 17:42:05
+round=4 commit=a7c64d5 1 passed, 2 subtests passed in 22.98s | ok | cpu_load_after=29% 17:42:32
+round=5 commit=848350f 1 passed, 2 subtests passed in 19.15s | ok | cpu_load_after=41% 17:42:55
+round=5 commit=434b104 1 passed, 2 subtests passed in 23.10s | ok | cpu_load_after=8% 17:43:22
+round=5 commit=a7c64d5 1 passed, 2 subtests passed in 21.38s | ok | cpu_load_after=6% 17:43:47
+round=6 commit=848350f 1 passed, 2 subtests passed in 20.98s | ok | cpu_load_after=% 17:44:12
+round=6 commit=434b104 1 failed, 1 passed, 1 subtests passed in 20.82s | | cpu_load_after=6% 17:44:36
+round=6 commit=a7c64d5 1 failed, 1 passed, 1 subtests passed in 21.34s | | cpu_load_after=28% 17:45:01
+
+## 848350f alone, 14 runs
+run=1 848350f 1 passed, 2 subtests passed in 18.59s | 
+run=2 848350f 1 passed, 2 subtests passed in 18.47s | 
+run=3 848350f 1 passed, 2 subtests passed in 18.56s | 
+run=4 848350f 1 passed, 2 subtests passed in 19.33s | 
+run=5 848350f 1 passed, 2 subtests passed in 19.54s | 
+run=6 848350f 1 passed, 2 subtests passed in 19.02s | 
+run=7 848350f 1 passed, 2 subtests passed in 20.44s | 
+run=8 848350f 1 passed, 2 subtests passed in 19.08s | 
+run=9 848350f 1 passed, 2 subtests passed in 18.90s | 
+run=10 848350f 1 passed, 2 subtests passed in 19.18s | 
+run=11 848350f 1 passed, 2 subtests passed in 19.21s | 
+run=12 848350f 1 passed, 2 subtests passed in 19.97s | 
+run=13 848350f 1 passed, 2 subtests passed in 20.06s | 
+run=14 848350f 1 passed, 2 subtests passed in 23.93s | 
+
+## a7c64d5 alone, 14 runs
+run=1 a7c64d5 1 passed, 2 subtests passed in 18.27s | 
+run=2 a7c64d5 1 passed, 2 subtests passed in 18.54s | 
+run=3 a7c64d5 1 passed, 2 subtests passed in 17.90s | 
+run=4 a7c64d5 1 passed, 2 subtests passed in 18.60s | 
+run=5 a7c64d5 1 passed, 2 subtests passed in 19.87s | 
+run=6 a7c64d5 1 passed, 2 subtests passed in 20.15s | 
+run=7 a7c64d5 1 passed, 2 subtests passed in 25.98s | 
+run=8 a7c64d5 1 passed, 2 subtests passed in 20.53s | 
+run=9 a7c64d5 1 failed, 1 passed, 1 subtests passed in 18.83s | drained before the expand 
+run=10 a7c64d5 1 passed, 2 subtests passed in 19.56s | 
+run=11 a7c64d5 1 passed, 2 subtests passed in 25.67s | 
+run=12 a7c64d5 1 passed, 2 subtests passed in 19.07s | 
+run=13 a7c64d5 1 passed, 2 subtests passed in 19.23s | 
+run=14 a7c64d5 1 failed, 1 passed, 1 subtests passed in 25.03s | drained before the expand 
+
+## margin: requests still running on EDP0 at the expand cutover (handed_decoded; the test needs > 0), 10 interleaved runs per tree
+{"label": "848350f", "run": 0, "handed_decoded": 1, "handed_over": 1, "done_before_cutover": 36, "shrink_s": 0.246, "expand_trigger": 2.5, "expand_cutover": 3.346, "last_done": 5.071}
+{"label": "a7c64d5", "run": 0, "handed_decoded": 2, "handed_over": 2, "done_before_cutover": 36, "shrink_s": 0.284, "expand_trigger": 2.237, "expand_cutover": 3.12, "last_done": 4.818}
+{"label": "848350f", "run": 0, "handed_decoded": 3, "handed_over": 3, "done_before_cutover": 35, "shrink_s": 0.285, "expand_trigger": 2.221, "expand_cutover": 3.303, "last_done": 5.037}
+{"label": "a7c64d5", "run": 0, "handed_decoded": 1, "handed_over": 1, "done_before_cutover": 36, "shrink_s": 0.258, "expand_trigger": 2.229, "expand_cutover": 3.141, "last_done": 4.881}
+{"label": "848350f", "run": 0, "handed_decoded": 3, "handed_over": 3, "done_before_cutover": 35, "shrink_s": 0.235, "expand_trigger": 2.219, "expand_cutover": 3.218, "last_done": 5.021}
+{"label": "a7c64d5", "run": 0, "handed_decoded": 2, "handed_over": 2, "done_before_cutover": 35, "shrink_s": 0.296, "expand_trigger": 2.222, "expand_cutover": 3.125, "last_done": 4.874}
+{"label": "848350f", "run": 0, "handed_decoded": 2, "handed_over": 2, "done_before_cutover": 36, "shrink_s": 0.246, "expand_trigger": 2.28, "expand_cutover": 3.181, "last_done": 4.929}
+{"label": "a7c64d5", "run": 0, "handed_decoded": 2, "handed_over": 2, "done_before_cutover": 36, "shrink_s": 0.23, "expand_trigger": 2.264, "expand_cutover": 3.141, "last_done": 4.911}
+{"label": "848350f", "run": 0, "handed_decoded": 2, "handed_over": 2, "done_before_cutover": 35, "shrink_s": 0.252, "expand_trigger": 2.254, "expand_cutover": 3.122, "last_done": 4.878}
+{"label": "a7c64d5", "run": 0, "handed_decoded": 2, "handed_over": 2, "done_before_cutover": 35, "shrink_s": 0.274, "expand_trigger": 2.242, "expand_cutover": 3.119, "last_done": 4.849}
+{"label": "848350f", "run": 0, "handed_decoded": 2, "handed_over": 2, "done_before_cutover": 35, "shrink_s": 0.254, "expand_trigger": 2.264, "expand_cutover": 3.141, "last_done": 4.888}
+{"label": "a7c64d5", "run": 0, "handed_decoded": 3, "handed_over": 3, "done_before_cutover": 34, "shrink_s": 0.272, "expand_trigger": 2.196, "expand_cutover": 3.159, "last_done": 4.884}
+{"label": "848350f", "run": 0, "handed_decoded": 3, "handed_over": 3, "done_before_cutover": 35, "shrink_s": 0.235, "expand_trigger": 2.196, "expand_cutover": 3.215, "last_done": 5.051}
+{"label": "a7c64d5", "run": 0, "handed_decoded": 1, "handed_over": 1, "done_before_cutover": 37, "shrink_s": 0.23, "expand_trigger": 2.287, "expand_cutover": 2.983, "last_done": 4.935}
+{"label": "848350f", "run": 0, "handed_decoded": 1, "handed_over": 1, "done_before_cutover": 37, "shrink_s": 0.225, "expand_trigger": 2.276, "expand_cutover": 3.126, "last_done": 4.79}
+{"label": "a7c64d5", "run": 0, "handed_decoded": 2, "handed_over": 2, "done_before_cutover": 35, "shrink_s": 0.286, "expand_trigger": 2.274, "expand_cutover": 3.151, "last_done": 4.921}
+{"label": "848350f", "run": 0, "handed_decoded": 4, "handed_over": 4, "done_before_cutover": 34, "shrink_s": 0.273, "expand_trigger": 2.29, "expand_cutover": 3.59, "last_done": 6.118}
+{"label": "a7c64d5", "run": 0, "handed_decoded": 3, "handed_over": 3, "done_before_cutover": 35, "shrink_s": 0.237, "expand_trigger": 2.304, "expand_cutover": 3.328, "last_done": 5.347}
+{"label": "848350f", "run": 0, "handed_decoded": 3, "handed_over": 3, "done_before_cutover": 35, "shrink_s": 0.281, "expand_trigger": 2.201, "expand_cutover": 3.158, "last_done": 4.915}
+{"label": "a7c64d5", "run": 0, "handed_decoded": 4, "handed_over": 4, "done_before_cutover": 34, "shrink_s": 0.224, "expand_trigger": 2.202, "expand_cutover": 3.258, "last_done": 5.103}
+## summary: handed_decoded 848350f mean 2.4 (min 1, max 4), a7c64d5 mean 2.2 (min 1, max 4); done_before_cutover 35.3 both; the test fails whenever this margin reaches 0
