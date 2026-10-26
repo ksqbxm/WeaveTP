@@ -1,0 +1,162 @@
+........................................................................ [ 23%]
+.........................s................................. [ 43%]
+................................................ [ 59%]
+.................................F................................. [ 81%]
+.........................................................           [100%]
+================================== FAILURES ===================================
+__ ServingProtocolTests.test_expand_with_requests_in_flight (mode='emulate') __
+
+self = <test_serving_protocol.ServingProtocolTests testMethod=test_expand_with_requests_in_flight>
+
+    def test_expand_with_requests_in_flight(self):
+        """60 toy requests and a 1 s rejoin keep EDP0 serving at the expand, so the ranks that join (emulate victims, real
+        replacements) decode handed-over requests whose admits they never saw: a KeyError in Driver.body before the
+        fix. Every request completes, the gate's result holds the serving_wall_s the calibration reads, the analyzer
+        accepts the gate's files and the quick check's criterion (run_serving.handed_over) covers those requests.
+        The simulation's 8 s bus-wait cap bounds the workload."""
+        loop, joined = serving_worker.ServingWorker.loop, {}
+    
+        def record(worker):
+            loop(worker)
+            joined[worker.slot] = {seq for seq, entry in worker.driver.run.request_log.items() if entry['t_tokens'] and not entry['admits']}
+    
+        for mode in ('emulate', 'real'):
+            joined.clear()
+            with self.subTest(mode=mode), patch.object(serving_worker.ServingWorker, 'loop', record), \
+>                   self.simulate(mode, {'method': 'weavetp'}, toy={'count': 60, 'rejoin_seconds': 1.0}) as (result, result_json, events, root):
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tools\resharding\failstop\test_serving_protocol.py:281: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+C:\Users\ksqbx\miniforge3\Lib\contextlib.py:141: in __enter__
+    return next(self.gen)
+           ^^^^^^^^^^^^^^
+tools\resharding\failstop\test_serving_protocol.py:178: in simulate
+    result = simulation.run()
+             ^^^^^^^^^^^^^^^^
+tools\resharding\failstop\test_serving_protocol.py:158: in run
+    result = serving_probe.control(self.config, self, common.Journal(self.root / 'controller.jsonl', 'SL3060', 'controller'),
+tools\resharding\failstop\serving_probe.py:153: in control
+    wait_until(lambda: all(service.finished.values()), config['launch_timeout_s'], 'every request to complete')
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+predicate = <function control.<locals>.<lambda> at 0x0000024FAE377A60>
+timeout = 60, what = 'every request to complete'
+
+    def wait_until(predicate, timeout, what):
+        deadline = time.monotonic() + timeout
+        while not predicate():
+            guard()
+            if bus.has('failure'):
+>               raise RuntimeError(f"peer failure: {bus.get('failure')}")
+E               RuntimeError: peer failure: actor failed: Traceback (most recent call last):
+E                 File "C:\Users\ksqbx\.codex\worktrees\failslow-online\WeaveTP_代码与实验资料_20260920\code\current\tools\resharding\failstop\test_topology_protocol.py", line 186, in supervisor
+E                   self.wait(['finish'])
+E                   ~~~~~~~~~^^^^^^^^^^^^
+E                 File "C:\Users\ksqbx\.codex\worktrees\failslow-online\WeaveTP_代码与实验资料_20260920\code\current\tools\resharding\failstop\test_async_protocol.py", line 53, in wait
+E                   raise TimeoutError(keys)
+E               TimeoutError: ['finish']
+
+tools\resharding\failstop\serving_probe.py:110: RuntimeError
+___ ServingProtocolTests.test_expand_with_requests_in_flight (mode='real') ____
+
+self = <test_serving_protocol.ServingProtocolTests testMethod=test_expand_with_requests_in_flight>
+
+    def test_expand_with_requests_in_flight(self):
+        """60 toy requests and a 1 s rejoin keep EDP0 serving at the expand, so the ranks that join (emulate victims, real
+        replacements) decode handed-over requests whose admits they never saw: a KeyError in Driver.body before the
+        fix. Every request completes, the gate's result holds the serving_wall_s the calibration reads, the analyzer
+        accepts the gate's files and the quick check's criterion (run_serving.handed_over) covers those requests.
+        The simulation's 8 s bus-wait cap bounds the workload."""
+        loop, joined = serving_worker.ServingWorker.loop, {}
+    
+        def record(worker):
+            loop(worker)
+            joined[worker.slot] = {seq for seq, entry in worker.driver.run.request_log.items() if entry['t_tokens'] and not entry['admits']}
+    
+        for mode in ('emulate', 'real'):
+            joined.clear()
+            with self.subTest(mode=mode), patch.object(serving_worker.ServingWorker, 'loop', record), \
+>                   self.simulate(mode, {'method': 'weavetp'}, toy={'count': 60, 'rejoin_seconds': 1.0}) as (result, result_json, events, root):
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tools\resharding\failstop\test_serving_protocol.py:281: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+C:\Users\ksqbx\miniforge3\Lib\contextlib.py:141: in __enter__
+    return next(self.gen)
+           ^^^^^^^^^^^^^^
+tools\resharding\failstop\test_serving_protocol.py:178: in simulate
+    result = simulation.run()
+             ^^^^^^^^^^^^^^^^
+tools\resharding\failstop\test_serving_protocol.py:158: in run
+    result = serving_probe.control(self.config, self, common.Journal(self.root / 'controller.jsonl', 'SL3060', 'controller'),
+tools\resharding\failstop\serving_probe.py:153: in control
+    wait_until(lambda: all(service.finished.values()), config['launch_timeout_s'], 'every request to complete')
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+predicate = <function control.<locals>.<lambda> at 0x0000024FAE2E84A0>
+timeout = 60, what = 'every request to complete'
+
+    def wait_until(predicate, timeout, what):
+        deadline = time.monotonic() + timeout
+        while not predicate():
+            guard()
+            if bus.has('failure'):
+>               raise RuntimeError(f"peer failure: {bus.get('failure')}")
+E               RuntimeError: peer failure: actor failed: Traceback (most recent call last):
+E                 File "C:\Users\ksqbx\.codex\worktrees\failslow-online\WeaveTP_代码与实验资料_20260920\code\current\tools\resharding\failstop\test_topology_protocol.py", line 186, in supervisor
+E                   self.wait(['finish'])
+E                   ~~~~~~~~~^^^^^^^^^^^^
+E                 File "C:\Users\ksqbx\.codex\worktrees\failslow-online\WeaveTP_代码与实验资料_20260920\code\current\tools\resharding\failstop\test_async_protocol.py", line 53, in wait
+E                   raise TimeoutError(keys)
+E               TimeoutError: ['finish']
+
+tools\resharding\failstop\serving_probe.py:110: RuntimeError
+___ ServingProtocolTests.test_restart_cycle_reloads_tp2_then_tp4_from_disk ____
+
+self = <test_serving_protocol.ServingProtocolTests testMethod=test_restart_cycle_reloads_tp2_then_tp4_from_disk>
+
+    def test_restart_cycle_reloads_tp2_then_tp4_from_disk(self):
+        """restart in the emulate fail-stop cycle: the survivors reload TP2 and all eight EDP0 ranks TP4 in the same processes
+        (no reference audit: reference_audit='skipped'), nothing migrates, EDP0's requests replay; the gate times both reloads
+        and the analyzer splits restart's downtime per switch as for fail-slow."""
+>       with self.simulate('emulate', {'method': 'restart'}, toy={'count': 40, 'rejoin_seconds': 1.0}) as (result, result_json, events, root):
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tools\resharding\failstop\test_serving_protocol.py:298: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+C:\Users\ksqbx\miniforge3\Lib\contextlib.py:141: in __enter__
+    return next(self.gen)
+           ^^^^^^^^^^^^^^
+tools\resharding\failstop\test_serving_protocol.py:178: in simulate
+    result = simulation.run()
+             ^^^^^^^^^^^^^^^^
+tools\resharding\failstop\test_serving_protocol.py:158: in run
+    result = serving_probe.control(self.config, self, common.Journal(self.root / 'controller.jsonl', 'SL3060', 'controller'),
+tools\resharding\failstop\serving_probe.py:153: in control
+    wait_until(lambda: all(service.finished.values()), config['launch_timeout_s'], 'every request to complete')
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+predicate = <function control.<locals>.<lambda> at 0x0000024F9E483A60>
+timeout = 60, what = 'every request to complete'
+
+    def wait_until(predicate, timeout, what):
+        deadline = time.monotonic() + timeout
+        while not predicate():
+            guard()
+            if bus.has('failure'):
+>               raise RuntimeError(f"peer failure: {bus.get('failure')}")
+E               RuntimeError: peer failure: actor failed: Traceback (most recent call last):
+E                 File "C:\Users\ksqbx\.codex\worktrees\failslow-online\WeaveTP_代码与实验资料_20260920\code\current\tools\resharding\failstop\test_topology_protocol.py", line 186, in supervisor
+E                   self.wait(['finish'])
+E                   ~~~~~~~~~^^^^^^^^^^^^
+E                 File "C:\Users\ksqbx\.codex\worktrees\failslow-online\WeaveTP_代码与实验资料_20260920\code\current\tools\resharding\failstop\test_async_protocol.py", line 53, in wait
+E                   raise TimeoutError(keys)
+E               TimeoutError: ['finish']
+
+tools\resharding\failstop\serving_probe.py:110: RuntimeError
+=========================== short test summary info ===========================
+SUBFAILED(mode='emulate') tools/resharding/failstop/test_serving_protocol.py::ServingProtocolTests::test_expand_with_requests_in_flight
+SUBFAILED(mode='real') tools/resharding/failstop/test_serving_protocol.py::ServingProtocolTests::test_expand_with_requests_in_flight
+FAILED tools/resharding/failstop/test_serving_protocol.py::ServingProtocolTests::test_restart_cycle_reloads_tp2_then_tp4_from_disk
+3 failed, 301 passed, 1 skipped, 117 subtests passed in 473.28s (0:07:53)
