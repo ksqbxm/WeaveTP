@@ -13,7 +13,7 @@ def execute(tasks, *, device, sources, targets, host, service_factory, rank_to_g
     All members iterate identical waves and launch the copy service each time,
     so the one-byte participation ring never waits on an absent rank. `overlap(work)`, when given, runs between
     each wave's launch and its wait (the caller's ordering barrier and foreground decode); without it the waves
-    are synchronous as before.
+    are synchronous.
     """
     h2d = torch.cuda.Stream()
     stats = {'payload_bytes': 0, 'sent_bytes': 0, 'control_bytes': 0, 'reuse_bytes': 0}

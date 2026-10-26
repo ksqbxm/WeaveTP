@@ -210,9 +210,8 @@ class MegatronRuntime:
 
     @staticmethod
     def release(model, protected, services):
-        # The standby view stays on the model, so reallocate() can bring the same storages back for a later switch.
-        standby = model.__dict__.get('failstop_standby') or StandbyWeights(model, protected_tensors=protected)
-        model.failstop_standby = standby
+        # Kept on the model: reallocate() brings the same storages back for a later switch.
+        standby = model.failstop_standby = StandbyWeights(model, protected_tensors=protected)
         storages = tuple(standby.groups)
         audit = release_standby(standby, services)
         require(all(s.nbytes() == 0 for s in storages), 'standby release did not clear storage')

@@ -43,7 +43,6 @@ QUICK = {'warmup_s': 20.0, 'slow_s': 30.0, 'tail_s': 20.0, 'detect_s': 10.0}
 METHODS, LEVEL, FAULT_GPUS, REQUESTS = ('weavetp', 'anchortp', 'restart'), 'W', (0, 1, 4, 5), 2000
 FAILSTOP = {'count': 64, 'output_scale': 8, 'rejoin_seconds': 5.0}  # the fail-stop restart launch: outputs 24-72 tokens
 LAUNCHES = METHODS + ('failstop_restart',)
-SINGLE = ('weavetp', 'restart', 'ignore', 'anchortp')  # --method: one fail-slow launch
 MISSING = '缺失'
 
 
@@ -52,6 +51,7 @@ def settings(method):
 
 
 def launch_names(method=None):
+    """The launches of one quick check: all four, or only the given method's fail-slow launch."""
     return LAUNCHES if method is None else (method,)
 
 
@@ -116,7 +116,7 @@ def main(argv=None):
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--quick', action='store_true')
     parser.add_argument('--correctness-only', action='store_true')
-    parser.add_argument('--method', choices=SINGLE, help='only this fail-slow launch (W)')
+    parser.add_argument('--method', choices=METHODS + ('ignore',), help='only this fail-slow launch (W)')
     parser.add_argument('--budget-seconds', type=float, default=None)
     parser.add_argument('--min-free-disk-gb', type=float, default=1)
     parser.add_argument('--profile-file', required=True, help='frozen Step 3 profile.json, same path on both nodes')
@@ -131,8 +131,8 @@ def main(argv=None):
     deadline = started + args.budget_seconds
     root = args.output / args.node
     root.mkdir(parents=True, exist_ok=False)
-    summary = {'step': 9, 'node': args.node, 'suite_id': args.suite_id, 'methods': list(launch_names(args.method)), 'level': LEVEL,
-               'settings': QUICK,
+    summary = {'step': 9, 'node': args.node, 'suite_id': args.suite_id, 'methods': list(METHODS) if args.method is None else [args.method],
+               'level': LEVEL, 'settings': QUICK,
                'quick_mode': True, 'correctness_only': True, 'shared_gpu_mode': True, 'timing_valid': False, 'accepted': False,
                'all_checks_passed': False, 'budget_s': args.budget_seconds, 'launches': {}}
     try:

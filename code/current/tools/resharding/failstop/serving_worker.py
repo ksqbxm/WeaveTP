@@ -191,9 +191,8 @@ class ServingWorker(ModelWorker):
         control = remote_control.RemoteControl(self.bus, self.domain, ledger, comm=comm, histories=backend.histories.get,
                                                publisher=self.slot == self.replica_leader())
         hooks = None
-        if self.domain == 'EDP0':  # online: EDP0 keeps its requests through the shrink, into the layout planned before serving
-            degraded = (lambda: failstop_adapter.rank_map_from_rows(self.degraded_rows)) if self.online else self.current_map
-            hooks = failstop_adapter.FailstopHooks(control, self.current_map, degraded, edp0_replicas=self.replicas, replay=not self.online)
+        if self.domain == 'EDP0':  # online: EDP0 keeps its requests through the shrink (their KV migrates)
+            hooks = failstop_adapter.FailstopHooks(control, self.current_map, self.current_map, edp0_replicas=self.replicas, replay=not self.online)
         policy = POLICIES[self.serving['decode_policy']]
         policy = policy() if self.serving['decode_policy'] == 'greedy' else policy({i.seq: self.requests[i.id]['output_token_ids'] for i in self.instances})
         validation = BitwiseValidation(self.config['deterministic_mode'])
@@ -267,7 +266,7 @@ class ServingWorker(ModelWorker):
         shrink on the profile with the fault GPUs at 1/(1+k) of their p2p bandwidth, the expand on the frozen profile: the
         co-runners are gone by then) and one exchange over every pair those plans and the KV holders use. No switch then
         builds a model, plans weights or opens a connection."""
-        self.tp4_model, degraded = model, failstop_adapter.rank_map_from_rows(self.degraded_rows)
+        self.tp4_model, (current, degraded) = model, self.shrink_maps()
         tp4, tp2 = [s for s, _ in self.weight_sources(model, 4, self.row['etp'])], []
         if not self.healthy and not self.victim:
             self.tp2_coord = next(r['etp'] for r in self.degraded_rows if r['slot'] == self.slot)
@@ -278,29 +277,22 @@ class ServingWorker(ModelWorker):
         factor = 1 / (1 + LEVELS[self.config['failslow']['level']])
         shrink = self.plan_before_serving('shrink', tp4, tp2, downweighted(self.profile, fault, factor))
         expand = self.plan_before_serving('expand', tp4 if self.healthy else tp2, [] if self.healthy else tp4, self.profile)
-        current, heads = self.current_map(), range(self.serving['geometry']['heads'] // self.serving['geometry']['group_heads'])
-        kv = {(self.builder.holder(a, replica, g), self.builder.holder(b, replica, g))
-              for a, b in ((current, degraded), (degraded, current)) for replica in self.replicas_of('EDP0') for g in heads}
+        heads = range(self.serving['geometry']['heads'] // self.serving['geometry']['group_heads'])
+        kv = {(self.builder.holder(a, replica, g), self.builder.holder(b, replica, g)) for a, b in ((current, degraded), (degraded, current))
+              for replica in (REPLICA_IDS['EDP0', 0], REPLICA_IDS['EDP0', 1]) for g in heads}
         pairs = {(t.source.rank, t.target.rank) for plan in (shrink, expand) for t in plan['tasks']} | kv
         warmed = self.warm_pairs({(a, b) for a, b in pairs if a != b})
         self.events.append({'event': 'online_ready', 'shrink_tasks': len(shrink['tasks']), 'expand_tasks': len(expand['tasks']),
                             'downweight': {'devices': sorted(fault), 'factor': factor}, 'p2p_pairs_warmed': warmed})
 
-    @staticmethod
-    def replicas_of(domain):
-        return sorted(i for (name, _), i in REPLICA_IDS.items() if name == domain)
-
     def shrink_maps(self):
-        """Online shrink KV: the serving TP4 layout -> the degraded TP2 layout planned before serving."""
+        """(source, target) rank maps of the online shrink KV: the serving TP4 layout -> the degraded TP2 layout planned
+        before serving."""
         return self.current_map(), failstop_adapter.rank_map_from_rows(self.degraded_rows)
 
-    def online_plan(self, label):
-        """transfer()'s cached plan: the weight plan made before serving, or an empty one for a KV-only delta (online);
-        None (plan at the switch) for every other scenario and method."""
-        if not self.online:
-            return None
-        return self.plans.get(label) or {'tasks': [], 'key': f'kv/{label}', 'profile_sha256': None, 'shards': (set(), set()),
-                                         'membership': sorted(identity(r) for r in self.session.rank_map() if r['active'])}
+    def expand_maps(self):
+        """(source, target) rank maps of the expand KV: the TP2 layout the survivors served -> the current TP4 one."""
+        return self.tp2_map(), self.current_map()
 
     def overlap(self, decode_fn, steps, budget):
         """execute()'s in-flight hook of the online switch (as the live benchmark): every member has enqueued this wave's
@@ -320,57 +312,51 @@ class ServingWorker(ModelWorker):
         return sum(m.source_tokens[2] - m.source_tokens[1] for m in moves) * geometry['group_heads'] * geometry['layers'] * \
             (geometry['k_dim'] + geometry['v_dim']) * 2
 
-    def shrink_transfer(self, meta=None, overlap=None):
-        """Survivor: an empty TP2 target filled from the residual TP4 shards and EDP1 (weights only; KV is replayed).
+    def shrink_transfer(self, meta, overlap=None):
+        """The TP2 target from the residual TP4 shards and EDP1. Returns (target, target context, stats, KV bytes).
 
-        Online (meta = this rank's compacted tables; fail-stop and the other fail-slow methods keep the path above):
-        every EDP0 rank, victims included, also sends its A-zone KV; a survivor receives into the TP2 model built before
-        serving (storage reallocated) and a TP2 pool; the weights follow the plan made before serving, the waves overlap
-        decode. Returns (target, target context, stats, KV bytes)."""
+        meta None (fail-stop, fail-slow anchortp/restart: survivors only, after the transition): the target is built now
+        and only weights move; the requests replay from prompt + committed history. Online (meta = this rank's
+        compacted tables, still in the phase-0 world): every EDP0 rank, victims included, also sends its A-zone KV; a
+        survivor receives into the TP2 model built before serving (storage reallocated) and a TP2 pool laid out like
+        the tables; the waves overlap decode."""
+        target = target_context = budget = None
+        moves, kv_sources, kv_targets = [], [], []
         if meta is None:
             self.tp2_coord = self.coord
             budget = self.admission(2, 0)
-            sources = self.weight_sources(self.model, 4, self.row['etp'])
             target = self.runtime.build(2, self.pack['target'], load=False)
-            self.publish(ROUND, 'shrink', sources, self.weight_sources(target, 2, self.coord))
-            leader = self.slot == min(self.survivors)
-            if leader:
-                self.bus.put(self.plan_key('shrink'), True)
-            stats = self.transfer(ROUND, 1, 'shrink', writer=leader)
-            self.events.append({'event': 'shrink', 'budget': budget, 'transfer': stats, 'kv': 'none migrated: requests replay from prompt + committed history'})
-            return target, None, stats, 0
-        moves = self.kv_moves(meta, ('A',), maps=self.shrink_maps())
-        target = target_context = budget = None
-        if not self.victim:
-            budget = self.admission(2, sum(meta['lengths'].values()) + self.serving['max_delta_steps'])
-            target = self.tp2_model
-            self.runtime.reallocate(target)
-            target_context = self.backend.new_context(2)
-            self.clone_tables(target_context, meta)
-        kv_sources, kv_targets = self.kv_shards(moves, self.backend.context.pool, None if target_context is None else target_context.pool,
-                                                maps=self.shrink_maps())
+        else:
+            maps = self.shrink_maps()
+            moves = self.kv_moves(meta, ('A',), maps)
+            if not self.victim:
+                budget = self.admission(2, sum(meta['lengths'].values()) + self.serving['max_delta_steps'])
+                target, target_context = self.tp2_model, self.backend.new_context(2)
+                self.runtime.reallocate(target)
+                self.clone_tables(target_context, meta)
+            kv_sources, kv_targets = self.kv_shards(moves, maps, self.backend.context.pool,
+                                                    None if target_context is None else target_context.pool)
         sources = self.weight_sources(self.model, 4, self.row['etp']) + kv_sources
         targets = ([] if target is None else self.weight_sources(target, 2, self.tp2_coord)) + kv_targets
         self.publish(ROUND, 'shrink', sources, targets)
         leader = self.slot == min(self.survivors)
         if leader:
             self.bus.put(self.plan_key('shrink'), True)
-        stats = self.transfer(ROUND, 1, 'shrink', writer=leader, cached=self.online_plan('shrink'), overlap=overlap)
+        stats = self.transfer(ROUND, 1, 'shrink', writer=leader, overlap=overlap)
         kv_bytes = self.moved_kv_bytes(moves)
         self.events.append({'event': 'shrink', 'budget': budget, 'transfer': stats, 'kv_prefix_moves': len(moves), 'kv_prefix_bytes': kv_bytes})
         return target, target_context, stats, kv_bytes
 
     def sender_transfer(self, label, decode_fn=None, overlap=None):
-        """EDP1: publish TP4 weight sources (none for a delta) and run the same waves as the receivers (online: the plan
-        made before serving, decode inside the waves)."""
+        """EDP1: publish TP4 weight sources (none for a delta) and run the same waves as the receivers (online: decode
+        inside the waves too)."""
         sources = [] if label in ('delta', 'shrink_delta') else self.weight_sources(self.model, 4, self.row['etp'])
         self.publish(ROUND, label, sources, [])
         if decode_fn is None:
             self.bus.wait([self.plan_key(label)])
         else:
             self.serve_until(self.plan_key(label), decode_fn)
-        return self.transfer(ROUND, 1 if label.startswith('shrink') else 2, label, writer=False, cached=self.online_plan(label),
-                             overlap=overlap)
+        return self.transfer(ROUND, 1 if label in ('shrink', 'shrink_delta') else 2, label, writer=False, overlap=overlap)
 
     def tables_meta(self, context):
         return {'tables': {str(seq): list(t.blocks) for seq, t in context.tables.items()},
@@ -384,20 +370,20 @@ class ServingWorker(ModelWorker):
         for seq, table in meta['tables'].items():
             context.tables[int(seq)] = block_kv.BlockTable(int(seq), list(table), meta['lengths'][seq])
 
-    def kv_moves(self, meta, zones, assignment=None, maps=None):
-        """KV moves of the given zones ('A' = full blocks, 'B' = open blocks) for the request assignment
-        (default: every request stays on this rank's replica) between `maps` = (source, target) rank maps
-        (default: the expand's served TP2 layout -> the current TP4 one)."""
+    def kv_moves(self, meta, zones, maps, assignment=None):
+        """KV moves of the given zones ('A' = full blocks, 'B' = open blocks) between `maps` = (source, target) rank maps
+        for the request assignment (default: every request stays on this rank's replica)."""
         tables = {int(seq): block_kv.BlockTable(int(seq), list(t), meta['lengths'][seq]) for seq, t in meta['tables'].items()}
         assignment = assignment or {seq: (self.replica_id, self.replica_id) for seq in tables}
         tokens = self.builder.zone_tokens_from_tables(tables, assignment, self.serving['block_tokens'], self.serving['max_delta_steps'])
-        moves = self.builder.kv_moves(*(maps or (self.tp2_map(), self.current_map())), assignment, tokens)
+        moves = self.builder.kv_moves(*maps, assignment, tokens)
         return [m for m in moves if m.zone in zones]
 
-    def kv_shards(self, moves, source_pool, target_pool, maps=None):
+    def kv_shards(self, moves, maps, source_pool, target_pool):
+        """This rank's source and target views of the moves (none on a side whose pool is None)."""
         dtype = self.runtime.args.params_dtype
-        sources, targets = self.builder.as_shards(moves, *(maps or (self.tp2_map(), self.current_map())), self.identities(),
-                                                  dtype_name=str(dtype), element_size=torch.empty(0, dtype=dtype).element_size())
+        sources, targets = self.builder.as_shards(moves, *maps, self.identities(), dtype_name=str(dtype),
+                                                  element_size=torch.empty(0, dtype=dtype).element_size())
         return (kv_shard_views(source_pool, sources, self.rank) if source_pool is not None else [],
                 kv_shard_views(target_pool, targets, self.rank) if target_pool is not None else [])
 
@@ -415,28 +401,31 @@ class ServingWorker(ModelWorker):
         # bound to an empty TP4 context, which is its target.
         target_context = self.backend.new_context(4) if source_context is not None else self.backend.context
         self.clone_tables(target_context, meta)
-        moves = self.kv_moves(meta, zones, assignment)
-        kv_sources, kv_targets = self.kv_shards(moves, None if source_context is None else source_context.pool, target_context.pool)
+        maps = self.expand_maps()
+        moves = self.kv_moves(meta, zones, maps, assignment)
+        kv_sources, kv_targets = self.kv_shards(moves, maps, None if source_context is None else source_context.pool, target_context.pool)
         sources = ([] if source_context is None else self.weight_sources(self.model, 2, self.tp2_coord)) + kv_sources
         targets = self.weight_sources(target, 4, self.coord) + kv_targets
         self.publish(ROUND, 'expand', sources, targets)
         leader = self.slot == min(self.survivors)
         if leader:
             self.bus.put(self.plan_key('expand'), True)
-        stats = self.transfer(ROUND, 2, 'expand', writer=leader, cached=self.online_plan('expand'), overlap=overlap)
+        stats = self.transfer(ROUND, 2, 'expand', writer=leader, overlap=overlap)
         kv_bytes = self.moved_kv_bytes(moves)
         self.events.append({'event': 'expand', 'budget': budget, 'transfer': stats, 'kv_prefix_moves': len(moves), 'kv_prefix_bytes': kv_bytes})
         return target, target_context, stats, kv_bytes
 
-    def expand_delta(self, meta, source_context, target_context, zones, assignment=None, maps=None, label='delta'):
+    def kv_delta(self, direction, meta, source_context, target_context, zones, assignment=None):
         """The delta-wave KV zones (WeaveTP: the open blocks, including tokens written during the base wave; AnchorTP:
         none) in the compaction layout, which the source pool keeps intact until the cutover (releases are deferred);
         the source snapshot feeds the check and the live lengths/releases are handed to the target either way.
 
         Requests that completed during the base wave are still copied (the layout is fixed) and released on the
-        target afterwards; the survivors publish which requests live on and their current lengths. The online shrink
-        delta (label 'shrink_delta', maps TP4 -> degraded TP2) has every TP4 coordinate as a source, snapshots under
-        'shrink', and a victim with no target only sends."""
+        target afterwards; the survivors publish which requests live on and their current lengths. expand: the TP2
+        survivors -> TP4 (a joining victim has no source pool); shrink (online): every TP4 coordinate -> the degraded
+        TP2 survivors (a victim has no target pool)."""
+        label = 'delta' if direction == 'expand' else 'shrink_delta'
+        maps = self.expand_maps() if direction == 'expand' else self.shrink_maps()
         if source_context is not None:
             live = {str(seq): table.length for seq, table in source_context.tables.items()
                     if seq not in (self.backend.deferred_releases or [])}
@@ -444,30 +433,29 @@ class ServingWorker(ModelWorker):
                 self.bus.put(f'tables/{ROUND}/{label}/{self.replica_id}', live)
         else:
             live = self.bus.wait([f'tables/{ROUND}/{label}/{self.replica_id}'])[0]
-        moves = self.kv_moves(meta, zones, assignment, maps=maps)
-        kv_sources, kv_targets = self.kv_shards(moves, None if source_context is None else source_context.pool,
-                                                None if target_context is None else target_context.pool, maps=maps)
+        moves = self.kv_moves(meta, zones, maps, assignment)
+        kv_sources, kv_targets = self.kv_shards(moves, maps, None if source_context is None else source_context.pool,
+                                                None if target_context is None else target_context.pool)
         self.publish(ROUND, label, kv_sources, kv_targets)
         if source_context is not None and self.audits:
-            self.save_pool_snapshot(source_context, *((self.coord, 'shrink') if label == 'shrink_delta' else ()))
+            self.save_pool_snapshot(source_context, self.tp2_coord if direction == 'expand' else self.coord, direction)
         leader = self.slot == min(self.survivors)
         if leader:
             self.bus.put(self.plan_key(label), True)
-        stats = self.transfer(ROUND, 1 if label == 'shrink_delta' else 2, label, writer=leader, cached=self.online_plan(label))
-        for seq in [s for s in (target_context.tables if target_context is not None else ()) if str(s) not in live]:
-            target_context.release(seq)
-        for seq, length in (live.items() if target_context is not None else ()):
-            target_context.tables[int(seq)].length = length
+        stats = self.transfer(ROUND, 2 if direction == 'expand' else 1, label, writer=leader)
+        if target_context is not None:
+            for seq in [s for s in target_context.tables if str(s) not in live]:
+                target_context.release(seq)
+            for seq, length in live.items():
+                target_context.tables[int(seq)].length = length
         return stats
 
-    def kv_saved_key(self, coord, label):
-        return f'kv_saved/{ROUND}/{self.replica_id}/{coord}' if label == 'expand' else f'kv_saved/{ROUND}/{label}/{self.replica_id}/{coord}'
+    def kv_saved_key(self, direction, coord):
+        return f'kv_saved/{ROUND}/{direction}/{self.replica_id}/{coord}'
 
-    def save_pool_snapshot(self, context, coord=None, label='expand'):
-        """This source coordinate's dense K/V per request (default: the expand's TP2 coordinate), for the receivers'
-        independent head mapping."""
-        coord = self.tp2_coord if coord is None else coord
-        directory = self.root / 'kv' / f'r{ROUND}' / label / f'replica_{self.replica_id}'  # every source coordinate of both EDP0 replicas
+    def save_pool_snapshot(self, context, coord, direction):
+        """This source coordinate's dense K/V per request, for the receivers' independent head mapping."""
+        directory = self.root / 'kv' / f'r{ROUND}' / direction / f'replica_{self.replica_id}'  # every source coordinate of both EDP0 replicas
         directory.mkdir(parents=True, exist_ok=True)
         snapshot = {}
         for seq, table in context.tables.items():
@@ -475,19 +463,20 @@ class ServingWorker(ModelWorker):
                              for layer in range(context.pool.layers)}
         torch.save({'coord': coord, 'lengths': {seq: t.length for seq, t in context.tables.items()}, 'kv': snapshot},
                    directory / f'coord_{coord}.pt')
-        self.bus.put(self.kv_saved_key(coord, label), str(directory))
+        self.bus.put(self.kv_saved_key(direction, coord), str(directory))
 
-    def check_kv(self, target_context, mode, source_tp=2, target_tp=4, target_coord=None, label='expand'):
-        """Every moved request's K/V on the target equals the head mapping of the sources' saved snapshots (default:
-        the expand's TP2 survivors -> this rank's TP4 coordinate)."""
-        directories = self.bus.wait([self.kv_saved_key(c, label) for c in range(source_tp)])
+    def check_kv(self, target_context, mode, direction):
+        """Every moved request's K/V on the target equals the head mapping of the sources' saved snapshots: expand, the
+        TP2 survivors -> this rank's TP4 coordinate; shrink (online), the TP4 coordinates -> this survivor's TP2 one."""
+        source_tp, target_tp, coord = (2, 4, self.coord) if direction == 'expand' else (4, 2, self.tp2_coord)
+        directories = self.bus.wait([self.kv_saved_key(direction, c) for c in range(source_tp)])
         snapshot = {}
         for path in sorted(Path(directories[0]).glob('coord_*.pt')):
             saved = torch.load(path, weights_only=False)
             snapshot[saved['coord']] = saved
         require(set(snapshot) == set(range(source_tp)), f'KV snapshots of all {source_tp} source coordinates are required')
         heads, local = self.serving['geometry']['heads'], self.serving['geometry']['heads'] // target_tp
-        first = (self.coord if target_coord is None else target_coord) * local
+        first = coord * local
         mismatches, compared = [], 0
         for seq, table in target_context.tables.items():
             length = table.length
@@ -505,8 +494,7 @@ class ServingWorker(ModelWorker):
                 if mismatches and mismatches[-1]['seq'] == seq:
                     break
         result = {'mode': mode, 'passed': not mismatches, 'requests': len(target_context.tables), 'tensors_compared': compared,
-                  'mismatches': mismatches[:3], 'reference': "head mapping of the survivors' saved TP2 block snapshots" if label == 'expand'
-                  else f"head mapping of the TP{source_tp} sources' saved block snapshots"}
+                  'mismatches': mismatches[:3], 'reference': f"head mapping of the TP{source_tp} sources' saved block snapshots"}
         self.kv_checks.append(result)
         return result
 
@@ -518,8 +506,8 @@ class ServingWorker(ModelWorker):
         target, target_context, stats, kv_bytes = self.expand_prefix(meta, None, zones['base'],
                                                                      overlap=self.overlap(None, [], 0) if self.online else None)
         audit = self.validate_weights(target, 4) if self.audits else {'skipped': 'timing'}
-        delta = self.expand_delta(meta, None, target_context, zones['delta'])
-        check = self.check_kv(target_context, 'bitwise') if self.audits else {'mode': 'bitwise', 'passed': None, 'skipped': 'timing'}
+        delta = self.kv_delta('expand', meta, None, target_context, zones['delta'])
+        check = self.check_kv(target_context, 'bitwise', 'expand') if self.audits else {'mode': 'bitwise', 'passed': None, 'skipped': 'timing'}
         if self.audits:
             require(check['passed'], f'migrated KV differs from the mapped source snapshots: {check["mismatches"]}')
         handoff = self.bus.wait([f'handoff/{ROUND}/{self.replica_id}'])[0]
@@ -610,37 +598,37 @@ class ServingSwitcher:
         self.phase = 1 if self.direction == 'shrink' else 2
         self.role = 'healthy' if worker.healthy else ('victim' if worker.victim else 'survivor')
         self.source, self.target, self.target_context, self.meta, self.handoff = worker.model, None, None, None, None
-        self.steps = []  # foreground steps decoded inside this switch's waves (online)
         self.online_shrink = worker.online and self.direction == 'shrink'
+        # The ranks whose KV migrates: the survivors at the expand; every EDP0 rank (victims too) at the online shrink.
+        self.moves_kv = (self.role == 'survivor' and self.direction == 'expand') or (self.online_shrink and self.role != 'healthy')
         worker.bus.put(f'switch_ack/{self.direction}/{worker.slot}', True)
 
     def compact(self, direction):
-        # Online shrink: every EDP0 rank (victims too) sends its KV, so every one fixes its compacted layout.
-        if (self.role == 'survivor' and direction == 'expand') or (self.online_shrink and self.role != 'healthy'):
+        if self.moves_kv:
             context = self.w.backend.context
             self.w.backend.hold_releases()  # the compacted layout stays fixed until the cutover
             report = block_kv.compact(context, {seq: self.w.replica_id for seq in context.tables})
             self.meta = self.w.tables_meta(context)
-            if direction == 'expand' and self.w.slot == self.w.replica_leader():
+            if direction == 'expand' and self.w.slot == self.w.replica_leader():  # the joining victims' layout
                 self.w.bus.put(f'tables/{ROUND}/{self.w.replica_id}', self.meta)
             return {'moved_blocks': report['moved_blocks'], 'tokens': {f'{k[0]}/{k[1]}': v for k, v in report['tokens'].items()}}
         return {'moved_blocks': 0}
 
     def base_wave(self, direction, decode_fn):
-        w = self.w
+        w, steps = self.w, []
         # Online: the waves overlap decode, at most max_delta_steps - growth steps (the open-block zone the delta copies).
-        overlap = w.overlap(decode_fn, self.steps, w.serving['max_delta_steps'] - self.run.growth.get(direction, 0)) if w.online else None
+        overlap = w.overlap(decode_fn, steps, w.serving['max_delta_steps'] - self.run.growth.get(direction, 0)) if w.online else None
         if self.online_shrink:
             # Online fail-slow WeaveTP: migrate in the phase-0 world, both EDPs decode inside the waves, victims are sources;
             # the world moves to the degraded groups only at the cutover. Fail-stop and the other methods: the path below.
             if self.role == 'healthy':
                 stats = w.sender_transfer('shrink', decode_fn, overlap)
                 delta = w.sender_transfer('shrink_delta', decode_fn)
-                return {'overlap_steps': len(self.steps), 'bytes': {'weights': stats['payload_bytes'], 'kv_prefix': 0}, 'transfer': stats,
+                return {'overlap_steps': len(steps), 'bytes': {'weights': stats['payload_bytes'], 'kv_prefix': 0}, 'transfer': stats,
                         'delta': delta, 'role': self.role}
             self.target, self.target_context, stats, kv_bytes = w.shrink_transfer(self.meta, overlap)
             received = kv_bytes if self.target is not None else 0
-            return {'overlap_steps': len(self.steps), 'bytes': {'weights': stats['payload_bytes'] - received, 'kv_prefix': received},
+            return {'overlap_steps': len(steps), 'bytes': {'weights': stats['payload_bytes'] - received, 'kv_prefix': received},
                     'transfer': stats, 'role': self.role}
         if self.role == 'victim':
             if w.real:
@@ -650,7 +638,7 @@ class ServingSwitcher:
         w.world_transition(self.phase, ROUND)
         if direction == 'shrink':
             if self.role == 'survivor':
-                self.target, _, stats, _ = w.shrink_transfer()
+                self.target, _, stats, _ = w.shrink_transfer(meta=None)
             else:
                 stats = w.sender_transfer('shrink')
             return {'overlap_steps': 0, 'bytes': {'weights': stats['payload_bytes'], 'kv_prefix': 0}, 'transfer': stats, 'role': self.role}
@@ -660,11 +648,11 @@ class ServingSwitcher:
             growth = self.run.growth.get('expand', 0)
             for _ in range(growth):
                 decode_fn(phase='switching')
-            return {'overlap_steps': len(self.steps) + growth, 'bytes': {'weights': stats['payload_bytes'] - kv_bytes, 'kv_prefix': kv_bytes},
+            return {'overlap_steps': len(steps) + growth, 'bytes': {'weights': stats['payload_bytes'] - kv_bytes, 'kv_prefix': kv_bytes},
                     'transfer': stats, 'role': self.role}
         stats = w.sender_transfer('expand', decode_fn, overlap)
         delta = w.sender_transfer('delta', decode_fn)
-        return {'overlap_steps': len(self.steps), 'bytes': {'weights': stats['payload_bytes'], 'kv_prefix': 0}, 'transfer': stats, 'delta': delta,
+        return {'overlap_steps': len(steps), 'bytes': {'weights': stats['payload_bytes'], 'kv_prefix': 0}, 'transfer': stats, 'delta': delta,
                 'role': self.role}
 
     def emulate_victim(self):
@@ -694,21 +682,14 @@ class ServingSwitcher:
         return {'role': self.role, **({} if self.w.audits else {'skipped': 'timing'})}
 
     def delta(self, direction):
-        if self.online_shrink and self.role != 'healthy':  # the open blocks, TP4 -> degraded TP2; a victim only sends
-            stats = self.w.expand_delta(self.meta, self.w.backend.context, self.target_context, self.zones['delta'],
-                                        maps=self.w.shrink_maps(), label='shrink_delta')
-            return {'bytes': {'kv_delta': stats['payload_bytes']}, 'transfer': stats}
-        if self.role == 'survivor' and direction == 'expand':
-            stats = self.w.expand_delta(self.meta, self.w.backend.context, self.target_context, self.zones['delta'], self.spec.assignment)
+        if self.moves_kv:  # online shrink: a victim only sends
+            stats = self.w.kv_delta(direction, self.meta, self.w.backend.context, self.target_context, self.zones['delta'], self.spec.assignment)
             return {'bytes': {'kv_delta': stats['payload_bytes']}, 'transfer': stats}
         return {'bytes': {'kv_delta': 0}}
 
     def compare_logits(self, direction, mode):
-        if self.online_shrink and self.role == 'survivor':
-            return self.w.check_kv(self.target_context, mode, source_tp=4, target_tp=2, target_coord=self.w.tp2_coord, label='shrink') \
-                if self.w.audits else {'mode': mode, 'passed': True, 'skipped': 'timing'}
-        if self.role == 'survivor' and direction == 'expand':
-            return self.w.check_kv(self.target_context, mode) if self.w.audits else {'mode': mode, 'passed': True, 'skipped': 'timing'}
+        if self.role == 'survivor' and (direction == 'expand' or self.online_shrink):  # it received KV
+            return self.w.check_kv(self.target_context, mode, direction) if self.w.audits else {'mode': mode, 'passed': True, 'skipped': 'timing'}
         if self.role == 'victim' and direction == 'shrink':
             return {'mode': mode, 'passed': True, 'note': 'victim: checked by join_expand'}
         return {'mode': mode, 'passed': True, 'note': 'no KV moved on this rank; the A6 replay compares the records offline'}

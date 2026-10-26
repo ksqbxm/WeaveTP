@@ -171,8 +171,9 @@ class Worker:
             for phase in (1, 2):
                 if self.healthy:
                     self.prebuilt[phase]['target'] = self.prebuilt[0]['target']
-            if self.online:  # EDP0 serves phase 2 on its phase-0 groups too (same ranks); P2P is ordered before decode
+            if self.online:  # EDP0's phase-2 groups are its phase-0 ones (same ranks): the initial TP4 model serves again
                 self.prebuilt[2]['target'], self.prebuilt[2]['data'] = self.prebuilt[0]['target'], self.prebuilt[0]['data']
+                # execute()'s overlap hook orders every wave's P2P before any model collective on this group
                 self.barrier = dist.new_group(list(range(16)), backend='gloo', timeout=timedelta(seconds=self.config['stage_timeout_s']))
                 self.warm_groups()
         torch.cuda.reset_peak_memory_stats()
@@ -180,17 +181,15 @@ class Worker:
     def warm_groups(self):
         """Online switch: connect every prebuilt NCCL communicator this rank is in (one-element all_reduce) in one global
         order (members, phase, position), so no collective during the run pays communicator setup."""
-        seen, order = set(), []
+        order = {}
         for phase, pack in sorted(self.prebuilt.items()):
-            collections = [getattr(pack[key], '__dict__', {}) for key in ('target', 'service2')]  # a victim has none in phase 1
-            for position, group in enumerate([pack['data'], *collections[0].values(), *collections[1].values()]):
-                if callable(getattr(group, 'size', None)) and id(group) not in seen and self.slot in dist.get_process_group_ranks(group):
-                    seen.add(id(group))
-                    order.append((tuple(dist.get_process_group_ranks(group)), phase, position, group))
-        for *_, group in sorted(order, key=lambda item: item[:3]):
+            if phase == 1 and self.victim:  # outside the degraded world: no phase-1 group
+                continue
+            collections = [c for c in (pack['target'], pack['service2']) if c is not None]  # holds only member groups
+            for position, group in enumerate([pack['data'], *(getattr(c, name) for c in collections for name in c.local_ranks)]):
+                order.setdefault(id(group), (tuple(dist.get_process_group_ranks(group)), phase, position, group))
+        for *_, group in sorted(order.values(), key=lambda item: item[:3]):
             dist.all_reduce(torch.zeros(1, device='cuda'), group=group)
-        if torch.cuda.is_available():
-            torch.cuda.synchronize()
 
     def build(self, session, phase):
         if self.real:
@@ -391,12 +390,12 @@ class Worker:
         return kv_shards(self.runtime.kv(context), device=self.device, node=self.row['node'], rank=self.rank, tp=tp,
                          coord=coord, heads=self.heads, start=start, stop=stop)
 
-    def transfer(self, round_id, phase, label, writer, cached=None, overlap=None):
+    def transfer(self, round_id, phase, label, writer, overlap=None):
         """Every active member plans the published global snapshot identically and runs the same waves.
 
-        cached (online switch): the weight plan made before serving, checked against the published weight shards and
-        the membership; KV atoms have one holder each and pair directly (fixed_tasks), so no planner runs. overlap:
-        execute()'s in-flight hook (ordering barrier + foreground decode inside every wave)."""
+        Online switch: no planner runs. The weights follow the plan made before serving for `label` (a KV-only delta has
+        none), which must cover exactly the published weight shards; KV atoms have one holder each and pair directly
+        (fixed_tasks). overlap: execute()'s in-flight hook (ordering barrier + foreground decode inside every wave)."""
         mapping = self.session.rank_map()
         members = [r['slot'] for r in mapping if r['active']]
         rank_map = {identity(r): r['new_rank'] for r in mapping if r['active']}
@@ -406,16 +405,16 @@ class Worker:
             return [Shard(**{**row, 'shape': tuple(row['shape']), 'start': tuple(row['start']), 'stop': tuple(row['stop'])})
                     for entry in published for row in entry[key]]
         sources, targets = shards('sources'), shards('targets')
-        if cached is None:
+        if self.online:
+            plan = self.plans.get(label, {'tasks': [], 'key': f'kv/{label}', 'record': {'planner': None}, 'shards': (set(), set())})
+            weights = {s for s in sources if not s.name.startswith('kv.')}, {t for t in targets if not t.name.startswith('kv.')}
+            require(weights == plan['shards'], f'{label}: the weight shards differ from the plan made before serving')
+            kv = [s for s in sources if s.name.startswith('kv.')], [t for t in targets if t.name.startswith('kv.')]
+            tasks = plan['tasks'] + fixed_tasks(*kv, len(plan['tasks']), 1 + max((t.wave for t in plan['tasks']), default=-1))
+            cache_key, record = plan['key'], plan['record']
+        else:
             tasks, cache_key, record = self.planner(sources, targets, self.profile, membership=list(rank_map),
                                                     epoch=self.session.epoch, rank_map=rank_map)
-        else:
-            kv = [s for s in sources if s.name.startswith('kv.')], [t for t in targets if t.name.startswith('kv.')]
-            weights = {s for s in sources if not s.name.startswith('kv.')}, {t for t in targets if not t.name.startswith('kv.')}
-            require(sorted(rank_map) == cached['membership'] and weights == cached['shards'],
-                    f'{label}: the membership or the weight shards differ from the plan made before serving')
-            tasks = cached['tasks'] + fixed_tasks(*kv, len(cached['tasks']), 1 + max((t.wave for t in cached['tasks']), default=-1))
-            cache_key, record = cached['key'], {'planner': 'weavetp, planned before serving', 'plan_profile_sha256': cached['profile_sha256']}
         self.session.resources.plans[cache_key] = tasks
         if writer:
             write_json(self.root / f'source_plan_{round_id}_{label}.json', {
@@ -452,7 +451,7 @@ class Worker:
 
     def plan_before_serving(self, label, sources, targets, profile):
         """Online switch: publish this rank's weight shards for `label`, gather everyone's and plan them now (every rank
-        computes the same plan), keyed for transfer(cached=...)."""
+        computes the same plan); transfer() runs it at the switch."""
         self.bus.put(f'plan_shards/{label}/{self.slot}', {'sources': [asdict(s) for s in sources], 'targets': [asdict(t) for t in targets]})
         mapping = self.session.rank_map()
         rank_map = {identity(r): r['new_rank'] for r in mapping if r['active']}
@@ -461,9 +460,9 @@ class Worker:
         def shards(key):
             return [Shard(**{**row, 'shape': tuple(row['shape']), 'start': tuple(row['start']), 'stop': tuple(row['stop'])})
                     for entry in published for row in entry[key]]
-        tasks, key, _ = self.planner(shards('sources'), shards('targets'), profile, membership=list(rank_map),
-                                     epoch=self.session.epoch, rank_map=rank_map)
-        self.plans[label] = {'tasks': tasks, 'key': key, 'membership': sorted(rank_map), 'profile_sha256': digest(profile),
+        tasks, key, record = self.planner(shards('sources'), shards('targets'), profile, membership=list(rank_map),
+                                          epoch=self.session.epoch, rank_map=rank_map)
+        self.plans[label] = {'tasks': tasks, 'key': key, 'record': {**record, 'planned': 'before serving', 'plan_profile_sha256': digest(profile)},
                              'shards': (set(shards('sources')), set(shards('targets')))}
         return self.plans[label]
 

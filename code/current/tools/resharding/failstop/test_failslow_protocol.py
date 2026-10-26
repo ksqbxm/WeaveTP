@@ -20,7 +20,7 @@ from tools.resharding.e2e import failslow_metrics, remote_control
 from tools.resharding.e2e.toy_inputs import write_toy_inputs
 
 TIMELINE = {'warmup_s': 0.6, 'slow_s': 2.0, 'tail_s': 2.0, 'detect_s': 0.3}
-SHRINK_KV, EXPAND_KV = "head mapping of the TP4 sources' saved block snapshots", "head mapping of the survivors' saved TP2 block snapshots"
+SHRINK_KV, EXPAND_KV = "head mapping of the TP4 sources' saved block snapshots", "head mapping of the TP2 sources' saved block snapshots"
 
 
 def pool(directory, count, failstop):

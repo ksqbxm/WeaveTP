@@ -248,8 +248,9 @@ def main():
                     all(r['passed'] for r in launches.values())):
                 raise RuntimeError('incomplete Step 9 fail-slow checks')
             status['step9'] = {m: {k: r[k] for k in ('status', 'leftover_hogs', 'gate') if k in r} for m, r in launches.items()}
-            for name, record in launches.items():  # restart reloads, switch durations, decode steps in switches, replayed tokens
-                print(f"STEP 9 SUMMARY {name}: {json.dumps(record.get('gate', {}).get('summary', '缺失'), ensure_ascii=False)}", flush=True)
+            for name, record in launches.items():  # SL3060's fail-slow launches: reloads, switch times, decode steps, replays
+                if 'gate' in record:
+                    print(f"STEP 9 SUMMARY {name}: {json.dumps(record['gate']['summary'], ensure_ascii=False)}", flush=True)
         else:
             if not (summary['all_cases_passed'] and flags and summary['emulate'] == summary['real'] == 'passed'):
                 raise RuntimeError('incomplete emulate/real correctness matrix')
@@ -323,9 +324,10 @@ def main():
                   f"backend=block attention=torch_splitkv shared_gpu_mode=true single_node={str(args.single_node).lower()} "
                   f"accepted=false logs={run}", flush=True)
         elif args.step == 9:
-            print(f"QUICK CHECK step=9{' method=' + args.method if args.method else ''} result={status['result']} "
-                  f"(fail-slow W: {args.method or 'weavetp/anchortp/restart'}, event order, deadline cut, "
-                  f"no co-runner left; fail-stop restart: passed, reference_audit skipped; {json.dumps(status.get('step9'), default=str)}) "
+            scope = f'method={args.method} ' if args.method else ''
+            failstop = '' if args.method else 'fail-stop restart: passed, reference_audit skipped; '
+            print(f"QUICK CHECK step=9 {scope}result={status['result']} (fail-slow W: {args.method or 'weavetp/anchortp/restart'}, "
+                  f"event order, deadline cut, no co-runner left; {failstop}{json.dumps(status.get('step9'), default=str)}) "
                   f"shared_gpu_mode=true accepted=false logs={run}", flush=True)
         elif args.step == 5:
             print(f"QUICK CHECK step=5 result={status['result']} (memory preflight, deterministic reference/candidate "
