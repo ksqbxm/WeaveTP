@@ -1,15 +1,15 @@
 # 11. fail-stop WeaveTP `--mode kill`：降级在预建组上在线迁移，恢复沿用 real 重建
 
-状态（2026-10-26）：**已实现，CPU 已验证，服务器 GPU 未运行。** 分支 `codex/failstop-online`，基于 `codex/failslow-online@1ae7211`（实现 `d8b8cd7`）；先 cherry-pick 了 `codex/failstop` 的纯文档提交 `42f19d3`（00_总计划 的 `--shared-gpu-ok` 登记与 inflight 快验命令，无冲突）。实现（A）`6f2fc849328c368cd45f9254575129fc32eb2731`；`releases.json["step6"]` 改指 A，`failslow` 仍为 `d8b8cd7`。只有 fail-stop weavetp 新增 `--mode kill`；fail-stop 的 emulate/real、AnchorTP、restart 与全部 fail-slow 行为不变，峰值驱逐的修复除外（§5）。
+状态（2026-10-26）：**已实现，CPU 已验证，服务器 GPU 未运行。** 分支 `codex/failstop-online`，基于 `codex/failslow-online@1ae7211`（实现 `d8b8cd7`）；先 cherry-pick 了 `codex/failstop` 的纯文档提交 `42f19d3`（00_总计划 的 `--shared-gpu-ok` 登记与 inflight 快验命令，无冲突）。实现（A）`c4b203e0d059700088f4b23fc84b9ab88605e935`（含 §9 的审阅修改；首版实现 `6f2fc84`、清单 `c71d737`、命令 `c4887e3` 与 bundle `failstop_online_c71d737` 作废）；`releases.json["step6"]` 改指 A，`failslow` 仍为 `d8b8cd7`。只有 fail-stop weavetp 新增 `--mode kill`；fail-stop 的 emulate/real、AnchorTP、restart 与全部 fail-slow 行为不变，峰值驱逐的修复除外（§5）。
 
 ## 1. 语义
 
 - **降级（kill）**：4 个 victim（EDP0 的 etp∈{0,1}）被监管器真实 SIGKILL，流程与 real 相同：kill_sent/kill_exited、回收、新进程替换。
   - 存活进程（EDP1 与 4 张存活卡）不 abort world，也不建组。它们沿用启动时预建的 phase-1 组，rank 编号同 emulate，即 rank = slot。
   - 存活卡对开服前建好并释放了存储的 TP2 模型做 reallocate，按开服前算好的缩容计划只迁移权重。
-  - 每一波按以下顺序执行：launch → 12 个存活 rank 过 Gloo 栅栏 → EDP1 decode，每波最多 `max_overlap_steps` 步 → wait。存活卡只过栅栏，因为它们的 TP4 组里有死卡。
+  - 每一波按以下顺序执行：launch → 12 个存活 rank 过 Gloo 栅栏 → EDP1 decode，每波最多 `max_overlap_steps` 步 → wait。每一波都 decode，整次切换不设上限：KV 不迁移，online 那种 open-block 预算在这里没有意义。存活卡只过栅栏，因为它们的 TP4 组里有死卡。
   - EDP0 的在途请求全部 requeue，从 prompt 加已提交 token 重新 prefill；KV 不迁移。
-- **降级完成后**（regroup('shrink') 发 phase-1 报告之前）：每个存活进程立即对自己所在、成员含 victim 的每个旧组调用 `c10d._abort_process_group(group)`。这些组取自 c10d 注册表，包括预建 phase-0 的 target/data/control 组，以及 `initialize_megatron` 建的模型并行组；默认 world 除外。这一步不建任何组。目的是让 victim GPU 的显存在 spawn 前能回收，独占模式下 `supervisor.py` 的回收等待不超时。各进程耗时的最大值记入 `events_actual.delays.dead_group_abort_s`。
+- **降级完成后**（regroup('shrink') 发出 phase-1 报告并 `session.complete()` 之后，即控制门的 shrink_done 之后）：每个存活进程立即对自己所在、成员含 victim 的每个旧组调用 `c10d._abort_process_group(group)`。这些组取自 c10d 注册表，包括预建 phase-0 的 target/data/control 组，以及 `initialize_megatron` 建的模型并行组；默认 world 除外。随后丢掉初始 world 的模型并行状态（`runtime.world_destroyed()`，real 在故障时也这样做）。这一步不建任何组。目的是让 victim GPU 的显存在 spawn 前能回收，独占模式下 `supervisor.py` 的回收等待不超时。各进程的耗时随 phase-2 报告上报，最大值记入 `events_actual.delays.dead_group_abort_s`。
 - **恢复（方案 A）**：与 real 相同。先 abort 旧 world（Gloo 默认 world 及其余子组），再以新 store 前缀 `init_process_group('nccl', rank=slot, world_size=16)` 重建 16 rank world，然后在线扩容：KV 前缀 + 增量，expand/delta 在切换时由 planner 计算。只有这里建组；EDP1 的重建停顿照常记录。
 - **范围**：`serving_config.require_method` 只接受 `--method weavetp --scenario failstop --mode kill`。kill 只跑 1 轮，Step 1–5 的入口都不开放 kill。
 - **GPU 证据（用户提供，本仓库没有原始记录）**：static_group 探针表明，组内成员被 SIGKILL 后，存活组仍能通信；只 abort 含死卡的旧组，耗时 0.34–0.52 s。
@@ -41,9 +41,10 @@
 | `plan_before_serving`/`warm_pairs` | 新增 session/group 参数，kill 传降级会话和 `prebuilt[1]['data']` | 缺省就是 online 原有行为 |
 | `ServingWorker.prepare_online` | kill 分支：存活卡建 TP2 后释放；在降级世界、用原始 profile 只计划 shrink；按计划用到的 P2P 对预热；不做 expand 计划，不预热 KV 对 | online fail-slow 的两向计划与 KV 预热 |
 | `shrink_transfer(meta=None)` | kill 对预建 TP2 做 reallocate，替代 `runtime.build(2)` | `runtime.build(2)` 保留给 emulate/real 的 weavetp 与 anchortp |
-| `ServingSwitcher.base_wave('shrink')` | victim 走 `w.real` 分支，等着被杀。存活方：`world_transition(1)`（不 abort）→ `require_degraded_map()`（与 online cutover 共用）→ 存活卡 `shrink_transfer(None, overlap(None…))`，EDP1 `sender_transfer('shrink', decode_fn, overlap(decode_fn…))`；`overlap_steps` 记实际步数 | emulate/real：不带 overlap，`overlap_steps` 为 0 |
-| `ServingSwitcher.regroup('shrink')` | `abort_dead_groups()` 后再发 phase-1 报告（报告带 `dead_group_abort_s`） | — |
-| `serving_probe` | kill_sent/kill_exited、rejoin_request/reclaimed、空接收端、PID 已变、EDP1 停顿：判断从 `mode == 'real'` 改为 `mode != 'emulate'`；新增 `delays.dead_group_abort_s` | — |
+| `ServingSwitcher.base_wave('shrink')` | victim 走 `w.real` 分支，等着被杀。存活方：`world_transition(1)`（不 abort）→ `require_degraded_map()`（与 online cutover 共用）→ 存活卡 `shrink_transfer(None, overlap(None…))`，EDP1 `sender_transfer('shrink', decode_fn, overlap(decode_fn…))`，每波 decode，总步数不设上限；`overlap_steps` 记实际步数 | emulate/real：不带 overlap，`overlap_steps` 为 0 |
+| `ServingSwitcher.ack`（`compact` 开头调用；`RestartSwitcher.compact` 同） | `switch_ack` 在峰值驱逐之后才发，控制门收齐后才 kill | 所有模式同一路径（原来在 `__init__` 里发，见 §9） |
+| `ServingSwitcher.regroup('shrink')` | 发 phase-1 报告并 `session.complete()` 后调用 `abort_dead_groups()`（耗时随 phase-2 报告上报） | — |
+| `serving_probe` | kill_sent/kill_exited、rejoin_request/reclaimed、空接收端、PID 已变、EDP1 停顿：判断从 `mode == 'real'` 改为 `mode != 'emulate'`；新增 `delays.dead_group_abort_s`（取 phase-2 报告） | — |
 | 入口 | `run_failstop_e2e.py`/`.sh`、`run_serving.py`、`quick_driver.py`、`quick_check.sh` 接受 `--mode kill` | — |
 
 不变的部分：`FailstopHooks`（kill 走 replay=True）、peak=evict、`online_switch`（仍只是 fail-slow weavetp）、恢复的 `expand_prefix`/`join_expand`/`kv_delta`/`check_kv`、监管器。
@@ -73,23 +74,45 @@
 - **新增 `fs/test_failstop_kill_protocol.py`**：16 actor 的 kill 协议模拟，correctness 与 timing 各一次。模拟的监管器杀掉 victim 之后，任何仍需要 victim 的集合通信都会撞上 8 s 上限而失败。
   - a) 从开服到 rejoin 的 transition 之间：没有 `new_group`、没有 `init_process_group`、没有计划、没有建模型；abort 只针对含死卡的组，覆盖每个存活进程所有含死卡的组，不碰默认 world。恢复时，12 个存活进程各 abort 一次 world、nccl init 一次；4 个替换进程各 init 一次。
   - b) 缩容各波只用 12 人栅栏。
-  - c) EDP1 的缩容 `overlap_steps > 0`；EDP0 有 requeue，`replay_prefill_tokens > 0`，12 条请求全部完成，KV 字节为 0。
+  - c) EDP1 在每个缩容波都 decode（`overlap_steps` = 波数）。测试把 shrink 的 growth 设为整个 open-block 区，原来的上限会让 EDP1 一步也不 decode。EDP0 有 requeue，`replay_prefill_tokens > 0`，12 条请求全部完成，KV 字节为 0。
   - d) 只有 shrink 在开服前计划，用的是原始 profile，源不含 victim；planner 调用开服前 12 次，rejoin 时 2 × 16 次。
-  - e) EDP1 的阶段 2 停顿、`dead_group_abort_s` 有值；correctness 下扩容 KV 逐位检查与参考 hash 都通过；控制门的 PID 与空接收端检查通过。
+  - e) EDP1 的阶段 2 停顿、`dead_group_abort_s` 有值；correctness 下扩容 KV 逐位检查与参考 hash 都通过；控制门的 PID 与空接收端检查通过；分析器接受结果（`rejected` 为空）。
+  - 另外：victim 在 shrink ack 之后不参与任何集合通信；每个存活进程的死组 abort 都在它的 phase-1 报告之后，并且只 drop 一次模型并行状态。
 - **模拟支架**：假 c10d 按 actor 维护进程组注册表（含默认 world）；假 `_abort_process_group(group=None)` 改为 `Simulation.abort`；假监管器对非 emulate 模式生成替换进程。
 - **改动的已有测试**：
   - `test_server_launch`：组合数 28 → 30，替换进程 16 → 24；
   - `test_expand_with_requests_in_flight`：toy 请求 60 → 120（只改测试，加大扩容时的在途余量）；
   - 峰值驱逐单测。
-- **回归**（09 §7 全量，AC 供电，无其他忙循环进程）：基线 `1ae7211` 为 303 通过、1 跳过、119 个子测试；本实现为 306 通过、1 跳过、123 个子测试。
+- **回归**（09 §7 全量，AC 供电，无其他忙循环进程）：基线 `1ae7211` 为 303 通过、1 跳过、119 个子测试；首版为 306 通过、1 跳过、123 个子测试；审阅后为 306 通过、1 跳过、123 个子测试。
 
 ## 7. 只能上机验证的风险与快验判据
 
 - **R1：abort Gloo 默认 world。** 阶段 2 要 abort 一个挂着 NCCL 子组的 Gloo 默认 world，现有模式没这样用过。torch 文档把 `_abort_process_group` 标为仅限 NCCL 的实验接口；默认后端是 Gloo 时，它不把 NCCL abort 包进 coalescing。本机 torch 2.14 已验证单 rank 的 Gloo world 可以 abort 后重建；服务器 torch 2.11 + NCCL 2.28 未验证。快验判据：控制门 passed（phase 2 的 validate 通过，说明重建成功），`delays.abort_s["2"]`、`rebuild_s["2"]` 有值。
 - **R2：回收。** 已由 §1 的死组 abort 处理。快验判据：`delays.gpu_reclaim_s` 每卡有值，没有 `GPU memory/process reclamation did not become stable` 超时；`delays.dead_group_abort_s` 有值。
-- **R3：模型并行组的元数据查询。** 被 abort 的模型并行组从 c10d 注册表里删掉了。推理前向从绑定的 pg_collection 取组，Megatron 的全局取组只出现在训练 recompute/fp8 路径（`moe_layer.py`）。若仍有元数据查询，会立刻报 `Group … is not registered`，不会静默出错。
+- **R3：模型并行状态。** 被 abort 的模型并行组和初始 world 的模型并行状态在降级后一起丢掉（`world_destroyed`），所以 kill 降级期间的状态和 real 一样：real 在 phase 1 就 destroy 了模型并行状态，照常服务。推理前向从绑定的 pg_collection 取组，Megatron 的全局取组只出现在训练 recompute/fp8 路径（`moe_layer.py`）。
 - **EDP1 decode。** 判据：SL3060 的 `result.json` 中 `switches` 里 domain EDP1 shrink 的 `overlap_steps > 0`。
 
 ## 8. step6 改钉
 
 `releases.json["step6"]` 从 `073a50f` 改指本实现 A。`073a50f` 带着两个回放历史问题（`BlockBackend.history_for` 优先用本 rank 的旧副本；跨副本重放时 prompt 拼了两次），二者已在 `d8b8cd7` 修复（见 10 §6）。**此前用 `073a50f` 跑出的 step6 结果作废。**
+
+## 9. 审阅修改（2026-10-26）
+
+1. **`switch_ack` 移到峰值驱逐之后（正确性，real 同样受影响）。**
+   - 原来 ack 在 `ServingSwitcher.__init__` 里发，之后 `perform_switch` 才做峰值驱逐。`RemoteControl.evict_for_peak` 无论有无驱逐，都要在整个 EDP0 域的 Gloo 组（含 victim）上广播一次。
+   - 控制门收齐 16 个 ack 就 kill。real/kill 下若 victim 在加入这次广播之前被杀，存活卡会卡在广播里，直到 stage 超时。
+   - CPU 模拟只在 bus 等待处杀进程，所以原来的测试看不到这个问题。
+   - 修复：ack 改由 `compact()` 的第一步发出（`ServingSwitcher.ack`；`RestartSwitcher.compact` 也调用），即 peak 之后的第一个 switcher 调用。所有模式都是这一条路径。
+   - 测试：victim 在 ack 之后不参与任何集合通信。修复前这条断言失败（victim 8 在 ack 之后参与了 EDP0 的 `bcast`）。
+2. **kill 的 EDP1 每波 decode，不设总上限。** 原来沿用 online 的预算 `max_delta_steps − growth`（正式配置为 32），超过 32 波以后 EDP1 在剩下的波里不再 decode。那个预算是 online 缩容中 open-block 增量区的上限，kill 不迁移 KV，用不上。测试把 shrink 的 growth 设成整个预算，修复前 EDP1 的 `overlap_steps` 是 0，修复后等于波数。
+3. **死组 abort 移到降级完成之后，并 drop 模型并行状态。**
+   - 原来在 phase-1 报告之前 abort，abort 耗时被算进控制门的 shrink_done 和 `shrink_wall_s`。现在放在报告和 `session.complete()` 之后，耗时随 phase-2 报告上报。
+   - 同时调用 `runtime.world_destroyed()`，不让模型并行全局状态指着已 abort 的组；降级期间的状态与 real 一致（R3）。
+4. **精简。**
+   - `plan_before_serving`、`warm_pairs` 的 session/group 改为必填（调用方都显式传入），去掉 None 缺省分支。
+   - 预建组的 healthy target 共享改为遍历全部 phase。
+   - prepare 的 kill 分支合成一个推导式。
+   - base_wave 的 online 与 kill 分支分开写。
+5. **模拟支架。**
+   - 假监管器等 `finish` 的上限改为 `launch_timeout_s`，与真实监管器相同（`supervisor.py`）。原来用的是单个协议步的 8 s 上限，而 toy 请求增到 120 条后，扩容后的排空可能超过 8 s：审阅后的第一次全量回归里 emulate 子测试因此失败过一次。
+   - 改后在 8–16 个忙循环负载下跑 18 次，未再出现这个失败。另有 1 次（16 个忙循环下 8 次中的 1 次）报 "drained before the expand"，这是基线已有的在途余量问题（10 §6），120 条只是让它更少见；不加负载时全量回归通过。
