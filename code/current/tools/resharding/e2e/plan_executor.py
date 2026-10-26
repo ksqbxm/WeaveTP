@@ -66,11 +66,12 @@ class PlanExecutor:
         self.armed += 1
 
 
-def perform_switch(switch, *, control, events, switcher, validation, step, now, peak, decode_fn, growth):
+def perform_switch(switch, *, control, events, switcher, validation, step, now, peak, decode_fn, growth, release):
     """Run one switch; `switcher` supplies the GPU-facing steps (compact, base, audit, delta, cutover, release, regroup).
 
     peak: {'mode': 'drain'|'evict', 'budget': bytes} - drain waits (polling decode_fn) until the
-    budget fits, evict pushes the newest admissions back to the queue head and records them.
+    budget fits, evict pushes the newest admissions back to the queue head and records them; release(seqs) frees
+    their KV (a later admission prefills them afresh).
     """
     outcome = SwitchOutcome(switch.index, switch.direction, {'kind': switch.triggered.kind, 'step': switch.triggered.step,
                                                              'overshoot': switch.triggered.overshoot})
@@ -85,6 +86,7 @@ def perform_switch(switch, *, control, events, switcher, validation, step, now, 
     if peak is not None:
         if peak['mode'] == 'evict':
             outcome.evictions = control.evict_for_peak(step(), direction, growth, peak['budget'])
+            release(outcome.evictions)
             if outcome.evictions:
                 mark('peak_eviction', evicted=outcome.evictions, count=len(outcome.evictions))
         else:

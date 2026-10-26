@@ -24,6 +24,13 @@ class Killed(BaseException):
     pass
 
 
+class DefaultGroup:
+    """The default process group of an actor's world (c10d._world.default_pg)."""
+
+    def __init__(self, size):
+        self.members = tuple(range(size))
+
+
 class Simulation:
     def __init__(self, mode, root, rounds, extra_config=None):
         self.mode, self.root, self.rounds = mode, root, rounds
@@ -79,6 +86,9 @@ class Simulation:
     def init(self, backend, *, store, rank, world_size, **kwargs):
         self.local.world, self.local.rank, self.local.size = store, rank, world_size
         self.local.counts, self.local.group_index = {}, 0
+        # c10d._world as this actor holds it: every process group it belongs to, the default one included
+        self.local.default = DefaultGroup(world_size)
+        self.local.registry = {self.local.default: {r: r for r in range(world_size)}}
 
     def group(self, ranks, **kwargs):
         sim, members = self, tuple(sorted(ranks))
@@ -91,6 +101,8 @@ class Simulation:
                 return members.index(sim.local.rank)
         group = Group()
         group.members, group.key = members, key
+        if self.local.rank in members:
+            self.local.registry[group] = {r: i for i, r in enumerate(members)}
         return group
 
     def reduce(self, tensor, group, op=None, **kwargs):
@@ -177,7 +189,7 @@ class Simulation:
                 self.put('slow_stopped', {'leftover': []})
             if victims:
                 self.wait(['spawn'])
-                if node == 'SL3061' and self.mode == 'real':
+                if node == 'SL3061' and self.mode != 'emulate':  # real, kill: replacements
                     for slot in victims:
                         self.spawn(slot, 2)
                 if node == 'SL3061':

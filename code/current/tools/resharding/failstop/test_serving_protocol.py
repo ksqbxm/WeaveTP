@@ -67,6 +67,21 @@ class FakeRuntime(model_test.FakeRuntime):
         return FakeModel(tp, groups, clean=load)
 
 
+class World:
+    """c10d._world as one actor sees it: the process groups it holds (the default one included) by global rank."""
+
+    def __init__(self, sim):
+        self.sim = sim
+
+    @property
+    def pg_group_ranks(self):
+        return self.sim.local.registry
+
+    @property
+    def default_pg(self):
+        return self.sim.local.default
+
+
 class Simulation(model_test.Simulation):
     toy = {'count': 12}  # write_toy_inputs arguments
 
@@ -96,6 +111,15 @@ class Simulation(model_test.Simulation):
     def broadcast_object_list(self, payload, src, group=None, **kwargs):
         values = self.collective(group, payload[0], 'bcast')
         payload[0] = values[group.members.index(src)]
+
+    def abort(self, group=None):
+        """c10d._abort_process_group: the whole world (group None) or one process group this actor holds."""
+        common.require(getattr(self.local, 'rank', None) is not None, 'abort without a process group')
+        if group is None:
+            self.local.registry = {}
+        else:
+            common.require(group in self.local.registry, 'abort of a group this rank does not hold')
+            del self.local.registry[group]
 
     def run(self):
         reference = self.root / 'reference'
@@ -152,8 +176,8 @@ class Simulation(model_test.Simulation):
                 get_process_group_ranks=lambda group: list(group.members), get_backend=lambda: 'fake',
                 all_reduce=self.reduce, all_gather=self.gather, broadcast_object_list=self.broadcast_object_list,
                 barrier=lambda group=None, **kwargs: self.collective(group, None, 'barrier')))
-            stack.enter_context(patch.object(model_worker.c10d, '_abort_process_group',
-                lambda: common.require(getattr(self.local, 'rank', None) is not None, 'abort without a process group')))
+            stack.enter_context(patch.object(model_worker.c10d, '_abort_process_group', self.abort))
+            stack.enter_context(patch.object(model_worker.c10d, '_world', World(self)))
             stack.enter_context(patch.object(serving_probe.signal, 'SIGKILL', 9, create=True))
             supervisors = [threading.Thread(target=self.supervisor, args=(node,), daemon=True) for node in common.NODES]
             for thread in supervisors:
@@ -268,7 +292,7 @@ class ServingProtocolTests(unittest.TestCase):
         self.run_mode('real', 'anchortp')
 
     def test_expand_with_requests_in_flight(self):
-        """60 toy requests and a 1 s rejoin keep EDP0 serving at the expand, so the ranks that join (emulate victims, real
+        """120 toy requests and a 1 s rejoin keep EDP0 serving at the expand, so the ranks that join (emulate victims, real
         replacements) decode handed-over requests whose admits they never saw: a KeyError in Driver.body before the
         fix. Every request completes, the gate's result holds the serving_wall_s the calibration reads, the analyzer
         accepts the gate's files and the quick check's criterion (run_serving.handed_over) covers those requests.
@@ -282,14 +306,14 @@ class ServingProtocolTests(unittest.TestCase):
         for mode in ('emulate', 'real'):
             joined.clear()
             with self.subTest(mode=mode), patch.object(serving_worker.ServingWorker, 'loop', record), \
-                    self.simulate(mode, {'method': 'weavetp'}, toy={'count': 60, 'rejoin_seconds': 1.0}) as (result, result_json, events, root):
+                    self.simulate(mode, {'method': 'weavetp'}, toy={'count': 120, 'rejoin_seconds': 1.0}) as (result, result_json, events, root):
                 victims = common.failed_slots(json.loads((root / 'rank_map.json').read_text())['0/0'])
                 handed = set().union(*joined.values())
                 self.assertTrue(handed, 'no joining rank decoded a handed-over request: the workload drained before the expand')
                 self.assertLessEqual({slot for slot, seqs in joined.items() if seqs}, set(victims))
                 self.assertLessEqual(handed, set(run_serving.handed_over(result_json)))
                 metrics = result['metrics']
-                self.assertEqual((metrics['requests_completed'], metrics['check_passed'], metrics['kv_check_passed']), (60, True, True))
+                self.assertEqual((metrics['requests_completed'], metrics['check_passed'], metrics['kv_check_passed']), (120, True, True))
                 self.assertEqual(result_json['serving_wall_s'], metrics['serving_wall_s'])
                 self.assertEqual(result_json['gpu_sharing'], 'shared')
                 self.assertEqual(analyze_failstop_e2e.main([str(root), '--out', str(root / 'analysis')]), 0)

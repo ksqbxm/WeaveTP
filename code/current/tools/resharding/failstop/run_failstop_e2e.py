@@ -64,7 +64,7 @@ def parse(argv=None):
                         help='ignore/nofault: --scenario failslow only (nofault = no injection, the baseline); restart: failslow '
                              'or emulate failstop')
     parser.add_argument('--scenario', choices=SCENARIOS, default='failstop')
-    parser.add_argument('--mode', choices=('emulate', 'real'), default='emulate')
+    parser.add_argument('--mode', choices=('emulate', 'real', 'kill'), default='emulate')
     parser.add_argument('--run-mode', choices=RUN_MODES, default='timing')
     parser.add_argument('--launches', type=int, default=1, help='independent launches of this cell, in order')
     parser.add_argument('--correctness-only', action='store_true',
@@ -113,7 +113,7 @@ def parse(argv=None):
             1024 <= args.port_base <= 65536 - args.launches, 'invalid budget/port')
     require(not (args.correctness_only and args.run_mode == 'timing'), '--correctness-only is a correctness-run flag')
     require(not (args.shared_gpu_ok and args.run_mode != 'timing'), '--shared-gpu-ok is a timing-run flag (correctness: --correctness-only)')
-    require(args.scenario == 'nofault' or args.mode in ('emulate', 'real'), 'invalid mode')
+    require(args.scenario == 'nofault' or args.mode in ('emulate', 'real', 'kill'), 'invalid mode')
     require(str(args.output).replace('\\', '/').startswith('/data/') and '..' not in args.output.parts, 'output must be under /data')
     return args
 

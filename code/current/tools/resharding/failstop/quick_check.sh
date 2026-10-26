@@ -8,7 +8,7 @@ set -euo pipefail
 usage() {
   cat <<'USAGE'
 usage: quick_check.sh --manifest SHA --step N --node SL3060|SL3061 [--single-node] [--layer a|b1|b2|b3|inflight]
-                      [--mode emulate|real] [--method METHOD] [--profile-file PATH] [--reference-root DIR]
+                      [--mode emulate|real|kill] [--method METHOD] [--profile-file PATH] [--reference-root DIR]
                       [--min-free-disk-gb N]
 
   --manifest SHA      full SHA of the delivered manifest commit; its releases.json names the implementation
@@ -21,7 +21,7 @@ usage: quick_check.sh --manifest SHA --step N --node SL3060|SL3061 [--single-nod
   --layer             Step 6 only: a = fake backend + CPU tests (default), b1/b2 = real model on this node,
                       b3 = two-node fail-stop end to end (never with --single-node),
                       inflight = b3 with requests still running at the expand (two nodes, 600 s budget)
-  --mode              Step 6 b3/inflight fault mode (default emulate)
+  --mode              Step 6 b3/inflight fault mode (default emulate; kill: weavetp only)
   --method            Step 6 b3/inflight recovery method under test (default weavetp; anchortp = fixed-path paused migration);
                       Step 9: weavetp|restart|ignore|anchortp runs only that fail-slow launch (default: all four launches)
   --profile-file      Step 6 b3/inflight and Step 9: frozen Step 3 profile.json, same path on both nodes
@@ -67,7 +67,7 @@ esac
 [[ "$NODE" == SL3060 || "$NODE" == SL3061 ]] || fail "--node must be SL3060 or SL3061 (got '${NODE}')"
 [[ "$MIN_FREE_DISK_GB" =~ ^[0-9]+([.][0-9]+)?$ ]] || fail "--min-free-disk-gb must be a number (got '${MIN_FREE_DISK_GB}')"
 [[ "$LAYER" =~ ^(a|b1|b2|b3|inflight)$ ]] || fail "--layer must be a, b1, b2, b3 or inflight (got '${LAYER}')"
-[[ "$MODE" =~ ^(emulate|real)$ ]] || fail "--mode must be emulate or real (got '${MODE}')"
+[[ "$MODE" =~ ^(emulate|real|kill)$ ]] || fail "--mode must be emulate, real or kill (got '${MODE}')"
 if [[ "$STEP" == 9 ]]; then
   [[ -z "$METHOD" || "$METHOD" =~ ^(weavetp|restart|ignore|anchortp)$ ]] || fail "Step 9 --method must be weavetp, restart, ignore or anchortp (got '${METHOD}')"
 else

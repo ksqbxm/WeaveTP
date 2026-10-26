@@ -112,7 +112,8 @@ class Worker:
         self.root, self.row = Path(config['output']), config['topology'][slot]
         self.store, self.bus = connect(config)
         self.journal = Journal(self.root / f'model_{slot}_{initial_epoch}.jsonl', config['node'], 'worker', **config['clock'])
-        self.real, self.healthy = config['mode'] == 'real', self.row['replica'] == 'EDP1'
+        # real, kill: the victims are SIGKILLed and replaced; kill keeps the prebuilt degraded world until the rejoin
+        self.real, self.kill, self.healthy = config['mode'] in ('real', 'kill'), config['mode'] == 'kill', self.row['replica'] == 'EDP1'
         self.session = FaultSession(config['topology'], config['launch'],
                                     FaultBackend(config['mode'], fail=lambda *_: None, rejoin=lambda *_: None),
                                     local_orders=model_local_orders(config['topology']))
@@ -134,8 +135,8 @@ class Worker:
         self.prebuilt = {}
         self.planner = PLANNERS[config['method']]
         self.online = online_switch(config)
-        self.degraded_rows = self.barrier = None
-        self.plans = {}  # online switch: the weight plans computed before serving, by label
+        self.degraded_rows = self.barrier = self.degraded = None
+        self.plans = {}  # online switch, kill: the weight plans computed before serving, by label
 
     # ---- world and groups -------------------------------------------------------------------------------------
     def initialize(self):
@@ -152,7 +153,7 @@ class Worker:
             empty_receiver=self.initial_epoch == 2, context_verification=context, manifest=self.manifest))
         self.bus.wait([f'cuda_verified/{self.initial_epoch}'])
         del context_tensor
-        if not self.real:
+        if self.initial_epoch == 0 and not self.session.backend.rebuilds(0):  # emulate, and kill until its rejoin
             dist.init_process_group('gloo', store=dist.PrefixStore(f"step05/{self.config['launch']}/control/", self.store),
                                     rank=self.slot, world_size=16, timeout=timedelta(seconds=self.config['stage_timeout_s']))
             stage = FaultSession(self.config['topology'], self.config['launch'], self.session.backend,
@@ -160,21 +161,27 @@ class Worker:
             self.prebuilt[0] = self.build(stage, 0)
             stage.fail(stage.failed)
             self.prebuilt[1] = self.build(stage, 1)
-            if self.online:  # the layout the online shrink migrates into, with the TP2 coordinates its groups actually give
+            if self.online or self.kill:  # the layout the shrink migrates into, with the TP2 coordinates its groups actually give
                 stage.adopt_group_order(self.prebuilt[1]['records'])  # (as adopt() reconciles them; cleared at the rejoin)
                 self.degraded_rows = stage.rank_map()
             stage.complete()
-            stage.rejoin(stage.failed)
-            self.prebuilt[2] = self.build(stage, 2)
-            # The world never changes in emulate mode: serving models keep their communicators.
-            self.prebuilt[2]['service2'] = self.prebuilt[1]['target']
-            for phase in (1, 2):
+            if self.kill:  # the rejoin rebuilds the world (as real); the shrink is planned in this degraded world before serving
+                self.degraded = stage
+            else:
+                stage.rejoin(stage.failed)
+                self.prebuilt[2] = self.build(stage, 2)
+                # The world never changes in emulate mode: serving models keep their communicators.
+                self.prebuilt[2]['service2'] = self.prebuilt[1]['target']
+            for phase in list(self.prebuilt)[1:]:
                 if self.healthy:
                     self.prebuilt[phase]['target'] = self.prebuilt[0]['target']
             if self.online:  # EDP0's phase-2 groups are its phase-0 ones (same ranks): the initial TP4 model serves again
                 self.prebuilt[2]['target'], self.prebuilt[2]['data'] = self.prebuilt[0]['target'], self.prebuilt[0]['data']
-                # execute()'s overlap hook orders every wave's P2P before any model collective on this group
-                self.barrier = dist.new_group(list(range(16)), backend='gloo', timeout=timedelta(seconds=self.config['stage_timeout_s']))
+            if self.online or self.kill:
+                # execute()'s overlap hook orders every wave's P2P before any model collective on this group: online, the
+                # phase-0 world (the victims send); kill, the degraded world's twelve live ranks (the victims are dead by then)
+                self.barrier = dist.new_group(sorted(stage.current_world()['ranks']), backend='gloo',
+                                              timeout=timedelta(seconds=self.config['stage_timeout_s']))
                 self.warm_groups()
         torch.cuda.reset_peak_memory_stats()
 
@@ -192,7 +199,7 @@ class Worker:
             dist.all_reduce(torch.zeros(1, device='cuda'), group=group)
 
     def build(self, session, phase):
-        if self.real:
+        if session.backend.rebuilds(phase):
             members = session.current_world()['membership']
             dist.init_process_group('nccl', store=dist.PrefixStore(
                 f"step05/{self.config['launch']}/epoch/{session.epoch}/", self.store),
@@ -212,7 +219,7 @@ class Worker:
         return {'target': groups[1 if self.healthy else 0], 'data': data, 'records': records, 'service2': service2}
 
     def adopt(self, phase):
-        pack = self.build(self.session, phase) if self.real else self.prebuilt[phase]
+        pack = self.build(self.session, phase) if self.session.backend.rebuilds(phase) else self.prebuilt[phase]
         self.session.adopt_group_order(pack['records'])
         self.pack = pack
         if self.binding is not None and (self.healthy or phase == 2):
@@ -393,9 +400,10 @@ class Worker:
     def transfer(self, round_id, phase, label, writer, overlap=None):
         """Every active member plans the published global snapshot identically and runs the same waves.
 
-        Online switch: no planner runs. The weights follow the plan made before serving for `label` (a KV-only delta has
-        none), which must cover exactly the published weight shards; KV atoms have one holder each and pair directly
-        (fixed_tasks). overlap: execute()'s in-flight hook (ordering barrier + foreground decode inside every wave)."""
+        Online switch (and kill's shrink): no planner runs. The weights follow the plan made before serving for `label` (a
+        KV-only delta has none), which must cover exactly the published weight shards; KV atoms have one holder each and
+        pair directly (fixed_tasks). overlap: execute()'s in-flight hook (ordering barrier + foreground decode inside every
+        wave)."""
         mapping = self.session.rank_map()
         members = [r['slot'] for r in mapping if r['active']]
         rank_map = {identity(r): r['new_rank'] for r in mapping if r['active']}
@@ -405,7 +413,7 @@ class Worker:
             return [Shard(**{**row, 'shape': tuple(row['shape']), 'start': tuple(row['start']), 'stop': tuple(row['stop'])})
                     for entry in published for row in entry[key]]
         sources, targets = shards('sources'), shards('targets')
-        if self.online:
+        if self.online or label in self.plans:
             plan = self.plans.get(label, {'tasks': [], 'key': f'kv/{label}', 'record': {'planner': None}, 'shards': (set(), set())})
             weights = {s for s in sources if not s.name.startswith('kv.')}, {t for t in targets if not t.name.startswith('kv.')}
             require(weights == plan['shards'], f'{label}: the weight shards differ from the plan made before serving')
@@ -434,26 +442,32 @@ class Worker:
         self.transfers.append({'phase': f'{round_id}/{phase}', 'label': label, **stats, 'tasks': len(tasks)})
         return stats
 
-    def warm_pairs(self, pairs):
+    def warm_pairs(self, pairs, session=None, group=None):
         """Online switch: one one-element exchange over every (source rank, target rank) pair a planned or KV wave will
-        use, through the same copy service and order as execute(), so no wave pays a first P2P connection."""
-        service = make_copy_service(self.session, self.slot, self.pack['data'], p2p_order='task-round')
-        index = {r: i for i, r in enumerate(dist.get_process_group_ranks(self.pack['data']))}
+        use, through the same copy service and order as execute(), so no wave pays a first P2P connection. session/group:
+        the world the waves run in (default the current one; kill: the degraded world and its data group)."""
+        session = self.session if session is None else session
+        group = self.pack['data'] if group is None else group
+        service = make_copy_service(session, self.slot, group, p2p_order='task-round')
+        index = {r: i for i, r in enumerate(dist.get_process_group_ranks(group))}
+        rank = session.rank_map()[self.slot]['new_rank']
         buffers = []
         for task, (source, target) in enumerate(sorted(pairs)):
             for peer, send in ((target, True), (source, False)):
-                if (source if send else target) == self.rank:
+                if (source if send else target) == rank:
                     buffers.append(torch.zeros(1, device='cuda'))
                     (service.submit_send if send else service.submit_recv)(buffers[-1], index[peer], task)
         service.producer_stream = torch.cuda.current_stream()
         service.launch().wait()
         return len(pairs)
 
-    def plan_before_serving(self, label, sources, targets, profile):
+    def plan_before_serving(self, label, sources, targets, profile, session=None):
         """Online switch: publish this rank's weight shards for `label`, gather everyone's and plan them now (every rank
-        computes the same plan); transfer() runs it at the switch."""
+        computes the same plan); transfer() runs it at the switch. session: the world the switch runs in (default the
+        current one; kill: the degraded world, whose members exclude the victims)."""
+        session = self.session if session is None else session
         self.bus.put(f'plan_shards/{label}/{self.slot}', {'sources': [asdict(s) for s in sources], 'targets': [asdict(t) for t in targets]})
-        mapping = self.session.rank_map()
+        mapping = session.rank_map()
         rank_map = {identity(r): r['new_rank'] for r in mapping if r['active']}
         published = self.bus.wait([f"plan_shards/{label}/{r['slot']}" for r in mapping if r['active']])
 
@@ -461,7 +475,7 @@ class Worker:
             return [Shard(**{**row, 'shape': tuple(row['shape']), 'start': tuple(row['start']), 'stop': tuple(row['stop'])})
                     for entry in published for row in entry[key]]
         tasks, key, record = self.planner(shards('sources'), shards('targets'), profile, membership=list(rank_map),
-                                          epoch=self.session.epoch, rank_map=rank_map)
+                                          epoch=session.epoch, rank_map=rank_map)
         self.plans[label] = {'tasks': tasks, 'key': key, 'record': {**record, 'planned': 'before serving', 'plan_profile_sha256': digest(profile)},
                              'shards': (set(shards('sources')), set(shards('targets')))}
         return self.plans[label]

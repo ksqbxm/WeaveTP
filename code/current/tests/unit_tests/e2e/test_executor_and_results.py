@@ -74,7 +74,7 @@ def run_switch(tmp_path, validation, peak):
 
     outcome = plan_executor.perform_switch(executor.current, control=live_runtime.ControlNode(controller, lambda: 0.0), events=events, switcher=switcher,
                                            validation=validation, step=lambda: steps['n'], now=lambda: 1.0, peak=peak,
-                                           decode_fn=decode_fn, growth=0)
+                                           decode_fn=decode_fn, growth=0, release=lambda seqs: None)
     executor.complete()
     return outcome, switcher, events, controller, decoded
 
@@ -114,7 +114,7 @@ def test_drain_mode_polls_decode_until_the_budget_fits(tmp_path):
     outcome = plan_executor.perform_switch(executor.current, control=live_runtime.ControlNode(controller, lambda: 0.0), events=timeline.SwitchEventWriter(tmp_path / 'e.jsonl'),
                                            switcher=FakeSwitcher(), validation=plan_executor.ToleranceValidation(False),
                                            step=lambda: state['step'], now=lambda: 0.0, peak={'mode': 'drain', 'budget': budget},
-                                           decode_fn=decode_fn, growth=0)
+                                           decode_fn=decode_fn, growth=0, release=lambda seqs: None)
     assert state['polls'] == 2 and not outcome.evictions and 'peak_eviction' not in outcome.milestones
 
 

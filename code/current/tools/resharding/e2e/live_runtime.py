@@ -336,10 +336,16 @@ class Driver:
             self.body()
             stepped['seconds'] += run.clock() - before
 
+        def release(seqs):  # peak-evicted requests leave the replicas this process serves with their KV
+            for seq in seqs:
+                for replica in run.local_replicas:
+                    run.backend.release(replica, seq)
+
         switcher = run.backend.switcher(run, current.direction)
         outcome = plan_executor.perform_switch(current, control=run.control, events=run.events, switcher=switcher,
                                                validation=run.validation, step=lambda: run.step, now=run.clock,
-                                               peak=run.peak, decode_fn=decode_fn, growth=run.growth.get(current.direction, 0))
+                                               peak=run.peak, decode_fn=decode_fn, growth=run.growth.get(current.direction, 0),
+                                               release=release)
         run.switches.append(outcome)
         if run.executor is not None:
             run.executor.complete()

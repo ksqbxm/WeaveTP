@@ -52,7 +52,7 @@ class WorkerCommandTests(unittest.TestCase):
         """Every combination serving_config (and the fail-slow settings) accepts, built per node as the launchers do."""
         configs = {}
         for label, scenario, mode, run_mode in itertools.product(('weavetp', 'anchortp', 'restart', 'ignore', 'nofault'),
-                                                                 serving_config.SCENARIOS, ('emulate', 'real'), serving_config.RUN_MODES):
+                                                                 serving_config.SCENARIOS, ('emulate', 'real', 'kill'), serving_config.RUN_MODES):
             try:
                 failslow = serving_config.failslow_settings(method=label, level=None if label == 'nofault' else 'W', fault_gpus=[0, 1, 4, 5],
                                                             warmup_s=1.0, slow_s=2.0, tail_s=1.0, detect_s=1.0, mode=mode) \
@@ -71,8 +71,8 @@ class WorkerCommandTests(unittest.TestCase):
         return configs
 
     def commands(self, config):
-        """The supervisor's worker command lines on config['node']: the initial workers and, for real fail-stop, the
-        replacements (start_workers, with spawning recorded instead of started)."""
+        """The supervisor's worker command lines on config['node']: the initial workers and, for real and kill fail-stop,
+        the replacements (start_workers, with spawning recorded instead of started)."""
         config = {**config, 'topology': self.rows}
         Path(config['output']).mkdir(parents=True)
         common.write_json(Path(config['output']) / 'worker_config.json', config)  # as Supervisor.run writes it
@@ -86,7 +86,7 @@ class WorkerCommandTests(unittest.TestCase):
             return child, {'pid': child.pid}
         with patch.object(sup.children, 'spawn', side_effect=spawn), patch.object(supervisor.signal, 'SIGKILL', 9, create=True):
             sup.start_workers([r['slot'] for r in self.rows if r['node'] == config['node']], 0)
-            if config['node'] == 'SL3061' and config['mode'] == 'real' and common.releases_fault_set(config):
+            if config['node'] == 'SL3061' and config['mode'] != 'emulate' and common.releases_fault_set(config):
                 sup.state, sup.killed = 'reclaimed', {slot: True for slot in self.victims}
                 sup.start_workers(self.victims, 2)
         return config, commands
@@ -128,7 +128,7 @@ class WorkerCommandTests(unittest.TestCase):
     def test_every_serving_combination_parses_on_every_worker(self):
         configs = self.serving_configs()
         accepted = {(label, scenario) for label, scenario, _, _ in configs}
-        self.assertEqual(len(configs), 28)  # failstop 10 (restart: emulate only), nofault 8, failslow 10 (emulate only)
+        self.assertEqual(len(configs), 30)  # failstop 12 (restart: emulate only; kill: weavetp only), nofault 8, failslow 10 (emulate only)
         self.assertEqual(accepted, {(m, 'failstop') for m in ('weavetp', 'anchortp', 'restart')} | {(m, 'nofault') for m in ('weavetp', 'anchortp')} |
                          {(m, 'failslow') for m in ('weavetp', 'anchortp', 'restart', 'ignore', 'nofault')})
         replacements = 0
@@ -138,7 +138,8 @@ class WorkerCommandTests(unittest.TestCase):
                     config, commands = self.commands(built)
                     groups = self.check(config, commands, 'serving_worker.py')
                     replacements += len(groups.get('2', []))
-        self.assertEqual(replacements, 4 * 4)  # the real fail-stop cells (weavetp/anchortp x correctness/timing) replace the victims
+        # the real fail-stop cells (weavetp/anchortp x correctness/timing) and the kill ones (weavetp) replace the victims
+        self.assertEqual(replacements, 6 * 4)
 
     def test_step5_model_workers_parse(self):
         for mode in ('emulate', 'real'):

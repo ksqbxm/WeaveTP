@@ -1,12 +1,16 @@
 """BlockBackend on a CPU toy model that calls the block-KV hooks the way Megatron does: batched prefill and paged
 decode commit the same tokens as a per-request dense model; dummies write nothing; replays prefill the committed history."""
 
+from types import SimpleNamespace
+
 import torch
 
 from tests.unit_tests.e2e import test_block_context_forward as toy
 from tools.resharding.e2e import controller as ctl
+from tools.resharding.e2e import live_runtime, plan_executor
 from tools.resharding.e2e.block_backend import BlockBackend
 from tools.resharding.e2e.decode_policy import Greedy
+from tools.resharding.e2e.timeline import SwitchEventWriter, TimelineWriter
 
 GEOMETRY = dict(layers=2, heads=4, group_heads=2, k_dim=toy.DK, v_dim=toy.DV)
 HEAD = torch.randn(toy.NP * toy.DV, toy.VOCAB)
@@ -76,3 +80,56 @@ def test_replay_prefills_prompt_plus_committed_history_from_the_source():
     assert kv.histories[5] == dense_reference_tokens(prompts[5] + committed[5], 1)
     kv.decode(0, [row], ledger, Greedy())
     assert row.generated_so_far == 4  # three committed before the replay plus the prefill's token
+
+
+class KeepKVSwitcher:
+    """A switch that leaves the domain's KV where it is (EDP1 in the fail-stop serving: a sender, its context persists)."""
+
+    def compact(self, direction):
+        return {'moved_blocks': 0}
+
+    def base_wave(self, direction, decode_fn):
+        return {'overlap_steps': 0, 'bytes': {}}
+
+    def audit(self, direction):
+        return {}
+
+    def delta(self, direction):
+        return {'bytes': {}}
+
+    def cutover(self, direction):
+        pass
+
+    def release_source(self, direction):
+        pass
+
+    def regroup(self, direction):
+        pass
+
+
+def test_a_request_evicted_at_a_switch_peak_prefills_again_on_the_replica_it_left(tmp_path):
+    """The peak check (perform_switch, peak mode evict) puts the newest admissions back at the queue head; admitted again
+    on the replica they left, their prefill must find none of their first admission's KV (BlockKVContext.admit refused
+    'seq N already resident')."""
+    prompts = {0: [3, 1, 4, 1, 5], 1: [9, 2, 6, 5, 3]}
+    clock = live_runtime.FakeClock()
+    controller = ctl.AdmissionController(ctl.Ledger(ctl.RankMap.dense(2, 2)), [ctl.Request(s, f'r{s}', len(p), 6) for s, p in prompts.items()],
+                                         capacity=lambda r: 400, b_max=2)
+    control = live_runtime.ControlNode(controller, clock)
+    committed = {}  # the history each requeue publishes (RemoteControl.publish_histories) minus the prompt
+    kv = backend(prompts, history_source=lambda seq: committed[seq])
+    kv.switcher_factory = lambda run, direction: KeepKVSwitcher()
+    run = live_runtime.DomainRun('EDP1', (0,), live_runtime.LocalComm('EDP1', (0,)), kv, Greedy(), None, TimelineWriter(tmp_path / 't.jsonl'),
+                                 SwitchEventWriter(tmp_path / 'e.jsonl'), control, plan_executor.BitwiseValidation(False), {'shrink': 0},
+                                 {'mode': 'evict', 'budget': 1}, clock, layout=2)
+    driver = live_runtime.Driver(run)
+    control.push('EDP1', 0, run.replicas)
+    driver.step()  # both admitted and prefilled on replica 0
+    assert set(kv.context.tables) == {0, 1}
+    committed.update({seq: kv.histories[seq][len(prompts[seq]):] for seq in prompts})
+    outcome = driver.switch(SimpleNamespace(kind='control', step=run.step, overshoot=0, direction='shrink'))
+    assert sorted(outcome.evictions) == [0, 1] and not kv.context.tables
+    control.set_phase('EDP1', False, 'normal')
+    control.push('EDP1', run.step, run.replicas)
+    driver.step()  # admitted again on replica 0: a fresh prefill of prompt + committed tokens
+    assert set(kv.context.tables) == {0, 1} and all(row.replica == 0 for row in run.ledger.replica(0).running.values())

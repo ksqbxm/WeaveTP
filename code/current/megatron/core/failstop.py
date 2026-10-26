@@ -51,13 +51,19 @@ class FaultBackend:
 
     real: local supervisor SIGKILL/reclaim/spawn + worker abort/rebuild.
     emulate: release local state/isolated data groups + empty receiving target.
+    kill: SIGKILL/reclaim/spawn as real; the degraded world keeps the prebuilt groups (emulate's
+    ranks), only the rejoin aborts and rebuilds the world.
     A callback exception leaves the session stopped, never apparently recovered.
     """
 
     def __init__(self, mode=None, *, fail, rejoin):
         self.mode = mode or os.environ.get("FAILSTOP_MODE", "emulate")
-        require(self.mode in ("emulate", "real"), "FAILSTOP_MODE must be emulate or real")
+        require(self.mode in ("emulate", "real", "kill"), "FAILSTOP_MODE must be emulate, real or kill")
         self.fail, self.rejoin = fail, rejoin
+
+    def rebuilds(self, phase):
+        """Whether the process world of `phase` (0 initial, 1 degraded, 2 rejoined) is built anew."""
+        return self.mode == "real" or (self.mode == "kill" and phase == 2)
 
 
 class EpochResources:
@@ -199,7 +205,7 @@ class FaultSession:
     def current_world(self):
         return {'epoch': self.epoch, 'membership': self.members,
                 'ranks': tuple(r['new_rank'] for r in self.rank_map() if r['active']),
-                'process_world_size': 16 if self.backend.mode == 'emulate' else len(self.members)}
+                'process_world_size': len(self.members) if self.backend.mode == 'real' else 16}
 
     def cache_key(self):
         return (self.launch, self.round, self.epoch, self.members,

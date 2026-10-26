@@ -69,9 +69,11 @@ def failslow_stage_seconds(settings):
 
 
 def require_method(method, scenario, mode):
-    """weavetp/anchortp run every scenario, restart also the emulate fail-stop cycle, ignore/nofault only fail-slow."""
+    """weavetp/anchortp run every scenario, restart also the emulate fail-stop cycle, ignore/nofault only fail-slow;
+    --mode kill only weavetp fail-stop."""
     require(scenario == 'failslow' or method in ('weavetp', 'anchortp') or (method, scenario, mode) == ('restart', 'failstop', 'emulate'),
             f'{method} runs only with --scenario failslow (restart also with --scenario failstop --mode emulate)')
+    require(mode != 'kill' or (method, scenario) == ('weavetp', 'failstop'), '--mode kill runs only --method weavetp --scenario failstop')
 
 
 def worker_arguments(checkpoint, prompt_tokens, seq_length, run_mode):

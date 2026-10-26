@@ -91,6 +91,7 @@ class ServingWorker(ModelWorker):
                                               v_dim=serving['geometry']['v_dim'])
         self.backend = self.driver = None
         self.kv_checks = []
+        self.dead_group_abort_s = None  # kill: abort_dead_groups()
         self.switcher_class = SWITCHERS[config['method']]  # the only place a method differs: switcher + its planner
         # correctness: reference hash audits, KV snapshots and bitwise checks; timing: none of them (default mode).
         self.audits = config['run_mode'] == 'correctness'
@@ -219,16 +220,17 @@ class ServingWorker(ModelWorker):
         report = self.journal.event('phase_ready', slot=self.slot, replica=self.row['replica'], phase=phase, round=round_id,
                                     rank_map=self.session.rank_map(), checks_passed=True, step=run.step, sequence=0,
                                     history=remote_control.digest(run.ledger, self.replicas), empty_receiver=empty_receiver, memory=memory,
-                                    layout=self.tp, rejoin_pause_s=pause)
+                                    layout=self.tp, rejoin_pause_s=pause, dead_group_abort_s=self.dead_group_abort_s)
         self.bus.put(f'phase/{round_id}/{phase}/{self.slot}', report)
 
     def kv_bytes(self):
         return 0 if self.backend is None else self.backend.kv_bytes(self.replica_id)
 
     def world_transition(self, phase, round_id):
-        """Fail (1) or rejoin (2): the real world is aborted and rebuilt, the session follows the control event."""
+        """Fail (1) or rejoin (2): the real world is aborted and rebuilt (kill: only at the rejoin), the session follows the
+        control event."""
         message = self.bus.wait([f'transition/{round_id}/{phase}'])[0]
-        if self.real:
+        if self.session.backend.rebuilds(phase):
             c10d._abort_process_group()
             require(not dist.is_initialized(), 'old world still initialized after abort')
             self.runtime.world_destroyed()
@@ -248,6 +250,22 @@ class ServingWorker(ModelWorker):
         if self.pauses and self.pauses[-1]['end_local'] is None:
             self.pauses[-1]['end_local'] = time.monotonic()
 
+    def require_degraded_map(self):
+        """In the degraded world (online: at the cutover; kill: before the shrink waves): its rank map must be the layout
+        planned before serving."""
+        differing = [(a['slot'], key, a[key], b[key]) for a, b in zip(self.session.rank_map(), self.degraded_rows) for key in a if a[key] != b[key]]
+        require(not differing, f'the degraded rank map differs from the one planned before serving: {differing[:4]}')
+
+    def abort_dead_groups(self):
+        """kill, once the degraded world serves: abort every process group of this rank that holds a SIGKILLed victim (the
+        phase-0 groups and the model-parallel state of the initial load; never the default world), so the victims' GPUs
+        are reclaimed before the spawn. No group is created; the rejoin aborts and rebuilds the rest of the world."""
+        start, victims = time.monotonic(), set(self.session.failed)  # kill keeps the initial world's ranks (= slots)
+        for group, ranks in list(c10d._world.pg_group_ranks.items()):
+            if group is not c10d.GroupMember.WORLD and victims & set(ranks):
+                c10d._abort_process_group(group)
+        self.dead_group_abort_s = time.monotonic() - start
+
     def serve_until(self, key, decode_fn):
         """Foreground logical steps until the whole EDP sees the key (consensus on the model groups)."""
         deadline = time.monotonic() + self.config['stage_timeout_s']
@@ -265,14 +283,24 @@ class ServingWorker(ModelWorker):
         """Before serving: the survivors' TP2 model (built now, storage released until the shrink), both weight plans (the
         shrink on the profile with the fault GPUs at 1/(1+k) of their p2p bandwidth, the expand on the frozen profile: the
         co-runners are gone by then) and one exchange over every pair those plans and the KV holders use. No switch then
-        builds a model, plans weights or opens a connection."""
-        self.tp4_model, (current, degraded) = model, self.shrink_maps()
+        builds a model, plans weights or opens a connection.
+
+        kill (fail-stop; EDP1 and the survivors only): the shrink weights alone, planned in the degraded world (the victims
+        are dead by then, so no source is theirs) on the frozen profile and warmed on its data group. No KV moves; the
+        expand is planned at the rejoin, which rebuilds the world."""
         tp4, tp2 = [s for s, _ in self.weight_sources(model, 4, self.row['etp'])], []
         if not self.healthy and not self.victim:
             self.tp2_coord = next(r['etp'] for r in self.degraded_rows if r['slot'] == self.slot)
             self.tp2_model = self.runtime.build(2, self.prebuilt[1]['target'], load=False)
             tp2 = [s for s, _ in self.weight_sources(self.tp2_model, 2, self.tp2_coord)]
             self.runtime.release(self.tp2_model, [], [])
+        if self.kill:
+            shrink = self.plan_before_serving('shrink', tp4, tp2, self.profile, self.degraded)
+            pairs = {(t.source.rank, t.target.rank) for t in shrink['tasks']}
+            warmed = self.warm_pairs({(a, b) for a, b in pairs if a != b}, self.degraded, self.prebuilt[1]['data'])
+            self.events.append({'event': 'kill_ready', 'shrink_tasks': len(shrink['tasks']), 'p2p_pairs_warmed': warmed})
+            return
+        self.tp4_model, (current, degraded) = model, self.shrink_maps()
         fault = {identity(r) for r in self.config['topology'] if r['slot'] in self.session.failed}
         factor = 1 / (1 + LEVELS[self.config['failslow']['level']])
         shrink = self.plan_before_serving('shrink', tp4, tp2, downweighted(self.profile, fault, factor))
@@ -316,7 +344,8 @@ class ServingWorker(ModelWorker):
         """The TP2 target from the residual TP4 shards and EDP1. Returns (target, target context, stats, KV bytes).
 
         meta None (fail-stop, fail-slow anchortp/restart: survivors only, after the transition): the target is built now
-        and only weights move; the requests replay from prompt + committed history. Online (meta = this rank's
+        (kill: the TP2 model built before serving, storage reallocated, planned then too) and only weights move; the
+        requests replay from prompt + committed history. Online (meta = this rank's
         compacted tables, still in the phase-0 world): every EDP0 rank, victims included, also sends its A-zone KV; a
         survivor receives into the TP2 model built before serving (storage reallocated) and a TP2 pool laid out like
         the tables; the waves overlap decode."""
@@ -325,7 +354,11 @@ class ServingWorker(ModelWorker):
         if meta is None:
             self.tp2_coord = self.coord
             budget = self.admission(2, 0)
-            target = self.runtime.build(2, self.pack['target'], load=False)
+            if self.kill:
+                target = self.tp2_model
+                self.runtime.reallocate(target)
+            else:  # emulate and real (both methods): built now, planned in transfer()
+                target = self.runtime.build(2, self.pack['target'], load=False)
         else:
             maps = self.shrink_maps()
             moves = self.kv_moves(meta, ('A',), maps)
@@ -562,7 +595,7 @@ class ServingWorker(ModelWorker):
             self.runtime.start()
             model = self.runtime.build(4, self.pack['target'], load=True)
             self.events.append({'event': 'load', 'weights': self.validate_weights(model, 4) if self.audits else {'skipped': 'timing'}})
-            if self.online:
+            if self.online or self.kill and not self.victim:
                 self.prepare_online(model)
             self.start_serving(model, 4)
             self.phase_report(ROUND, 0)
@@ -616,8 +649,12 @@ class ServingSwitcher:
 
     def base_wave(self, direction, decode_fn):
         w, steps = self.w, []
-        # Online: the waves overlap decode, at most max_delta_steps - growth steps (the open-block zone the delta copies).
-        overlap = w.overlap(decode_fn, steps, w.serving['max_delta_steps'] - self.run.growth.get(direction, 0)) if w.online else None
+        # Online (and kill's shrink): the waves overlap decode, at most max_delta_steps - growth steps (the open-block zone
+        # the delta copies). kill's survivors only take the barrier: their TP4 groups hold the dead ranks.
+        overlap = None
+        if w.online or (w.kill and direction == 'shrink'):
+            overlap = w.overlap(None if w.kill and self.role == 'survivor' else decode_fn, steps,
+                                w.serving['max_delta_steps'] - self.run.growth.get(direction, 0))
         if self.online_shrink:
             # Online fail-slow WeaveTP: migrate in the phase-0 world, both EDPs decode inside the waves, victims are sources;
             # the world moves to the degraded groups only at the cutover. Fail-stop and the other methods: the path below.
@@ -637,11 +674,14 @@ class ServingSwitcher:
             return self.emulate_victim()
         w.world_transition(self.phase, ROUND)
         if direction == 'shrink':
+            if w.kill:  # the prebuilt degraded world the shrink was planned in; EDP1 decodes inside the waves
+                w.require_degraded_map()
             if self.role == 'survivor':
-                self.target, _, stats, _ = w.shrink_transfer(meta=None)
+                self.target, _, stats, _ = w.shrink_transfer(None, overlap)
             else:
-                stats = w.sender_transfer('shrink')
-            return {'overlap_steps': 0, 'bytes': {'weights': stats['payload_bytes'], 'kv_prefix': 0}, 'transfer': stats, 'role': self.role}
+                stats = w.sender_transfer('shrink', decode_fn if w.kill else None, overlap)
+            return {'overlap_steps': len(steps), 'bytes': {'weights': stats['payload_bytes'], 'kv_prefix': 0}, 'transfer': stats,
+                    'role': self.role}
         if self.role == 'survivor':
             self.target, self.target_context, stats, kv_bytes = w.expand_prefix(self.meta, w.backend.context, self.zones['base'],
                                                                                 self.spec.assignment, overlap)
@@ -706,8 +746,7 @@ class ServingSwitcher:
                 self.emulate_victim()
             else:
                 w.world_transition(1, ROUND)
-                differing = [(a['slot'], key, a[key], b[key]) for a, b in zip(w.session.rank_map(), w.degraded_rows) for key in a if a[key] != b[key]]
-                require(not differing, f'the degraded rank map differs from the one planned before serving: {differing[:4]}')
+                w.require_degraded_map()
         if self.role == 'victim':
             # The emulate victim joined the expand: adopt the handoff and continue as a TP4 member of the domain.
             w.rebind_serving(self.target, 4, self.target_context)
@@ -753,6 +792,8 @@ class ServingSwitcher:
         run.layout = w.tp
         if direction == 'shrink' and self.role == 'survivor':
             w.bus.put(f'destination/{ROUND}/1/{w.slot}', True)
+        if direction == 'shrink' and w.kill:
+            w.abort_dead_groups()
         # An emulate victim's single switch spans the whole degraded period and ends in the expanded world.
         w.phase_report(ROUND, 2 if self.role == 'victim' else self.phase, empty_receiver=self.role == 'victim')
         w.session.complete()  # after the report (the gate compares rank maps in the transition state); forwards may run again

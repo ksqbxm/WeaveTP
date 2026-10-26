@@ -269,7 +269,7 @@ def main(argv=None):
     parser.add_argument('--budget-seconds', type=float, default=300)
     parser.add_argument('--min-free-disk-gb', type=float, default=1)
     parser.add_argument('--layer', choices=tuple(LAYERS), default='a')
-    parser.add_argument('--mode', choices=('emulate', 'real'), default='emulate', help='b3/inflight only')
+    parser.add_argument('--mode', choices=('emulate', 'real', 'kill'), default='emulate', help='b3/inflight only (kill: weavetp)')
     parser.add_argument('--method', choices=('weavetp', 'anchortp'), default='weavetp', help='b3/inflight only: recovery method under test')
     parser.add_argument('--checkpoint', default=os.environ.get('CHECKPOINT', '/data/models/DeepSeek-V2-Lite-megatron-v2'))
     parser.add_argument('--seq-length', type=int, default=512, help='b1/b2/b3: max_position_embeddings (rotary table and static baseline)')

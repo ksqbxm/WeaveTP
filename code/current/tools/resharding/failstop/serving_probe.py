@@ -133,12 +133,12 @@ def control(config, bus, journal, check):
             differing = [(a, b) for a, b in zip(report['rank_map'], expected) if a != b]
             require(not differing, f'actual group mapping mismatch for slot {s} (worker vs gate): {differing[:2]}')
             require(report['checks_passed'], 'worker correctness check failed')
-            if mode == 'real' and phase == 2 and s in victims:
+            if mode != 'emulate' and phase == 2 and s in victims:  # real, kill: the replacements
                 require(report['empty_receiver'], 'replacement was not an empty receiver')
         if phase == 2:
             healthy = [r['rejoin_pause_s'] for r in values if rows[r['slot']]['replica'] == 'EDP1']
             require(all((p is None) == (mode == 'emulate') for p in healthy), 'EDP1 pause record mismatch')
-            if mode == 'real':
+            if mode != 'emulate':  # real, kill: the rejoin rebuilt the world
                 pauses.append({'round': 0, 'edp1_rejoin_pause_s': max(healthy),
                                'pause_semantics': 'abort of the old world to the rebuilt groups adopted (serving resumes after the switch)'})
         reports[f'0/{phase}'] = values
@@ -234,7 +234,7 @@ def fault_cycle(config, bus, journal, service, session, times, validate, wait, w
         wait([f'shrink_ready/{s}' for s in range(16)], config['stage_timeout_s'])
         times['shrink_ready'] = time.monotonic()
     publish('kill')
-    if mode == 'real':
+    if mode != 'emulate':  # real, kill
         wait(['kill_sent'])
         killed = wait(['kill_exited'])[0]
         require({r['slot'] for r in killed} == set(victims) and all(
@@ -259,7 +259,7 @@ def fault_cycle(config, bus, journal, service, session, times, validate, wait, w
     wait_until(lambda: time.monotonic() >= due, max(1.0, rejoin_seconds + 5), 'rejoin due')
     times['rejoin_due'], times['rejoin_request'] = due, max(due, times['shrink_done'])
     reclaim = None
-    if mode == 'real':
+    if mode != 'emulate':
         publish('rejoin_request')
         reclaim = wait(['reclaimed'], config['reclaim_timeout_s'])[0]
         times['reclaim_done'] = time.monotonic()
@@ -267,7 +267,7 @@ def fault_cycle(config, bus, journal, service, session, times, validate, wait, w
     wait([f'verified/2/{n}' for n in NODES], config['startup_timeout_s'])
     returned = dict(zip(victims, wait([f'cuda/2/{s}' for s in victims])))
     require(all(returned[s]['empty_receiver'] for s in victims), 'rejoin target prefilled')
-    require(all((returned[s]['pid'] != initial[s]['pid']) == (mode == 'real') for s in victims), 'incorrect rejoin PID semantics')
+    require(all((returned[s]['pid'] != initial[s]['pid']) == (mode != 'emulate') for s in victims), 'incorrect rejoin PID semantics')
     initial.update(returned)
     publish('cuda_verified/2')
     for domain in DOMAINS:
@@ -371,6 +371,9 @@ def write_outputs(root, config, instances, workload, summaries, times, trigger, 
                        'abort_s': {phase: times[f'aborted_{phase}'] - times[f'transition/0/{phase}'] for phase in (1, 2)},
                        'rebuild_s': {phase: times[f'build/0/{phase}'] - times[f'aborted_{phase}'] for phase in (1, 2)},
                        'edp1_pause_s': max((p['edp1_rejoin_pause_s'] for p in pauses), default=None),
+                       # kill: the slowest live rank's abort of the groups holding a victim, once the degraded world served
+                       'dead_group_abort_s': max((r['dead_group_abort_s'] for r in reports['0/1'] if r['dead_group_abort_s'] is not None),
+                                                 default=None),
                        'null_reason': None if reclaim is not None else 'emulate mode has no GPU reclaim or EDP1 abort pause'}})
     write_json(root / 'events_actual.json', events)
     return {'result': result, 'check': report, 'events': events}

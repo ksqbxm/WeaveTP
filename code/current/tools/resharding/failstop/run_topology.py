@@ -28,8 +28,9 @@ def cases(mode, rounds, real_launches, suite):
     result = []
     if mode in ('emulate', 'both'):
         result.append({'mode': 'emulate', 'rounds': rounds, 'launch': suite + '_emulate'})
-    if mode in ('real', 'both'):
-        result.extend({'mode': 'real', 'rounds': 1, 'launch': f'{suite}_real_{i:02d}'}
+    if mode in ('real', 'kill', 'both'):  # one round per launch: the world is aborted (kill: at the rejoin)
+        kind = 'kill' if mode == 'kill' else 'real'
+        result.extend({'mode': kind, 'rounds': 1, 'launch': f'{suite}_{kind}_{i:02d}'}
                       for i in range(real_launches))
     return result
 

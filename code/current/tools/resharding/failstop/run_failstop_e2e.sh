@@ -3,7 +3,7 @@
 # (--scenario failslow: releases.json["failslow"]).
 # Usage (same arguments on both nodes, --node differs):
 #   bash run_failstop_e2e.sh --node SL3060 --suite-id <id> --method weavetp|anchortp --scenario failstop|nofault \
-#        --mode emulate|real --run-mode timing --launches N --requests ... --workload ... --plan ... --profile-file ... \
+#        --mode emulate|real|kill --run-mode timing --launches N --requests ... --workload ... --plan ... --profile-file ... \
 #        --output /data/ubuntu/lxh/weavetp/acceptance/step07_e2e_acceptance [other run_failstop_e2e.py options]
 # Prints the log path; the run continues in the background. Afterwards restore the formal checkout yourself:
 #   git -C "$REPO" checkout --detach f7d555998b45756998465924d733fd70e553d6b4

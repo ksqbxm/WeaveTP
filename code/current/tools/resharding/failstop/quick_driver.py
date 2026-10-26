@@ -106,7 +106,7 @@ def main():
     parser.add_argument('--layer', choices=('a', 'b1', 'b2') + TWO_NODE_LAYERS, default='a',
                         help='Step 6: a = fake backend + CPU tests; b1/b2 = real model on one node; b3 = two-node fail-stop e2e; '
                              'inflight = b3 with requests in flight at the expand (600 s budget)')
-    parser.add_argument('--mode', choices=('emulate', 'real'), default='emulate', help='Step 6 b3/inflight: fault mode')
+    parser.add_argument('--mode', choices=('emulate', 'real', 'kill'), default='emulate', help='Step 6 b3/inflight: fault mode')
     parser.add_argument('--method', choices=('weavetp', 'anchortp', 'restart', 'ignore'),
                         help='Step 6 b3/inflight: recovery method (default weavetp); Step 9: only this fail-slow launch')
     parser.add_argument('--profile-file', help='Step 6 b3/inflight and Step 9: frozen Step 3 profile.json')
