@@ -596,7 +596,9 @@ class ServingWorker(ModelWorker):
         else:
             self.adopt(0)
             self.runtime.start()
-            model = self.runtime.build(4, self.pack['target'], load=True)
+            # this rank's TP4 shards, collective-free: the 16-rank world holds two independent replicas whose expert shards
+            # both carry replica_id 0, so load_checkpoint's global sharding validation counts each of them twice
+            model = self.runtime.build(4, self.pack['target'], load='local')
             self.events.append({'event': 'load', 'weights': self.validate_weights(model, 4) if self.audits else {'skipped': 'timing'}})
             if self.online or self.kill and not self.victim:
                 self.prepare_online(model)

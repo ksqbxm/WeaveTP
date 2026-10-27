@@ -133,8 +133,8 @@ class KillProtocolTests(unittest.TestCase):
             self.assertEqual([e for e in mine[ack:] if e[0] == 'collective'], [])
             self.assertEqual([e for e in mine if e[2] != 'start' and e[0] in ('new_group', 'init', 'abort', 'plan', 'build')], [])
         # the shrink's TP2 targets were built before serving (released, reallocated at the shrink): 16 TP4 loads and
-        # 4 TP2 builds at the start, the 8 TP4 expand targets at the rejoin
-        self.assertEqual(sorted(e[3] for e in log if e[0] == 'build' and e[2] == 'start'), [(2, False)] * 4 + [(4, True)] * 16)
+        # 4 TP2 builds at the start (the TP4 loads collective-free: load_local), the 8 TP4 expand targets at the rejoin
+        self.assertEqual(sorted(e[3] for e in log if e[0] == 'build' and e[2] == 'start'), [(2, False)] * 4 + [(4, 'local')] * 16)
         self.assertEqual([e[3] for e in rejoin if e[0] == 'build'], [(4, False)] * 8)
         # b) the shrink waves order on the barrier of the twelve live ranks only (a dead member would hang them)
         barriers = [e for e in serving if e[0] == 'collective' and e[3][0] == 'barrier']

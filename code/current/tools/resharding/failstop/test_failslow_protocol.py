@@ -126,8 +126,9 @@ class FailslowProtocolTests(unittest.TestCase):
         shrink_plan, expand_plan = (self.plan_files[f'source_plan_0_{label}.json'] for label in ('shrink', 'expand'))
         self.assertNotEqual(shrink_plan['plan_profile_sha256'], shrink_plan['profile_sha256'])
         self.assertEqual(expand_plan['plan_profile_sha256'], expand_plan['profile_sha256'])
-        # b) after startup: no model build, no planner call (16 TP4 loads + 4 TP2 builds, 2 plans per rank, all before serving)
-        self.assertEqual(sorted(e[2] for e in log if e[0] == 'build'), [(2, False)] * 4 + [(4, True)] * 16)
+        # b) after startup: no model build, no planner call (16 collective-free TP4 loads + 4 TP2 builds, 2 plans per rank,
+        # all before serving)
+        self.assertEqual(sorted(e[2] for e in log if e[0] == 'build'), [(2, False)] * 4 + [(4, 'local')] * 16)
         self.assertEqual(len([e for e in log if e[0] == 'plan']), 32)
         # c) no process group is created once serving started
         self.assertEqual([e for e in log if e[0] == 'new_group'], [])

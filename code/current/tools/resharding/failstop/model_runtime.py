@@ -3,10 +3,11 @@
 One process, one GPU, one world (emulate: a Gloo control world of 16 with NCCL replica
 groups; real: the current NCCL world). Models are built with the replica's own
 ProcessGroupCollection so they survive world renumbering through ModelBinding.rebind.
-The initial TP4 weights come through Megatron's checkpoint path with model-parallel
-state initialised over the 16-rank world as TP4 x EP2 x DP2; in the fixed scenario
-those coordinates coincide with the replica coordinates, and the worker proves the
-loaded bytes afterwards by hashing every parameter against the standalone reference load.
+The serving workers read their weights with load_local (this rank's shards, no collective);
+the Step 5 model worker's initial TP4 load comes through Megatron's checkpoint path with
+model-parallel state initialised over the 16-rank world as TP4 x EP2 x DP2. Either way the
+worker proves the loaded bytes afterwards by hashing every parameter against the standalone
+reference load (correctness runs).
 """
 
 import hashlib
@@ -117,7 +118,7 @@ class MegatronRuntime:
             p.requires_grad_(False)
         if load == 'local':
             self.load_local(model)
-        elif load:
+        elif load:  # the Step 5 model worker's initial load
             require(tp == 4, 'only the initial TP4 layout is checkpoint-loaded; targets are migrated')
             load_checkpoint([model], None, None)
         else:
@@ -126,10 +127,12 @@ class MegatronRuntime:
         return model
 
     def load_local(self, model):
-        """Fail-slow restart: this rank's shards of any layout from the same checkpoint, with no collective, so EDP0
-        reloads while EDP1 keeps serving. load_checkpoint all-reduces the tracker iteration and barriers over the whole
-        world; the torch_dist strategy itself reads with no_dist=True, and the model's sharded state dict takes its
-        offsets from its own process groups."""
+        """This rank's shards of any layout from the checkpoint, with no collective: the serving workers' initial TP4 load and
+        fail-slow restart's reloads (EDP0 reloads while EDP1 keeps serving). load_checkpoint validates the sharding over
+        the whole world, which double-counts the expert shards of two independent replicas (both replica_id 0: experts
+        take the DP part from their replica's expt_dp group), all-reduces the tracker iteration and barriers; the
+        torch_dist strategy itself reads with no_dist=True, and the model's sharded state dict takes its offsets from
+        its own process groups."""
         from megatron.core import dist_checkpointing, parallel_state
         from megatron.core.dist_checkpointing.strategies.torch import TorchDistLoadShardedStrategy
         from megatron.training.checkpointing import get_checkpoint_name, get_checkpoint_tracker_filename
