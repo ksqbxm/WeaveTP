@@ -1,5 +1,7 @@
 # 快验：fail-slow 在线切换 Step 9（服务器命令）
 
+> 2026-10-27：本文件 ①② 的 bundle `failslow_online_005a4c8` 与清单 `005a4c8` 作废。它们的实现 `d8b8cd7` 的初始加载走 `load_checkpoint`，在 16 rank 两节点服务上必然失败（见 10 §8）。导入与 Step 9 快验改用 [Step6_failstop_kill_服务器命令.md](Step6_failstop_kill_服务器命令.md)。下面 ② 的字段说明与 ③ 的正式时间线仍然适用。
+
 交付：实现 A `d8b8cd7ef1d59926e3e294a2e6d905e115cdfdfb`（审阅后的 `a7c64d5` 加上重放 history 的修复：restart 循环的竞态与跨副本重放时 prompt 重复，见 [10_failslow在线化依据.md](10_failslow在线化依据.md) §5），清单 B `005a4c84e40fa2c576e29952f0638f5807f530a3`（`releases.json["failslow"]` 指向 A；`step6` 仍为 `073a50f41e70ee54551f3f2e2613c60203697ad1`，fail-stop 不变）。本文件在 B 的子提交 C 里，C 随 bundle `failslow_online_005a4c8.bundle` 交付（基线 `f7d555998b45756998465924d733fd70e553d6b4`，ref `refs/heads/codex/failslow-online-005a4c8` 指向 C），bundle 的 SHA256 在同名 `.sha256` 文件里。上一版 bundle `failslow_online_9488be4`（A `a7c64d5`、B `9488be4`）作废；已导入的旧分支留着不用即可。设计与删改清单见 10；CPU 回归（交流供电、主机空闲）303 项通过、1 项仅 Linux 的测试跳过、119 subtest 通过，与同时段重跑的 a7c64d5（302 项）相比只多出新单测 ReplayHistoryTests（见 10 §5、§6）。以下命令未在服务器执行过。
 
 ## ① 导入 bundle（Windows → SL3061 → SL3060；只 fetch 和校验，不检出主仓库）

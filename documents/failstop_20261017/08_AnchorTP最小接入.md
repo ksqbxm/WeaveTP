@@ -87,6 +87,7 @@ python -B -X utf8 -m pytest -q -o addopts='' --noconftest -p no:cacheprovider te
 - 2026-10-21 修正（§9）：实现（A）`c4df30a8a2bc2b9435cffde17cb2463be7eea113`，`releases.json["step6"]` 改指它（`560361c` 作废）。服务器命令（C，本次放在 bundle 所含的提交里）：见 [Step6_inflight快验_服务器命令.md](Step6_inflight快验_服务器命令.md)。
 - 2026-10-21 fail-slow 交付（`codex/failslow`，[09_failslow主图.md](09_failslow主图.md) §9）：`releases.json["step6"]` 改指 `073a50f41e70ee54551f3f2e2613c60203697ad1`（与 `failslow` 同一实现；新增 emulate fail-stop 的 restart，不做参考 hash 比对；修正 worker 的参数解析与控制门的导入，见 09 §11，此前真实模型 worker 启动即退出；weavetp/anchortp 的 fail-stop 迁移行为同 `c4df30a`）。
 - 2026-10-26 fail-stop kill 交付（`codex/failstop-online`，[11_failstop在线化依据.md](11_failstop在线化依据.md)）：`releases.json["step6"]` 改指 `c4b203e0d059700088f4b23fc84b9ab88605e935`（新增 weavetp `--mode kill`，含 `d8b8cd7` 的回放历史修复与峰值驱逐修复；`switch_ack` 改在峰值驱逐之后发，所有模式同一路径；emulate/real 的 weavetp、anchortp、restart 迁移行为不变；首版 `6f2fc84` 作废，见 11 §9）。`073a50f` 带两个回放历史问题，用它跑出的 step6 结果作废。
+- 2026-10-27：`releases.json` 的 `step6`（与 `failslow`）改指 `c3d0dfba74ddde136d05c280c811c5b4eeb1e021`：服务 worker 的初始 TP4 加载改用 `load_local`，`load_checkpoint` 的全局分片校验会把两个副本的专家分片计为重复读取，见 11 §10。
 
 ## 9. 2026-10-21 修正：扩容在途请求、结果文件、b3 两节点配置；`--shared-gpu-ok`；inflight 快验
 

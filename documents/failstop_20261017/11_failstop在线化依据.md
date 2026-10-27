@@ -1,6 +1,6 @@
 # 11. fail-stop WeaveTP `--mode kill`：降级在预建组上在线迁移，恢复沿用 real 重建
 
-状态（2026-10-26）：**已实现，CPU 已验证，服务器 GPU 未运行。** 分支 `codex/failstop-online`，基于 `codex/failslow-online@1ae7211`（实现 `d8b8cd7`）；先 cherry-pick 了 `codex/failstop` 的纯文档提交 `42f19d3`（00_总计划 的 `--shared-gpu-ok` 登记与 inflight 快验命令，无冲突）。实现（A）`c4b203e0d059700088f4b23fc84b9ab88605e935`（含 §9 的审阅修改；首版实现 `6f2fc84`、清单 `c71d737`、命令 `c4887e3` 与 bundle `failstop_online_c71d737` 作废）；`releases.json["step6"]` 改指 A，`failslow` 仍为 `d8b8cd7`。只有 fail-stop weavetp 新增 `--mode kill`；fail-stop 的 emulate/real、AnchorTP、restart 与全部 fail-slow 行为不变，峰值驱逐的修复除外（§5）。
+状态（2026-10-26）：**已实现，CPU 已验证，服务器 GPU 未运行。** 分支 `codex/failstop-online`，基于 `codex/failslow-online@1ae7211`（实现 `d8b8cd7`）；先 cherry-pick 了 `codex/failstop` 的纯文档提交 `42f19d3`（00_总计划 的 `--shared-gpu-ok` 登记与 inflight 快验命令，无冲突）。实现（A）`c3d0dfba74ddde136d05c280c811c5b4eeb1e021`（含 §9 的审阅修改与 §10 的初始加载修正；`c4b203e`/`dee4f3b`/`f90c3e8` 与首版 `6f2fc84`/`c71d737`/`c4887e3` 的交付作废）；`releases.json` 的 `step6` 与 `failslow` 都指向 A。只有 fail-stop weavetp 新增 `--mode kill`；fail-stop 的 emulate/real、AnchorTP、restart 与全部 fail-slow 行为不变，峰值驱逐的修复除外（§5）。
 
 ## 1. 语义
 
@@ -116,3 +116,40 @@
 5. **模拟支架。**
    - 假监管器等 `finish` 的上限改为 `launch_timeout_s`，与真实监管器相同（`supervisor.py`）。原来用的是单个协议步的 8 s 上限，而 toy 请求增到 120 条后，扩容后的排空可能超过 8 s：审阅后的第一次全量回归里 emulate 子测试因此失败过一次。
    - 改后在 8–16 个忙循环负载下跑 18 次，未再出现这个失败。另有 1 次（16 个忙循环下 8 次中的 1 次）报 "drained before the expand"，这是基线已有的在途余量问题（10 §6），120 条只是让它更少见；不加负载时全量回归通过。
+
+## 10. 2026-10-27：服务器首次走到初始加载，分片完整性校验失败（实现 `c3d0dfba74ddde136d05c280c811c5b4eeb1e021`）
+
+- **现象。** fail-slow Step 9 的 weavetp、ignore、restart 三项快验（`s9q_20261027T064713_eb030784`、`s9q_20261027T065038_e60e4050`、`s9q_20261027T070202_39d8314a`）都在开服前失败。slot 0 的调用链为 `serving_worker.run_worker` → `MegatronRuntime.build(4, load=True)` → `load_checkpoint` → `dist_checkpointing.load` → `validate_sharding_integrity`。报错有两类：专家权重 `decoder.layers.*.mlp.experts.experts.linear_fc1/fc2.weight` 的 `Invalid access pattern`（访问计数为 2），以及专家 `linear_fc2._extra_state` 的 64 个 ShardedObject 重复（`-64 ShardedObject are missing`）。其余报错（peer failure、TCPStore recv 0 bytes、超时）是连锁反应。10-21 的运行在启动阶段就被参数解析和导入问题挡住，从未走到加载；Step 5 的快验（`run_model.py`）用全局模型并行组建模型，所以也没有暴露。
+- **根因（已核实）。** `load_checkpoint` 在 16 rank 的全局 world 上校验分片的访问模式。两个副本中，稠密张量 `replica_id` 的 DP 部分取自全局模型并行的 DP 组（`metadata['dp_cp_group']`），这个组跨两个副本，所以不重复。专家张量则在 `SequentialMLP.sharded_state_dict`（`megatron/core/transformer/moe/experts.py`）里改用模型自身 pg_collection 的 `expt_dp` 组，这个组在一个副本内只有 1 个成员，于是两个副本的专家分片都是 `replica_id=(0,0,0)`，每个分片被计为读了两次（`_extra_state` 同理）。用户提出的根因方向正确，但只限于专家张量：稠密张量本来就带了全局 DP 编号。
+- **修复。** 服务 worker 的初始 TP4 加载改用 `MegatronRuntime.load_local`（实现 `c3d0dfba74ddde136d05c280c811c5b4eeb1e021`；fail-slow restart 的重新加载原本就用它）。它的做法：只读本 rank 的分片，偏移取自模型自己的进程组；`dist_checkpointing.load` 关闭全局校验（`validate_access_integrity=False`、`strict='assume_ok_unexpected'`），所以没有 `determine_global_metadata` 这次 all-gather；torch_dist 用 `no_dist=True` 读取；tracker 在本地读，没有 all-reduce，也没有 world barrier。common state（args、iteration、rng）推理用不上，`load_local` 只取 `state['model']`；content metadata 与 `load_checkpoint` 一样从检查点读取。 correctness 模式下已有的 `validate_weights(model, 4)` 把每个参数与参考 load 逐位比对，上机时证明 `load_local` 读出的字节与原来的 `load_checkpoint` 相同（fail-stop weavetp 的 Step 6 kill 快验覆盖；fail-slow 不做参考比对）。
+
+**全仓库的检查点加载点：**
+
+| 位置 | world 与模型 | 是否受影响 |
+|---|---|---|
+| `serving_worker.run_worker` 的初始 TP4 加载（Step 6、Step 9） | 16 rank、两个副本，模型用各自的 pg_collection | 受影响，已改为 `load_local` |
+| fail-slow restart 的重新加载（`RestartSwitcher.load`，`load='local'`） | 同上 | 本来就是 `load_local` |
+| 替换进程与恢复（`join_expand`、`expand_prefix`） | 空接收端，不读检查点 | 不涉及 |
+| `model_worker.Worker.run_worker:633`（`run_failstop_model.py launch`，两节点 16 rank 的 Step 5 fail-stop 协议） | 16 rank、两个副本、pg_collection，走同一个 `build(4, load=True)` | **同样受影响**。按要求保持不变（计划里写的是"单节点"，实为两节点 launch）；若要上机运行，需同样改为 `load_local` |
+| `model_reference.py:164`（`run_model.py`：Step 5 快验与参考 hash） | 用全局模型并行组建模型（`get_training_model`） | 不受影响：专家的 DP 组也是全局的，两个副本的 `replica_id` 不同 |
+| `serving_layers.py:301`（Step 6 b1/b2）、`correctness/router_determinism.py:160`、`examples/rl/benchmark_live_moe_tp.py:1446` | 同上，单节点 | 不受影响 |
+| `e2e/factories.py:65`（`failstop_factories`） | 没有调用方 | 不可达 |
+
+**测试。**
+- 新增 `test_load_local.py`：在 Megatron 真实的 `dist_checkpointing` 上，先用 1 rank 的 Gloo world 存一个 torch_dist 检查点，再用 `load_local` 读 TP2 坐标 1 的行。检查三点：
+  - 期间 `torch.distributed` 的全部集合通信计数为 0（存盘时的 gather/broadcast/barrier 也被计到，说明计数有效）；
+  - 不调用 `load_checkpoint`；
+  - 读出的行正确。
+  同一次读取只要打开全局校验，就报同类的 `Invalid access pattern`。
+- 模拟中 16 个初始 TP4 加载都走 `load='local'`（kill 与 fail-slow 协议测试）。
+- 全量回归：307 通过、1 跳过、123 个子测试（对照 `c4b203e`：306 通过、1 跳过、123 个子测试；多出的 1 项是新单测）。
+- CPU 测试不加载真实检查点，测不到 Megatron 模型的分片问题。
+
+**只能在服务器上验证的步骤（快验的检查顺序）：**
+1. 初始 TP4 加载（`load_local`）；
+2. TP2 预分配（开服前建好并释放，计划缩容）；
+3. 组预热（`warm_groups`、`warm_pairs`）；
+4. kill 回收（SIGKILL、死组 abort、GPU 回收）；
+5. phase-2 重建（在 Gloo 默认 world 上 abort 后重建 16 rank NCCL world）。
+
+每一步看哪里，见 [Step6_failstop_kill_服务器命令.md](Step6_failstop_kill_服务器命令.md) ②；快验依次为 Step 9 的 weavetp、ignore、restart，然后是 Step 6 kill。

@@ -1,6 +1,6 @@
 # fail-slow weavetp 在线切换：依据、探针与删改清单
 
-状态（2026-10-26）：**已实现，CPU 已验证，服务器 GPU 未运行。** 分支 `codex/failslow-online`（自 `codex/failslow@848350f`，实现 073a50f）。只改 fail-slow 场景下的 weavetp（`common.online_switch`）；fail-stop 全部、AnchorTP、restart、ignore、nofault 行为不变（重放 history 的修复除外，见 §5），`releases.json["step6"]` 不动。交付登记见 §6，审阅后的修改见 §7。
+状态（2026-10-26）：**已实现，CPU 已验证，服务器 GPU 未运行。** 分支 `codex/failslow-online`（自 `codex/failslow@848350f`，实现 073a50f）。只改 fail-slow 场景下的 weavetp（`common.online_switch`）；fail-stop 全部、AnchorTP、restart、ignore、nofault 行为不变（重放 history 的修复除外，见 §5），`releases.json["step6"]` 不动。交付登记见 §6，审阅后的修改见 §7。2026-10-27 起 `releases.json["failslow"]` 指向 `codex/failstop-online` 的实现 `c3d0dfb`（初始加载改用 `load_local`，见 §8）。
 
 ## 1. 依据
 
@@ -99,3 +99,10 @@
 - `shrink_transfer` 两条路径的重复尾部合并为一份。
 - KV 辅助函数改为显式传参：不再靠缺省值区分方向，也没有两种键格式或两种 reference 文本（§3）。
 - 切换内步数改用局部列表；`compact` 与 `delta` 共用 `moves_kv`。
+
+## 8. 2026-10-27：服务器首次走到初始加载，分片完整性校验失败（实现 `c3d0dfba74ddde136d05c280c811c5b4eeb1e021`）
+
+- **现象。** fail-slow Step 9 的 weavetp、ignore、restart 三项快验（`s9q_20261027T064713_eb030784`、`s9q_20261027T065038_e60e4050`、`s9q_20261027T070202_39d8314a`）都在开服前失败。slot 0 的调用链为 `serving_worker.run_worker` → `MegatronRuntime.build(4, load=True)` → `load_checkpoint` → `dist_checkpointing.load` → `validate_sharding_integrity`。报错有两类：专家权重 `decoder.layers.*.mlp.experts.experts.linear_fc1/fc2.weight` 的 `Invalid access pattern`（访问计数为 2），以及专家 `linear_fc2._extra_state` 的 64 个 ShardedObject 重复（`-64 ShardedObject are missing`）。其余报错（peer failure、TCPStore recv 0 bytes、超时）是连锁反应。10-21 的运行在启动阶段就被参数解析和导入问题挡住，从未走到加载；Step 5 的快验（`run_model.py`）用全局模型并行组建模型，所以也没有暴露。
+- **根因（已核实）。** `load_checkpoint` 在 16 rank 的全局 world 上校验分片的访问模式。两个副本中，稠密张量 `replica_id` 的 DP 部分取自全局模型并行的 DP 组（`metadata['dp_cp_group']`），这个组跨两个副本，所以不重复。专家张量则在 `SequentialMLP.sharded_state_dict`（`megatron/core/transformer/moe/experts.py`）里改用模型自身 pg_collection 的 `expt_dp` 组，这个组在一个副本内只有 1 个成员，于是两个副本的专家分片都是 `replica_id=(0,0,0)`，每个分片被计为读了两次（`_extra_state` 同理）。用户提出的根因方向正确，但只限于专家张量：稠密张量本来就带了全局 DP 编号。
+- **修复。** 服务 worker 的初始 TP4 加载改用 `MegatronRuntime.load_local`（实现 `c3d0dfba74ddde136d05c280c811c5b4eeb1e021`；fail-slow restart 的重新加载原本就用它）。它的做法：只读本 rank 的分片，偏移取自模型自己的进程组；`dist_checkpointing.load` 关闭全局校验（`validate_access_integrity=False`、`strict='assume_ok_unexpected'`），所以没有 `determine_global_metadata` 这次 all-gather；torch_dist 用 `no_dist=True` 读取；tracker 在本地读，没有 all-reduce，也没有 world barrier。common state（args、iteration、rng）推理用不上，`load_local` 只取 `state['model']`；content metadata 与 `load_checkpoint` 一样从检查点读取。 fail-slow 不做参考 hash 比对，所以逐位一致由 Step 6 kill 快验（fail-stop weavetp correctness）的 `validate_weights` 证明。全仓库其余加载点、测试，以及只能在服务器上验证的步骤见 [11_failstop在线化依据.md](11_failstop在线化依据.md) §10。
+- **交付。** `releases.json` 的 `failslow` 与 `step6` 都改指 `c3d0dfba74ddde136d05c280c811c5b4eeb1e021`；命令见 [Step6_failstop_kill_服务器命令.md](Step6_failstop_kill_服务器命令.md)，其中包括本场景的 Step 9 快验。`failslow_online_005a4c8` 的实现 `d8b8cd7` 仍走 `load_checkpoint`，作废。
