@@ -4,6 +4,10 @@ MAX_WAVES = 64
 STRESS_BYTES = 64 * 1024 * 1024
 WORKLOAD_ID = "short8-synthetic2048-v1"
 KV_SEED = 20261012
+DEFAULT_MODEL = "deepseek-v2-lite"
+# Fixed-hot routing activates exactly top-k experts per model.
+ACTIVE_EXPERTS = {"deepseek-v2-lite": "0,1,2,3,4,5", "moonlight-16b-a3b": "0,1,2,3,4,5",
+                  "qwen1.5-moe-a2.7b": "0,1,2,3"}
 
 
 def kv_workload():
@@ -41,9 +45,11 @@ def capacity_budget():
             "switches": switches, "kv_tokens": kv_tokens}
 
 
-def method_env(method, mode, profile, output):
+def method_env(method, mode, profile, output, model=DEFAULT_MODEL):
     if method not in ("W2", "B0") or mode not in ("cycle", "independent"):
         raise ValueError("unknown method or cold-start mode")
+    if model not in ACTIVE_EXPERTS:
+        raise ValueError(f"unknown model preset: {model}")
     w2 = method == "W2"
     switches = 3 if mode == "cycle" else 1
     # Identical cache allocation across methods AND modes; covers the three-switch run.
@@ -69,13 +75,15 @@ def method_env(method, mode, profile, output):
         ALLOW_AWARE_SHRINK="0", REPEAT_FORWARD="0", PERSISTENT_PACK_BUFFERS="0",
         PACK_REROUTED_ONLY="0", EMULATE_NONCOLLOCATED_SOURCES="0", KV_REQUEST_IDENTITY="1",
         WEIGHT_STORAGE_AUDIT="0", WEIGHT_CHECK_AUDIT="0", WEIGHT_BITWISE_AUDIT="0",
-        ROUTER_MODE="fixed-hot", ACTIVE_EXPERTS="0,1,2,3,4,5", ACTIVE_EXPERT_PHASES="",
+        ROUTER_MODE="fixed-hot", ACTIVE_EXPERTS=ACTIVE_EXPERTS[model], ACTIVE_EXPERT_PHASES="",
         PRESSURE_RANK_PHASES="", HOTSPOT_PRESSURE_BYTES="0", PROMPT_TOKENS="8",
         DIAGNOSE_EQUIVALENCE="0",
         P2P_ORDER="peer-size-desc", LOGIT_VALIDATION_MODE="bf16-relative",
         LOGIT_MAX_NRMSE="0.4", LOGIT_MIN_COSINE="0.93", LOGIT_MIN_TOP1_AGREEMENT="0.0",
         PROFILE=str(profile), OUT_DIR=str(output), PYTHONUNBUFFERED="1", PYTHONDONTWRITEBYTECODE="1",
     )
+    if model != DEFAULT_MODEL:
+        result["MODEL_PRESET"] = model
     return result
 
 

@@ -84,7 +84,8 @@ def test_order_restores_each_pair_and_empties_cache_before_every_request(tmp_pat
     ("desc","early_exit"),("desc","last_exit"),("desc","cleanup")])
 def test_supervisor_go_only_after_pressure_memory_gate_and_owned_cleanup(monkeypatch, tmp_path, order, failure):
     rows = quick_protocol.schedule(1,order)
-    args = NS(out=tmp_path,k=1,order=order,timeout=100,python="python",mps_owner="yiwei",ignore_util_gpus=[1,4,5])
+    args = NS(out=tmp_path,k=1,order=order,timeout=100,python="python",mps_owner="yiwei",ignore_util_gpus=[1,4,5],
+              model=common.DEFAULT_MODEL)
     actions, children = [], []
     class Manager:
         def __init__(self,path): self.root,self.required,self.children=path,[],[]

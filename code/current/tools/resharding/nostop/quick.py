@@ -29,11 +29,18 @@ from tools.resharding.nostop import (
 
 def method_config(args, method):
     directory = args.out / "methods" / method
-    config = common.method_env(method, "cycle", args.out / "bandwidth_profile.json", directory / "run")
+    config = common.method_env(method, "cycle", args.out / "bandwidth_profile.json", directory / "run",
+                               model=args.model)
     config.update(ENTRYPOINT_OVERRIDE="tools/resharding/nostop/quick_benchmark.py",
                   QUICK_K=str(args.k), QUICK_ORDER=args.order, QUICK_OUT=str(args.out), QUICK_METHOD=method,
                   QUICK_LAUNCH_ID=f"{args.out.name}:{os.getpid()}:{method}", QUICK_TIMEOUT=str(args.timeout))
     return config
+
+
+def launch_command(args):
+    wrapper = ("run_deepseek_v2_lite_live_benchmark.sh" if args.model == common.DEFAULT_MODEL
+               else "run_moe_preset_live_benchmark.sh")
+    return ["bash", f"tools/resharding/{wrapper}"]
 
 
 def run_method(args, method, rows, env):
@@ -43,7 +50,7 @@ def run_method(args, method, rows, env):
     monitor = machine.ComputeMonitor(manager, args.mps_owner)
     config = method_config(args, method)
     run_env = {**env, **config}
-    command = ["bash", "tools/resharding/run_deepseek_v2_lite_live_benchmark.sh"]
+    command = launch_command(args)
     artifacts.write_json(directory / "config.json", config)
     artifacts.write_json(directory / "environment.json", {k: run_env[k] for k in set(machine.ENV_NAMES) | set(config) | {"PYTHON", "CHECKPOINT"} if k in run_env})
     (directory / "command.txt").write_text(shlex.join(command) + "\n", encoding="utf-8")
@@ -52,7 +59,7 @@ def run_method(args, method, rows, env):
         (case / "run").mkdir(parents=True)
         # Standard three-switch projection; actual runtime count/parent launch
         # is explicit in the method config and each trace/result's quick metadata.
-        case_config = common.method_env(method, "cycle", config["PROFILE"], case / "run")
+        case_config = common.method_env(method, "cycle", config["PROFILE"], case / "run", model=args.model)
         case_config["ENTRYPOINT_OVERRIDE"] = config["ENTRYPOINT_OVERRIDE"]
         artifacts.write_json(case / "config.json", case_config)
         (directory / "handshake" / row["level"]).mkdir(parents=True, exist_ok=True)
@@ -184,6 +191,8 @@ def main(argv=None):
     parser.add_argument("--mps-owner", default=os.environ.get("MPS_OWNER", "yiwei"))
     parser.add_argument("--ignore-util-gpus", type=quick_preflight.parse_ignored, default="",
                         help="comma-separated physical GPU indices; skip only their utilization check")
+    parser.add_argument("--model", choices=tuple(common.ACTIVE_EXPERTS), default=common.DEFAULT_MODEL,
+                        help="non-DeepSeek presets use Megatron random init and no checkpoint")
     parser.add_argument("--checkpoint", default=os.environ.get("CHECKPOINT", "/data/models/DeepSeek-V2-Lite-megatron-v2"))
     parser.add_argument("--profile", type=Path, default=os.environ.get("PROFILE", "profiles/moe_tp_8gpu_idle_p2p_v21.json"))
     parser.add_argument("--timeout", type=int, default=7200, help="seconds per torchrun process")
@@ -194,14 +203,18 @@ def main(argv=None):
         parser.error("timeout must be positive")
     args.out = args.out.resolve()
     args.profile = (supervisor.CODE / args.profile).resolve()
+    deepseek = args.model == common.DEFAULT_MODEL
     if args.dry_run:
-        print(json.dumps(dict(order=args.order, schedule=rows, torchrun_launches=2,
-                              runtime_switches_per_launch=2 + 2 * len(rows), pressure_counts=quick_protocol.COUNTS,
-                              stress_links=quick_protocol.LINKS, stress_bytes=common.STRESS_BYTES,
-                              ignore_util_gpus=args.ignore_util_gpus, matmul_preflight=quick_preflight.MATMUL,
-                              ignored_gpu_minimum_fraction=.95, reported_clock_locks=quick_preflight.REPORTED_CLOCK_LOCKS,
-                              resident_admission="free + current reserved + current context >= peak allocated + peak context + 1.5 GiB",
-                              configs={m: method_config(args, m) for m in ("W2", "B0")}), indent=2))
+        plan = dict(order=args.order, schedule=rows, torchrun_launches=2,
+                    runtime_switches_per_launch=2 + 2 * len(rows), pressure_counts=quick_protocol.COUNTS,
+                    stress_links=quick_protocol.LINKS, stress_bytes=common.STRESS_BYTES,
+                    ignore_util_gpus=args.ignore_util_gpus, matmul_preflight=quick_preflight.MATMUL,
+                    ignored_gpu_minimum_fraction=.95, reported_clock_locks=quick_preflight.REPORTED_CLOCK_LOCKS,
+                    resident_admission="free + current reserved + current context >= peak allocated + peak context + 1.5 GiB",
+                    configs={m: method_config(args, m) for m in ("W2", "B0")})
+        if not deepseek:
+            plan.update(model=args.model, command=launch_command(args))
+        print(json.dumps(plan, indent=2))
         return 0
     if os.name != "posix" or not args.out.is_relative_to(Path("/data")) or args.out == Path("/data"):
         parser.error("quick execution requires Linux and a new --out under /data")
@@ -214,21 +227,25 @@ def main(argv=None):
     previous = {s: signal.signal(s, interrupted) for s in (signal.SIGINT, signal.SIGTERM)}
     code = 1
     try:
-        if not Path(args.checkpoint).is_dir():
+        if deepseek and not Path(args.checkpoint).is_dir():
             raise ValueError("existing checkpoint required")
         profile = args.profile.read_bytes()
         (args.out / "bandwidth_profile.json").write_bytes(profile)
         manifest = dict(protocol="nostop_quick_v1", workload=common.kv_workload(),
             cases=[[quick_protocol.case_name(m, r), r["level"], m, "cycle"] for m in ("W2", "B0") for r in rows],
-            checkpoint=args.checkpoint, profile_sha256=hashlib.sha256(profile).hexdigest(), order=args.order, k=args.k,
+            checkpoint=args.checkpoint if deepseek else None, profile_sha256=hashlib.sha256(profile).hexdigest(), order=args.order, k=args.k,
             torchrun_launches=2, runtime_switches_per_launch=2+2*len(rows), schedule=rows,
             stress_links=quick_protocol.LINKS, stress_bytes=common.STRESS_BYTES, stress_sync_every=16,
             processes_per_pair=quick_protocol.COUNTS, l3_processes=7,
             ignore_util_gpus=args.ignore_util_gpus,
             sample_semantics="K repeated measurements per level sharing one model load/warm cycle; not independent launches")
+        if not deepseek:
+            manifest["model"] = args.model
         artifacts.write_json(args.out / "manifest.json", manifest)
         env = supervisor.isolated_env(args.out)
         env.update(PYTHON=args.python, CHECKPOINT=args.checkpoint, MPS_OWNER=args.mps_owner or "")
+        if not deepseek:
+            env.pop("CHECKPOINT")  # random init; the preset wrapper never loads one
         quick_preflight.run(args, env, manifest)
         for method in ("W2", "B0"):
             print(f"START {method}", flush=True)
