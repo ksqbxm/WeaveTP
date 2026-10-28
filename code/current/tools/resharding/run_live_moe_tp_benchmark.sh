@@ -162,6 +162,83 @@ if [[ "$MODEL_PRESET" == "deepseek-v2-lite" ]]; then
         --load "$LOAD_CHECKPOINT"
         --ckpt-format torch_dist
     )
+elif [[ "$MODEL_PRESET" == "moonlight-16b-a3b" ]]; then
+    # Shapes from the HF config; Megatron random init (switching depends on shapes only).
+    MODEL_ARGS+=(
+        --num-layers 27
+        --hidden-size 2048
+        --ffn-hidden-size 11264
+        --num-attention-heads 16
+        --num-query-groups 16
+        --kv-channels 16
+        --multi-latent-attention
+        --kv-lora-rank 512
+        --v-head-dim 128
+        --qk-head-dim 128
+        --qk-layernorm
+        --qk-pos-emb-head-dim 64
+        --num-experts 64
+        --moe-layer-freq '([0]+[1]*26)'
+        --moe-ffn-hidden-size 1408
+        --moe-grouped-gemm
+        --moe-router-score-function sigmoid
+        --moe-router-enable-expert-bias
+        --moe-router-topk 6
+        --moe-router-topk-scaling-factor 2.446
+        --moe-shared-expert-intermediate-size 2816
+        --moe-token-dispatcher-type alltoall
+        --seq-length "$SEQ_LENGTH"
+        --max-position-embeddings "$MAX_POSITION_EMBEDDINGS"
+        --vocab-size 163840
+        --make-vocab-size-divisible-by 128
+        --normalization RMSNorm
+        --norm-epsilon 1e-5
+        --no-persist-layer-norm
+        --swiglu
+        --bf16
+        --untie-embeddings-and-output-weights
+        --position-embedding-type rope
+        --rope-type rope
+        --rotary-percent 1.0
+        --rotary-base 50000
+        --attention-softmax-in-fp32
+        --no-masked-softmax-fusion
+    )
+elif [[ "$MODEL_PRESET" == "qwen1.5-moe-a2.7b" ]]; then
+    # Shapes from the HF config; Megatron random init (switching depends on shapes only).
+    MODEL_ARGS+=(
+        --num-layers 24
+        --hidden-size 2048
+        --num-attention-heads 16
+        --num-query-groups 16
+        --kv-channels 128
+        --add-qkv-bias
+        --num-experts 60
+        --moe-layer-freq 1
+        --moe-ffn-hidden-size 1408
+        --moe-grouped-gemm
+        --moe-router-score-function softmax
+        --moe-router-topk 4
+        --moe-router-pre-softmax
+        --moe-shared-expert-intermediate-size 5632
+        --moe-shared-expert-gate
+        --moe-token-dispatcher-type alltoall
+        --seq-length "$SEQ_LENGTH"
+        --max-position-embeddings "$MAX_POSITION_EMBEDDINGS"
+        --vocab-size 151936
+        --make-vocab-size-divisible-by 32
+        --normalization RMSNorm
+        --norm-epsilon 1e-6
+        --no-persist-layer-norm
+        --swiglu
+        --bf16
+        --untie-embeddings-and-output-weights
+        --position-embedding-type rope
+        --rotary-percent 1.0
+        --rotary-base 1000000
+        --attention-softmax-in-fp32
+        --no-masked-softmax-fusion
+    )
 elif [[ "$MODEL_PRESET" == "synthetic" ]]; then
     MODEL_ARGS+=(
         --num-layers "$NUM_LAYERS"
