@@ -207,7 +207,7 @@ def add_live_args(parser):
     )
     group.add_argument(
         "--live-model-preset",
-        choices=("synthetic", "deepseek-v2-lite"),
+        choices=("synthetic", "deepseek-v2-lite", "moonlight-16b-a3b", "qwen1.5-moe-a2.7b"),
         default="synthetic",
     )
     group.add_argument("--live-dst-tp", type=int, default=4)
@@ -528,10 +528,13 @@ def _configure_live_model(config: TransformerConfig, args) -> None:
     config.live_router_mode = args.live_router_mode
     config.live_active_experts = args.live_active_experts_tuple
     config.live_router_bias = args.live_router_bias
+    if args.live_model_preset == "qwen1.5-moe-a2.7b":
+        # main() clears add_qkv_bias for every preset; Qwen1.5-MoE has a QKV bias.
+        config.add_qkv_bias = True
 
 
 def _validate_model_preset(args) -> None:
-    if args.live_model_preset == "synthetic":
+    if args.live_model_preset != "deepseek-v2-lite":
         return
     if not args.load:
         raise ValueError("deepseek-v2-lite requires --load with a converted Megatron checkpoint")
@@ -590,6 +593,18 @@ def _install_live_router(block_spec: TransformerBlockSubmodules) -> None:
             mlp_submodules.router = LiveTopologyInvariantTopKRouter
 
 
+def _check_fixed_hot_routing(args, models) -> None:
+    """Fixed-hot masks gating logits to -inf, but routing adds expert_bias to sigmoid scores.
+    With zero bias and exactly top-k active experts, top-k selects exactly the active set."""
+    if args.live_router_mode != "fixed-hot":
+        return
+    if any(len(phase) != args.moe_router_topk for phase in args.live_active_expert_phases_tuple):
+        raise ValueError("fixed-hot requires exactly moe-router-topk active experts")
+    routers = [m for model in models for m in model.modules() if isinstance(m, TopKRouter)]
+    if any(r.expert_bias is not None and bool(r.expert_bias.ne(0).any()) for r in routers):
+        raise ValueError("fixed-hot requires an all-zero router expert_bias")
+
+
 def model_provider(
     pre_process=True,
     post_process=True,
@@ -601,7 +616,7 @@ def model_provider(
     if config is None:
         config = core_transformer_config_from_args(args)
     _configure_live_model(config, args)
-    if args.live_model_preset == "deepseek-v2-lite":
+    if args.live_model_preset != "synthetic":
         block_spec = get_gpt_decoder_block_spec(
             config,
             use_transformer_engine=False,
@@ -1449,7 +1464,7 @@ def run_live_benchmark() -> None:
     )[0].cuda()
     src_model.eval()
     loaded_checkpoint_iteration = None
-    if args.live_model_preset == "deepseek-v2-lite":
+    if args.live_model_preset != "synthetic" and args.load:
         loaded_checkpoint_iteration, _ = load_checkpoint([src_model], None, None)
         print_rank_0(
             "Loaded DeepSeek-V2-Lite checkpoint before constructing the TP4 standby "
@@ -1480,6 +1495,8 @@ def run_live_benchmark() -> None:
         wrap_with_ddp=False,
     )[0].cuda()
     dst_model.eval()
+    if args.live_model_preset in ("moonlight-16b-a3b", "qwen1.5-moe-a2.7b"):
+        _check_fixed_hot_routing(args, (src_model, dst_model))
 
     all_ranks = list(range(world_size))
     reshard_group = dist.new_group(ranks=all_ranks, backend="nccl")
@@ -2485,6 +2502,8 @@ def run_live_benchmark() -> None:
             str(tp): tracker.snapshot() for tp, tracker in trackers.items()
         },
     }
+    if args.live_model_preset in ("moonlight-16b-a3b", "qwen1.5-moe-a2.7b"):
+        result["weights_random_init"] = loaded_checkpoint_iteration is None
     if source_search_config is not None:
         import hashlib
 
